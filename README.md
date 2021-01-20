@@ -1,11 +1,9 @@
 # Monogokoro
+Monogokoro / `mngkr` is the implementation for domestic robots to grow up by themselves.
+
 - ものごころ
 - thing's think
 - 物心
-
-Monogokoro / `mngkr` is the implementation for domestic robots to grow up by themselves.
-
-----
 
 ## Install
 
@@ -13,8 +11,6 @@ Monogokoro / `mngkr` is the implementation for domestic robots to grow up by the
 
 ## License
 [YOLO LICENSE Version 2](./LICENSE)
-
-----
 
 ## Reference
 - [Great repos of (deep) reinforcement learning](https://github.com/search?o=desc&q=reinforce+learn&s=stars&type=Repositories)
