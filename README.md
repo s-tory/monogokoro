@@ -10,7 +10,7 @@
 
 ## Usage
 
-## rchitecture
+## Architecture
 
 ## License
 [YOLO LICENSE Version 2](./LICENSE)
