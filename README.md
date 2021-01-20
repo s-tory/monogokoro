@@ -5,7 +5,7 @@
 - The abbreviation is `mngkr`
 
 ## Overview
-for domestic robots.
+We implement functions to grow by themselves for domestic robots especially.
 
 ## Install
 
