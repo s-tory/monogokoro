@@ -15,5 +15,5 @@
 ## License
 [YOLO LICENSE Version 2](./LICENSE)
 
-## Startup by
+## Started up by
 [s-tory](https://github.com/s-tory)
