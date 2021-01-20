@@ -2,6 +2,7 @@
 - ものごころ
 - thing's think
 - 物心
+- The abbreviation is `mngkr`
 
 ## Overview
 
