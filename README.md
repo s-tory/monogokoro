@@ -1,1 +1,4 @@
-# M O N O G O K O R O
+# Monogokoro
+- ものごころ
+- thinking of things
+- 物心
