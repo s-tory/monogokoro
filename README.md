@@ -11,8 +11,8 @@
 ## Usage
 
 ## Architecture
-[MACHiNA](https://github.com/DeepX-inc/machina)
-[PFRL](https://github.com/pfnet/pfrl)
+- [MACHiNA](https://github.com/DeepX-inc/machina)
+- [PFRL](https://github.com/pfnet/pfrl)
 
 ## License
 [YOLO LICENSE Version 2](./LICENSE)
