@@ -2,7 +2,7 @@
 Monogokoro / `mngkr` is the implementation for domestic robots especially to grow up by themselves.
 
 - ものごころ
-- thing's think
+- Thinks of Things
 - 物心
 
 ## Install
