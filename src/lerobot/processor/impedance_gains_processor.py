@@ -58,9 +58,12 @@ class ImpedanceGainDefaultsProcessorStep(RobotActionProcessorStep):
         default_d: Default damper constant per motor, same order as `impedance_joints`.
     """
 
+    # Kept identical to `SO101ImpedanceFollowerConfig.default_k`/`default_d`, which document how
+    # they were measured. Recording with gains the robot would not actually apply would teach the
+    # policy to predict a K/D pair that does not correspond to the compliance seen in the videos.
     impedance_joints: tuple[str, ...] = DEFAULT_IMPEDANCE_JOINTS
-    default_k: tuple[float, ...] = (100.0, 100.0, 100.0, 60.0, 40.0, 30.0)
-    default_d: tuple[float, ...] = (5.0, 5.0, 5.0, 3.0, 2.0, 1.5)
+    default_k: tuple[float, ...] = (10.0, 20.0, 15.0, 10.0, 8.0, 5.0)
+    default_d: tuple[float, ...] = (0.3, 0.5, 0.4, 0.3, 0.2, 0.15)
 
     def __post_init__(self):
         if len(self.default_k) != len(self.impedance_joints) or len(self.default_d) != len(

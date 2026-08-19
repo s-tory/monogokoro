@@ -84,3 +84,48 @@ fn velocity_estimate_ignores_a_rollover_between_samples() {
     let v = finite_difference_velocity(4095.0, 0.0, 0.001);
     assert!((v - 1000.0).abs() < 1.0, "got {v}");
 }
+
+#[test]
+fn averaging_finite_differences_equals_the_wide_window_difference() {
+    use so101_impedance_ctrl::control::MovingAverage;
+
+    // The velocity filter is a moving average over per-tick differences rather than a difference
+    // against a saved older sample. Those are the same quantity -- the intermediate terms
+    // telescope -- which is what lets the filter divide quantisation noise by the window size
+    // while still reporting a true velocity rather than a scaled-down one.
+    let n = 8;
+    let dt = 1.0 / 400.0;
+    let mut avg = MovingAverage::new(n);
+
+    // A quantised ramp: the encoder ticks over on some samples and not others, exactly the
+    // pattern that makes the raw single-tick difference alternate between 0 and 400 ticks/s.
+    let positions: Vec<f32> = (0..=n).map(|i| 1000.0 + (i as f32 * 0.4).floor()).collect();
+    let mut filtered = 0.0;
+    for w in positions.windows(2) {
+        filtered = avg.push(finite_difference_velocity(w[0], w[1], dt));
+    }
+
+    let wide = (positions[n] - positions[0]) / (n as f32 * dt);
+    assert!(
+        (filtered - wide).abs() < 1e-2,
+        "filtered {filtered} vs wide {wide}"
+    );
+}
+
+#[test]
+fn velocity_filter_preserves_a_steady_velocity() {
+    use so101_impedance_ctrl::control::MovingAverage;
+
+    // Filtering must not attenuate the signal, only the noise: a joint moving at a constant rate
+    // has to report that rate once the window has filled, or the D term would be silently scaled.
+    let dt = 1.0 / 400.0;
+    let mut avg = MovingAverage::new(8);
+    let mut filtered = 0.0;
+    let mut pos = 1000.0f32;
+    for _ in 0..32 {
+        let next = pos + 2.0; // 2 counts/tick == 800 counts/s
+        filtered = avg.push(finite_difference_velocity(pos, next, dt));
+        pos = next;
+    }
+    assert!((filtered - 800.0).abs() < 1e-2, "got {filtered}");
+}

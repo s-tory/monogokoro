@@ -73,15 +73,32 @@ class SO101ImpedanceFollowerConfig:
     # degrees -- Rust never applies this robot's degree/range calibration math, only this Python
     # class does (at the `.pos` <-> raw-tick boundary). Tune these values in PWM-per-raw-tick
     # units, not PWM-per-degree.
-    default_k: tuple[float, ...] = (100.0, 100.0, 100.0, 60.0, 40.0, 30.0)
-    default_d: tuple[float, ...] = (5.0, 5.0, 5.0, 3.0, 2.0, 1.5)
+    #
+    # These K values are measured, not chosen. Holding the arm outstretched (near worst case for
+    # gravity) at K=1 makes the daemon's reported PWM read out directly as the duty each joint
+    # needs to hold itself, since pwm = 1 * err: 17 / 87 / 61 / ~0 / ~0 / 0 counts for pan / lift /
+    # elbow / wrist_flex / wrist_roll / gripper. A pure PD law always droops under a constant load
+    # by `err = holding_duty / K`, so K follows from the droop you will accept -- these target ~5
+    # counts (0.4 deg) and are floored at a value that still gives each joint positioning
+    # authority. Re-measure per arm: the numbers are specific to this unit's friction and wiring.
+    default_k: tuple[float, ...] = (10.0, 20.0, 15.0, 10.0, 8.0, 5.0)
+
+    # D is bounded from above by velocity *noise*, not by stability. Position is quantised to whole
+    # counts, so the filtered finite difference has a noise floor of about
+    # `1 / (vel_filter_window * dt)` -- ~50 counts/s at the daemon's defaults -- which D turns
+    # straight into PWM chatter. Keeping D near K/40 holds that under ~2% duty while still damping
+    # a real 100 counts/s motion with a meaningful command.
+    default_d: tuple[float, ...] = (0.3, 0.5, 0.4, 0.3, 0.2, 0.15)
 
     # Defense-in-depth clamps applied in `send_action`, independent of (but should be kept
-    # consistent with) whatever bound the Rust daemon itself enforces via `--pwm-max`.
+    # consistent with) whatever bound the Rust daemon itself enforces via `--pwm-max`. `d_max` is
+    # the tighter of the two on purpose: an over-large K merely saturates PWM at a small error,
+    # whereas an over-large D amplifies the velocity noise floor into full-duty chatter, which the
+    # gearboxes pay for. Nothing above ~5 is usable given that noise floor.
     k_min: float = 0.0
     k_max: float = 500.0
     d_min: float = 0.0
-    d_max: float = 50.0
+    d_max: float = 5.0
 
     # How long to wait for the shared-memory segment to appear (i.e. for the Rust daemon to have
     # started) before giving up in `connect()`.

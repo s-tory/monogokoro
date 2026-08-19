@@ -62,6 +62,21 @@ struct Cli {
     #[arg(long, default_value_t = 32)]
     current_avg_window: usize,
 
+    /// Sample count for the velocity moving average that feeds the D term (1 = unfiltered).
+    ///
+    /// Raising `loop_hz` makes the raw finite difference *worse*, not better: position is quantised
+    /// to whole encoder ticks, so one LSB of jitter reads as `1 / dt` ticks/s -- 400 ticks/s at
+    /// 400 Hz. Fed straight into the D term that is 400*D PWM of pure noise, which chatters audibly
+    /// well before D is large enough to damp anything.
+    ///
+    /// Averaging N consecutive finite differences telescopes exactly to `(p[t] - p[t-N]) / (N*dt)`,
+    /// i.e. the N-tick difference, so this divides quantisation noise by N while costing N/2 ticks
+    /// of lag -- at the defaults, noise drops to 50 ticks/s for 10 ms of lag. Doing it as a running
+    /// average of wrapped per-tick deltas (rather than differencing against a saved older sample)
+    /// also keeps it correct across the 4095/0 encoder wrap for free.
+    #[arg(long, default_value_t = 8)]
+    vel_filter_window: usize,
+
     /// Sample one motor's `Present_Current` every Nth tick, round-robin (1 = every tick).
     ///
     /// The impedance law only needs `Present_Position` at full rate; current is averaged and
@@ -343,13 +358,15 @@ fn main() {
     // to guess wrong.
     log::info!(
         "config: invert_pwm={} pwm_sign_bit={} loop_hz={} pwm_max={} sync_read={} current_read_divisor={} \
-         pos_limits=[{}, {}] max_blind_ticks={} watchdog_ms={} serial_timeout_ms={}",
+         vel_filter_window={} pos_limits=[{}, {}] max_blind_ticks={} watchdog_ms={} \
+         serial_timeout_ms={}",
         args.invert_pwm,
         args.pwm_sign_bit,
         args.loop_hz,
         args.pwm_max,
         args.sync_read,
         args.current_read_divisor,
+        args.vel_filter_window,
         args.pos_min,
         args.pos_max,
         args.max_blind_ticks,
@@ -371,6 +388,9 @@ fn main() {
 
     let mut current_avgs: Vec<MovingAverage> = (0..NUM_MOTORS)
         .map(|_| MovingAverage::new(args.current_avg_window))
+        .collect();
+    let mut vel_avgs: Vec<MovingAverage> = (0..NUM_MOTORS)
+        .map(|_| MovingAverage::new(args.vel_filter_window.max(1)))
         .collect();
     let mut prev_pos = [0f32; NUM_MOTORS];
     let mut tick: u64 = 0;
@@ -483,7 +503,14 @@ fn main() {
         let dt_s = loop_period.as_secs_f32();
         let mut present_vel = [0f32; NUM_MOTORS];
         for i in 0..NUM_MOTORS {
-            present_vel[i] = finite_difference_velocity(prev_pos[i], present_pos[i], dt_s);
+            // Filtered, because the raw difference carries `1 / dt` ticks/s of quantisation noise
+            // -- see `--vel-filter-window`. On a tick whose read failed, `present_pos` still holds
+            // the previous sample, so this pushes a genuine zero rather than a fabricated spike.
+            present_vel[i] = vel_avgs[i].push(finite_difference_velocity(
+                prev_pos[i],
+                present_pos[i],
+                dt_s,
+            ));
         }
         prev_pos = present_pos;
 

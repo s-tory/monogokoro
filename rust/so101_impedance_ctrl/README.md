@@ -122,6 +122,30 @@ Validate with **monitor mode**, which cannot run away: Python writes nothing, so
 PWM at zero and the arm stays limp. Move each joint by hand and confirm the positions track it with
 no comms errors in the daemon's per-second summary. Fall back with `--sync-read false --loop-hz 300`.
 
+## Sizing K and D
+
+Gains are per joint because the load is. `shoulder_lift` and `elbow_flex` hold the arm's weight;
+`wrist_roll` holds nothing.
+
+Measure rather than guess: **hold the arm at its most gravity-loaded pose with `--k 1`**. Then
+`pwm == err`, so the `pwm` column reads out directly as the duty each joint needs to hold itself.
+On this arm, outstretched: 17 / 87 / 61 / ~0 / ~0 / 0 counts for pan / lift / elbow / wrist_flex /
+wrist_roll / gripper.
+
+A PD law droops under a constant load by `err = holding_duty / K`, so K follows from the droop you
+accept -- and more generally `K_new = K * err / err_wanted` from any hold test. Targeting ~5 counts
+(0.4 deg) gives the shipped `SO101ImpedanceFollowerConfig.default_k`. Note the flip side: K also
+sets where PWM saturates, at `pwm_max / K` counts -- K=20 is full duty at 4.4 deg, which is the
+compliance range you actually feel. Wanting both a small droop *and* a wide compliance range means
+adding gravity feedforward, not raising K.
+
+D is bounded from above by velocity noise, not by stability. Position is quantised to whole counts,
+so the filtered finite difference has a noise floor near `1 / (vel_filter_window * dt)` -- ~50
+counts/s at the defaults -- and D turns that straight into PWM chatter. `K/40` keeps it under ~2%
+duty. Raising `--loop-hz` makes this *worse*, which is why `--vel-filter-window` exists: averaging
+N per-tick differences telescopes exactly to the N-tick difference, dividing the noise by N for
+N/2 ticks of lag, with no attenuation of a real velocity.
+
 ## Protocol notes
 
 Feetech register addresses in `src/feetech.rs` mirror

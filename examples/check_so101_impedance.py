@@ -47,7 +47,30 @@ import json
 import logging
 import time
 
-from lerobot.robots.so101_impedance_follower.checker import SO101ImpedanceChecker, format_state_table
+from lerobot.robots.so101_impedance_follower.checker import (
+    MOTOR_NAMES,
+    SO101ImpedanceChecker,
+    format_state_table,
+)
+
+
+def _gain_arg(value: str) -> float | dict[str, float]:
+    """Parses `--k`/`--d` as either one gain for every joint or one gain per joint.
+
+    Per-joint gains are the normal case rather than a refinement: `shoulder_lift` and `elbow_flex`
+    hold the arm's weight, so they need roughly an order of magnitude more K than `wrist_roll`,
+    which holds nothing. A single scalar therefore has to be either too soft for the shoulder or
+    needlessly stiff everywhere else.
+    """
+    parts = value.split(",")
+    if len(parts) == 1:
+        return float(parts[0])
+    if len(parts) != len(MOTOR_NAMES):
+        raise argparse.ArgumentTypeError(
+            f"expected 1 or {len(MOTOR_NAMES)} comma-separated gains "
+            f"({','.join(MOTOR_NAMES)}), got {len(parts)}"
+        )
+    return {motor: float(p) for motor, p in zip(MOTOR_NAMES, parts, strict=True)}
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,8 +103,17 @@ def parse_args() -> argparse.Namespace:
         "then exit. Safe: one motor, bounded duty, sub-second, auto-abort.",
     )
     parser.add_argument("--hold", action="store_true", help="Actively hold the startup position (see above).")
-    parser.add_argument("--k", type=float, default=20.0, help="Spring gain used in --hold mode.")
-    parser.add_argument("--d", type=float, default=1.0, help="Damper gain used in --hold mode.")
+    parser.add_argument(
+        "--k",
+        type=_gain_arg,
+        default=20.0,
+        help="Spring gain for --hold. One value for every joint, or 6 comma-separated values in "
+        f"the order {','.join(MOTOR_NAMES)} -- the gravity-loaded joints need far more K than the "
+        "wrist, and the gripper wants the least of all.",
+    )
+    parser.add_argument(
+        "--d", type=_gain_arg, default=1.0, help="Damper gain for --hold; same formats as --k."
+    )
 
     parser.add_argument(
         "--interval", type=float, default=0.05, help="Telemetry refresh / command period (s)."
@@ -164,9 +196,15 @@ def main() -> None:
                 print(format_state_table(state, checker.describe_faults(), targets=hold_targets))
                 if hold_targets is not None:
                     print(
-                        "\nerr = target - pos (ticks, 11.4/deg). Drifting away with pwm near 0 means"
-                        "\ntoo soft -- raise --k. Drifting away with pwm pegged at %max means the"
-                        "\ndrive direction is inverted -- toggle the daemon's --invert-pwm."
+                        "\nerr = target - pos (ticks, 11.4/deg)."
+                        "\n  err settled, vel ~0    -> holding. pwm IS the duty gravity+friction"
+                        "\n                            demand at this pose, so size the gain:"
+                        "\n                            K_new = K * err / err_wanted."
+                        "\n  err growing, pwm ~0    -> too soft. Raise --k for that joint."
+                        "\n  err growing, pwm %max  -> drive direction inverted; the daemon needs"
+                        "\n                            the opposite --invert-pwm (K cannot fix it)."
+                        "\n  err ~0 but buzzing     -> D too high for the velocity noise floor;"
+                        "\n                            lower --d or raise --vel-filter-window."
                     )
 
                 elapsed = time.perf_counter() - tick_start
