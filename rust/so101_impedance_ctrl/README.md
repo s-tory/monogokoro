@@ -79,58 +79,48 @@ fails fast if the name or `layout_version` doesn't match
 
 ### Loop rate is bounded by the servo link, not CPU
 
-The isolated core spends nearly the whole tick blocked on I/O, so the servo link sets the ceiling.
-1 Mbaud is already the STS3215 maximum; at 8N1 that is 10 us/byte, giving this **wire-time floor**:
+The isolated core spends nearly the whole tick blocked on I/O, so the servo link sets the ceiling --
+and the dominant cost is the **USB round trip**, not baud rate. Each transaction measures ~256 us
+against the ~160 us its bytes take at 1 Mbaud, and CDC-ACM exposes no latency knob (`latency_timer`
+is an FTDI feature these CH343 bridges do not have).
 
-| read strategy                                                | bytes/tick   | wire time |
-| ------------------------------------------------------------ | ------------ | --------- |
-| one READ per motor (**default**)                             | 218          | 2.18 ms   |
-| `--sync-read`, current every tick (`--current-read-divisor 1`) | 150          | 1.50 ms   |
-| `--sync-read`, current decimated (divisor 10)                | 88 (typical) | 0.88 ms   |
+So count transactions, not bytes:
 
-12 per-motor READs (6 motors x 2 registers, ~160 us each) blow a 1 ms budget on their own.
-`SYNC_READ` collapses each register into one request plus back-to-back replies (620 us per
-register). Only `Present_Position` is needed at full rate; `Present_Current` is moving-averaged and
-consumed by ACT at camera rate (~30 Hz), so `--current-read-divisor` skips it on most ticks (they
-republish the existing average). The averaging window then spans
-`current_avg_window * divisor / loop_hz` seconds -- 0.32 s at the defaults.
+| configuration                                    | transactions/tick | measured mean | sustains |
+| ------------------------------------------------ | ----------------- | ------------- | -------- |
+| per-motor READ, current batched every 10th tick  | 7, but 13 on the batched tick | 2.30 ms | 300 Hz with 10% overruns |
+| per-motor READ, current round-robin              | 8                 | 2.39 ms       | 300 Hz cleanly |
+| **SYNC_READ, current round-robin (default)**     | **3**             | ~0.8 ms       | **400 Hz with headroom** |
 
-**Wire time is a floor, not a prediction.** It ignores the USB round trip, which dominates in
-practice. Measured on the reference setup (CH343 bridge presenting as CDC-ACM `/dev/ttyACM*`,
-SYNC_READ with divisor 10):
+The middle row is the useful lesson: batching all six current reads onto one tick made that tick
+twice as expensive as the rest, and those fat ticks were *every single overrun*. Sampling one
+motor per tick round-robin costs the same one extra transaction every time, which removes the
+spike instead of making it rarer -- and refreshes each motor more often than the batched version
+did. Current only feeds a moving average that ACT reads at camera rate, so staggering the six
+samples in time costs nothing.
 
-```
-loop timing over 1000 ticks: min 1.127471ms / mean 1.309507ms / max 2.290276ms (period 1ms); 1000 overruns
-```
+Do not chase rate beyond this. What limits how the arm *feels* is open-loop PWM and gearbox
+friction, not the loop period; 400 Hz is already far past the arm's mechanical bandwidth and more
+than 10x ACT's ~30 Hz. Size `--loop-hz` from the summary the daemon logs every second -- pick a
+period above the observed `max` -- rather than from arithmetic.
 
-That is ~250 us above the 0.88 ms wire-time figure, and the min never drops below ~1.1 ms because
-each tick needs two USB bulk round trips (one SYNC_READ, one SYNC_WRITE) that no amount of baud
-rate removes. CDC-ACM exposes no latency knob either -- `latency_timer` is an FTDI feature and does
-not exist for these bridges. **So size `--loop-hz` from a measurement, not from the table above:**
-run for a few seconds, read the summary the daemon logs every second, and pick a period above the
-observed `max`. Here that means ~400 Hz (2.5 ms), not the 1000 Hz the wire math suggests.
-
-The daemon logs that summary once a second rather than warning per overrun -- at 1 kHz a saturated
-bus would emit a thousand lines a second, and writing them costs more time than they report. A
-nonzero overrun count every second means the link cannot sustain the requested rate: lower
-`--loop-hz` or raise `--current-read-divisor`.
-
-### SYNC_READ is opt-in, and why
+### Validating SYNC_READ on unfamiliar hardware
 
 `--sync-read` is protocol-0 only, which covers the SO101's `sts3215` (the protocol-1 SCS series has
-no SYNC_READ -- the same restriction `FeetechMotorsBus` enforces in Python). Its framing is
-unit-tested but **not validated against physical servos**, and it is off by default because its
-failure mode is nasty rather than obvious:
+no SYNC_READ -- the same restriction `FeetechMotorsBus` enforces in Python). It is on by default
+here because it has been validated on this arm, but re-check it on hardware you have not tried,
+because the failure mode is quiet rather than loud:
 
 A misparsed reply does not raise -- it returns a plausible-looking but wrong position. The
-impedance law then computes an error that never converges and drives the joint continuously, which
-looks exactly like a runaway. Crucially, **flipping `--invert-pwm` does not fix it**; it only
-reverses which way the joint runs, so "it runs away with the flag both on and off" is a symptom of
-bad telemetry, not of a wrong drive direction. Watching `pwm` in the checker's table separates
-them: a real sign error pegs PWM at `%max`, whereas a joint that is simply too soft sits near zero.
+impedance law then chases an error that never converges and drives the joint continuously, which
+looks exactly like a runaway. Crucially, **flipping `--invert-pwm` does not fix it**; that only
+reverses which way the joint runs. So "it runs away with the flag both on and off" points at bad
+telemetry, not a wrong drive direction. The checker's `pwm` column separates them: a real sign
+error pegs PWM at `%max`, whereas a joint that is merely too soft sits near zero.
 
-Turn `--sync-read` on only after per-motor reads are working and you have confirmed the positions
-it reports track reality.
+Validate with **monitor mode**, which cannot run away: Python writes nothing, so the watchdog holds
+PWM at zero and the arm stays limp. Move each joint by hand and confirm the positions track it with
+no comms errors in the daemon's per-second summary. Fall back with `--sync-read false --loop-hz 300`.
 
 ## Protocol notes
 

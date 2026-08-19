@@ -50,21 +50,30 @@ struct Cli {
     #[arg(long)]
     shm_name: String,
 
-    #[arg(long, default_value_t = 200.0)]
+    /// Control loop rate. 400 Hz is what this arm sustains with SYNC_READ: three bus transactions
+    /// per tick at ~256 us each is ~0.8 ms against a 2.5 ms period, so there is real headroom for
+    /// the occasional stalled reply. Higher is available but pointless -- the limit on how the arm
+    /// feels is the open-loop PWM and the gearbox friction, not the loop rate, and 400 Hz is
+    /// already far past the arm's mechanical bandwidth and ACT's ~30 Hz camera rate.
+    #[arg(long, default_value_t = 400.0)]
     loop_hz: f64,
 
     /// Fixed sample count for the per-motor Present_Current moving average.
     #[arg(long, default_value_t = 32)]
     current_avg_window: usize,
 
-    /// Read `Present_Current` only every Nth tick (1 = every tick).
+    /// Sample one motor's `Present_Current` every Nth tick, round-robin (1 = every tick).
     ///
     /// The impedance law only needs `Present_Position` at full rate; current is averaged and
-    /// consumed by ACT as an observation at camera rate (~30 Hz), so sampling it slower costs
-    /// nothing and buys back a whole SYNC_READ (~620 us at 1 Mbaud) on most ticks -- that is what
-    /// makes --loop-hz 1000 reachable. Note this stretches the averaging window in wall-clock
-    /// terms: `--current-avg-window` samples now span `window * divisor / loop_hz` seconds.
-    #[arg(long, default_value_t = 10)]
+    /// consumed by ACT as an observation at camera rate (~30 Hz), so it can be sampled far slower.
+    /// One motor per tick keeps the per-tick cost flat, which matters more than the raw saving:
+    /// reading all six on one tick made that tick twice as expensive as the rest, and those fat
+    /// ticks accounted for every single overrun observed at 300 Hz.
+    ///
+    /// A given motor is therefore refreshed every `NUM_MOTORS * N` ticks, and its averaging window
+    /// spans `current_avg_window * NUM_MOTORS * N / loop_hz` seconds -- at the defaults and 300 Hz,
+    /// 32 * 6 * 1 / 300 = 0.64 s.
+    #[arg(long, default_value_t = 1)]
     current_read_divisor: u64,
 
     /// If no fresh input is received within this window, PWM output is zeroed (fail-safe).
@@ -120,20 +129,30 @@ struct Cli {
     max_blind_ticks: u32,
 
     /// Serial round-trip timeout per register transaction.
-    #[arg(long, default_value_t = 20)]
+    ///
+    /// A transaction costs ~256 us in practice (16 bytes of wire time at 1 Mbaud plus the USB
+    /// round trip), so this is ~20x the normal case -- generous, but low enough to *bound* a
+    /// stalled transaction instead of letting it blow the tick budget. The previous 20 ms meant a
+    /// single dropped reply cost six control periods at 300 Hz; capping it at 5 ms turns the same
+    /// event into a bounded blip that the blind-tick fail-safe then handles.
+    #[arg(long, default_value_t = 5)]
     serial_timeout_ms: u64,
 
-    /// Read every motor's register in one SYNC_READ instead of one READ per motor.
+    /// Read all six positions in one SYNC_READ instead of one READ per motor.
     ///
-    /// **Opt-in on purpose.** SYNC_READ is ~2.5x fewer bus bytes, but it is a protocol-0-only
-    /// instruction whose reply framing this daemon parses by hand, and a misparse does not fail
-    /// loudly -- it yields plausible-looking but wrong positions. The impedance law then computes
-    /// against an error that never converges and drives the joint continuously, which looks
-    /// exactly like a runaway and does *not* go away when you flip `--invert-pwm` (that only
-    /// reverses which way it runs). Per-motor READ is the boring, well-understood path; use it
-    /// until SYNC_READ has been verified against your servos with `--probe-direction` and a
-    /// telemetry check.
-    #[arg(long, default_value_t = false)]
+    /// On by default now that it has been validated against real servos: positions tracked
+    /// hand-movement cleanly with no comms errors. That check is worth repeating on unfamiliar
+    /// hardware before trusting it, because the failure mode is quiet -- this is a protocol-0-only
+    /// instruction whose reply framing the daemon parses by hand, and a misparse yields
+    /// plausible-looking but wrong positions rather than an error. The impedance law then chases
+    /// an error that never converges and drives the joint continuously, which looks like a runaway
+    /// and is *not* fixed by flipping `--invert-pwm` (that only reverses which way it runs).
+    ///
+    /// To validate safely, run monitor mode: Python writes nothing, so the watchdog holds PWM at
+    /// zero and the arm stays limp while you move it by hand and watch the positions. Pass
+    /// `--sync-read false` to fall back to per-motor reads (and drop `--loop-hz` to ~300, since
+    /// that path costs eight transactions per tick instead of three).
+    #[arg(long, default_value_t = true)]
     sync_read: bool,
 }
 
@@ -324,7 +343,7 @@ fn main() {
     // to guess wrong.
     log::info!(
         "config: invert_pwm={} pwm_sign_bit={} loop_hz={} pwm_max={} sync_read={} current_read_divisor={} \
-         pos_limits=[{}, {}] max_blind_ticks={} watchdog_ms={}",
+         pos_limits=[{}, {}] max_blind_ticks={} watchdog_ms={} serial_timeout_ms={}",
         args.invert_pwm,
         args.pwm_sign_bit,
         args.loop_hz,
@@ -335,6 +354,7 @@ fn main() {
         args.pos_max,
         args.max_blind_ticks,
         args.watchdog_timeout_ms,
+        args.serial_timeout_ms,
     );
 
     rt::apply_rt_settings(args.cpu_core, args.priority);
@@ -428,28 +448,35 @@ fn main() {
             }
         }
 
+        // Sample one motor's current per tick, round-robin, instead of all six on every Nth tick.
+        //
+        // Batching them made every Nth tick cost roughly twice a normal one, and that single fat
+        // tick was the *entire* overrun population: at 300 Hz with a divisor of 10, exactly 10% of
+        // ticks overran. Spreading the work keeps per-tick cost flat -- one extra transaction,
+        // always -- which removes the periodic spike rather than just making it rarer. It also
+        // samples each motor *more* often than a divisor of 10 did (every NUM_MOTORS ticks), and
+        // current only feeds a moving average consumed by ACT at camera rate, so staggering the
+        // six samples in time is of no consequence to it.
         if tick.is_multiple_of(args.current_read_divisor) {
-            match read_register_all(&mut bus, feetech::REG_PRESENT_CURRENT, args.sync_read) {
-                Ok(values) => {
-                    for i in 0..NUM_MOTORS {
-                        present_current[i] = current_avgs[i].push(values[i] as f32);
-                    }
+            let i = (tick / args.current_read_divisor) as usize % NUM_MOTORS;
+            match bus.read_register(MOTOR_IDS[i], feetech::REG_PRESENT_CURRENT) {
+                Ok(value) => {
+                    current_avgs[i].push(value as f32);
                 }
                 Err(e) => {
-                    log::warn!("read Present_Current failed: {e} (reusing last moving average)");
+                    log::warn!(
+                        "read Present_Current failed for motor {}: {e} (keeping last average)",
+                        MOTOR_IDS[i]
+                    );
                     comms_error = true;
-                    // Deliberately do NOT push a placeholder sample -- feeding a fake 0 into the
-                    // moving average would corrupt the value ACT consumes as an observation.
-                    for i in 0..NUM_MOTORS {
-                        present_current[i] = current_avgs[i].average();
-                    }
+                    // Deliberately do NOT push a placeholder -- feeding a fake 0 into the moving
+                    // average would corrupt the value ACT consumes as an observation.
                 }
             }
-        } else {
-            // Skipped tick: republish the existing average rather than re-reading the bus.
-            for i in 0..NUM_MOTORS {
-                present_current[i] = current_avgs[i].average();
-            }
+        }
+        // Every tick republishes all six averages; only the freshly-sampled one changed.
+        for i in 0..NUM_MOTORS {
+            present_current[i] = current_avgs[i].average();
         }
         tick = tick.wrapping_add(1);
 
@@ -530,7 +557,7 @@ fn main() {
         }
 
         let elapsed = loop_start.elapsed();
-        timing.record(elapsed, loop_period);
+        timing.record(elapsed, loop_period, comms_error);
         if let Some(summary) = timing.take_summary_if_due(loop_period) {
             log::info!("{summary}");
         }
@@ -549,14 +576,21 @@ fn main() {
 struct LoopTiming {
     ticks: u64,
     overruns: u64,
+    /// Ticks where a serial read or write failed. Reported alongside the timings because the two
+    /// are usually the same event: a transaction that had to wait on the timeout shows up as an
+    /// outlier `max`, and correlating them says whether a spike was the bus or the scheduler.
+    comms_errors: u64,
     total: Duration,
     min: Option<Duration>,
     max: Duration,
 }
 
 impl LoopTiming {
-    fn record(&mut self, elapsed: Duration, period: Duration) {
+    fn record(&mut self, elapsed: Duration, period: Duration, comms_error: bool) {
         self.ticks += 1;
+        if comms_error {
+            self.comms_errors += 1;
+        }
         self.total += elapsed;
         self.max = self.max.max(elapsed);
         self.min = Some(self.min.map_or(elapsed, |m: Duration| m.min(elapsed)));
@@ -573,13 +607,15 @@ impl LoopTiming {
         }
         let mean = self.total / self.ticks as u32;
         let summary = format!(
-            "loop timing over {} ticks: min {:?} / mean {:?} / max {:?} (period {:?}); {} overruns",
+            "loop timing over {} ticks: min {:?} / mean {:?} / max {:?} (period {:?}); \
+             {} overruns, {} comms errors",
             self.ticks,
             self.min.unwrap_or_default(),
             mean,
             self.max,
             period,
             self.overruns,
+            self.comms_errors,
         );
         *self = Self::default();
         Some(summary)
