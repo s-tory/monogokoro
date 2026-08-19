@@ -76,6 +76,15 @@ STS_SMS_SERIES_CONTROL_TABLE = {
     "Torque_Enable": (40, 1),
     "Acceleration": (41, 1),
     "Goal_Position": (42, 2),
+    # NOTE: this register (addr 0x2c / 44) is overloaded by the firmware as the PWM duty-cycle
+    # command when `Operating_Mode = PWM` (see the `OperatingMode` enum in feetech.py). In PWM
+    # mode, bit 10 is the sign/direction bit -- unlike `Goal_Position`'s bit 15, and unlike the
+    # bit 11 the `OperatingMode` docstring in feetech.py states; bit 10 is what actually
+    # reverses an sts3215 on the bench -- see
+    # `STS_SMS_SERIES_PWM_ENCODINGS_TABLE` below. Not used by Python at runtime today: the
+    # `rust/so101_impedance_ctrl` RT daemon is the sole runtime user of PWM mode, reading/writing
+    # this register directly over its own serial connection; this entry exists purely so this
+    # table doesn't silently disagree with what that daemon does.
     "Goal_Time": (44, 2),
     "Goal_Velocity": (46, 2),
     "Torque_Limit": (48, 2),
@@ -213,6 +222,14 @@ STS_SMS_SERIES_ENCODINGS_TABLE = {
     "Present_Position": 15,
     "Present_Velocity": 15,
     "Present_Speed": 15,
+}
+
+# Documentation-only: sign-magnitude bit for `Goal_Time`/addr 44 when read as the PWM duty-cycle
+# command (`Operating_Mode = PWM`), which uses bit 10 instead of bit 15. Not consumed by
+# `FeetechMotorsBus` today -- kept here so the register map stays a single source of truth for
+# both this Python package and the `rust/so101_impedance_ctrl` RT daemon, which owns PWM mode.
+STS_SMS_SERIES_PWM_ENCODINGS_TABLE = {
+    "Goal_PWM": 10,
 }
 
 MODEL_ENCODING_TABLE = {

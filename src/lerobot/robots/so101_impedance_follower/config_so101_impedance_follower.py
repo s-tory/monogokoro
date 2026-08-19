@@ -1,0 +1,96 @@
+#!/usr/bin/env python
+
+# Copyright 2026 The HuggingFace Inc. team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from dataclasses import dataclass, field
+
+from lerobot.cameras import CameraConfig
+
+from ..config import RobotConfig
+
+# Fixed order of all 6 impedance-controlled motors -- the 5 arm joints AND the gripper. The
+# gripper is impedance-controlled too (not left in plain position mode): a rigid position-mode
+# gripper keeps commanding full force toward its target regardless of contact, which crushes
+# fragile objects before it can ever "feel" them via K/D compliance.
+DEFAULT_IMPEDANCE_JOINTS = (
+    "shoulder_pan",
+    "shoulder_lift",
+    "elbow_flex",
+    "wrist_flex",
+    "wrist_roll",
+    "gripper",
+)
+
+
+@dataclass
+class SO101ImpedanceFollowerConfig:
+    """Configuration for the SO101 impedance-controlled follower.
+
+    Unlike `SOFollowerConfig`, this robot does not open its own serial port: the
+    `rust/so101_impedance_ctrl` RT daemon exclusively owns the SO101's single half-duplex UART
+    (all 6 servos, including the gripper) to avoid two processes racing on one bus. This robot
+    only ever talks to that daemon through a shared-memory segment; start the daemon first.
+    """
+
+    # Name of the POSIX shared-memory segment created by the Rust daemon (must match its
+    # `--shm-name` argument).
+    shm_name: str
+
+    disable_torque_on_disconnect: bool = True
+
+    # Same semantics as `SOFollowerConfig.max_relative_target`, applied to all 6 motors'
+    # `.pos` targets (in normalized units -- degrees or range -100..100 -- not raw ticks).
+    max_relative_target: float | dict[str, float] | None = None
+
+    cameras: dict[str, CameraConfig] = field(default_factory=dict)
+
+    # Set to `True` for consistency with plain `SOFollower` datasets/policies.
+    use_degrees: bool = True
+
+    impedance_joints: tuple[str, ...] = DEFAULT_IMPEDANCE_JOINTS
+
+    # Default per-motor spring (K) / damper (D) gains, in `impedance_joints` order (arm joints,
+    # then gripper). Used as a fallback in `send_action` when a predicted/teleop action lacks
+    # `.k`/`.d`, and by the recording pipeline's `ImpedanceGainDefaultsProcessorStep` to label
+    # ground-truth K/D during data collection. The gripper's default is deliberately softer than
+    # the arm joints' -- a low K lets it yield near the target instead of continuing to squeeze,
+    # which is the whole point of impedance-controlling it: gentler grasping of fragile objects.
+    #
+    # NOTE on units: K and D operate on the *raw encoder tick* position/velocity error computed
+    # inside the Rust control loop (see `rust/so101_impedance_ctrl/src/control.rs`), not on
+    # degrees -- Rust never applies this robot's degree/range calibration math, only this Python
+    # class does (at the `.pos` <-> raw-tick boundary). Tune these values in PWM-per-raw-tick
+    # units, not PWM-per-degree.
+    default_k: tuple[float, ...] = (100.0, 100.0, 100.0, 60.0, 40.0, 30.0)
+    default_d: tuple[float, ...] = (5.0, 5.0, 5.0, 3.0, 2.0, 1.5)
+
+    # Defense-in-depth clamps applied in `send_action`, independent of (but should be kept
+    # consistent with) whatever bound the Rust daemon itself enforces via `--pwm-max`.
+    k_min: float = 0.0
+    k_max: float = 500.0
+    d_min: float = 0.0
+    d_max: float = 50.0
+
+    # How long to wait for the shared-memory segment to appear (i.e. for the Rust daemon to have
+    # started) before giving up in `connect()`.
+    shm_attach_timeout_s: float = 5.0
+    # How long to wait for the daemon to ack a configuration/calibration command.
+    command_ack_timeout_s: float = 2.0
+
+
+@RobotConfig.register_subclass("so101_follower_impedance")
+@dataclass
+class SO101ImpedanceFollowerRobotConfig(RobotConfig, SO101ImpedanceFollowerConfig):
+    pass

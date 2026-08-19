@@ -65,6 +65,7 @@ from .hil_processor import (
     RewardClassifierProcessorStep,
     TimeLimitProcessorStep,
 )
+from .impedance_gains_processor import DEFAULT_IMPEDANCE_JOINTS, ImpedanceGainDefaultsProcessorStep
 from .newline_task_processor import NewLineTaskProcessorStep
 from .normalize_processor import NormalizerProcessorStep, UnnormalizerProcessorStep, hotswap_stats
 from .observation_processor import VanillaObservationProcessorStep
@@ -111,6 +112,8 @@ __all__ = [
     "AddTeleopActionAsComplimentaryDataStep",
     "AddTeleopEventsAsInfoStep",
     "ComplementaryDataProcessorStep",
+    "DEFAULT_IMPEDANCE_JOINTS",
+    "ImpedanceGainDefaultsProcessorStep",
     "batch_to_transition",
     "create_transition",
     "from_tensor_to_numpy",

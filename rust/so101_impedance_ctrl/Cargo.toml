@@ -1,0 +1,34 @@
+[package]
+name = "so101_impedance_ctrl"
+version = "0.1.0"
+edition = "2021"
+description = "PREEMPT_RT impedance controller for the SO101 arm (Feetech STS3215 servos), driven over shared memory by the monogokoro ACT policy."
+license = "Apache-2.0"
+
+[lib]
+name = "so101_impedance_ctrl"
+path = "src/lib.rs"
+
+[[bin]]
+name = "so101_impedance_ctrl"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+# `default-features = false` drops the `libudev` feature (port *enumeration*, e.g.
+# `available_ports()`), which requires libudev-dev + pkg-config on the build host. We only ever
+# open a port by explicit path (`--port`), never enumerate, so this dependency is unnecessary.
+serialport = { version = "4", default-features = false }
+nix = { version = "0.29", features = ["sched", "process", "fs", "user"] }
+shared_memory = "0.12"
+libc = "0.2"
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
+# none beyond std -- tests are pure unit tests over control.rs/feetech.rs/shm.rs
+
+[profile.release]
+# Predictable timing over raw throughput for an RT control loop.
+opt-level = 3
+panic = "unwind"
