@@ -10,7 +10,7 @@
 
 use std::sync::atomic::{fence, AtomicU32, Ordering};
 
-pub const LAYOUT_VERSION: u32 = 2;
+pub const LAYOUT_VERSION: u32 = 3;
 pub const SHM_MAGIC: u32 = 0x534F_3130; // ASCII "SO10"
 /// All 6 servos -- the 5 arm joints AND the gripper -- are impedance-controlled (K/D over PWM).
 /// A rigid position-mode gripper crushes anything it grips before it can sense resistance;
@@ -50,6 +50,12 @@ pub struct OutputData {
     pub present_current_avg: [f32; NUM_MOTORS],
     pub pwm_cmd_debug: [f32; NUM_MOTORS],
     pub fault_flags: u32,
+    /// Leader-side gripper telemetry, present only when the daemon was given `--leader-port`;
+    /// all zero otherwise. Exposed so the operator-facing tools can show whether the trigger is
+    /// being driven, and so a recording pipeline can eventually label grip intent with it.
+    pub leader_gripper_pos: f32,
+    pub leader_gripper_vel: f32,
+    pub leader_gripper_pwm: f32,
 }
 
 #[repr(C)]
@@ -61,6 +67,10 @@ pub struct OutputRegion {
 pub const FAULT_WATCHDOG_TIMEOUT: u32 = 1 << 0;
 pub const FAULT_COMMS_ERROR: u32 = 1 << 1;
 pub const FAULT_OVERCURRENT: u32 = 1 << 2;
+/// The leader arm's bus failed this tick. Kept distinct from [`FAULT_COMMS_ERROR`] because the
+/// consequences differ: the follower losing its bus stops the robot, whereas the leader losing
+/// its bus only drops force feedback -- the follower keeps tracking normally.
+pub const FAULT_LEADER_COMMS_ERROR: u32 = 1 << 3;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

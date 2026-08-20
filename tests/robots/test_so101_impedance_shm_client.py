@@ -33,6 +33,9 @@ from multiprocessing import shared_memory
 import pytest
 
 from lerobot.robots.so101_impedance_follower.shm_client import (
+    FAULT_COMMS_ERROR,
+    FAULT_LEADER_COMMS_ERROR,
+    FAULT_WATCHDOG_TIMEOUT,
     LAYOUT_VERSION,
     SHM_MAGIC,
     CommandKind,
@@ -230,3 +233,31 @@ def test_wait_for_ack_times_out_if_daemon_never_acks(shm_segment):
     with pytest.raises(ImpedanceShmClientError, match="Timed out"):
         client.wait_for_ack(seq, timeout_s=0.2)
     client.close()
+
+
+def test_read_output_exposes_leader_gripper_telemetry(shm_segment):
+    # The leader's trigger is the operator-facing half of bilateral teleoperation, so it has to
+    # survive the shared-memory round trip alongside the follower's arrays -- and it is a scalar,
+    # not a seventh element of them: it belongs to a different arm, on a different bus.
+    layout = ShmLayout.from_buffer(shm_segment.buf)
+    layout.output.data.leader_gripper_pos = 2048.0
+    layout.output.data.leader_gripper_vel = -37.5
+    layout.output.data.leader_gripper_pwm = 120.0
+    layout.output.data.timestamp_mono_ns = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+    layout.output.seq = 2  # stable/even
+
+    client = ImpedanceShmClient(shm_segment.name)
+    snapshot = client.read_output()
+
+    assert snapshot["leader_gripper_pos"] == pytest.approx(2048.0)
+    assert snapshot["leader_gripper_vel"] == pytest.approx(-37.5)
+    assert snapshot["leader_gripper_pwm"] == pytest.approx(120.0)
+    client.close()
+
+
+def test_leader_fault_is_distinct_from_the_followers_comms_fault(shm_segment):
+    # Losing the leader's bus only drops force feedback; losing the follower's stops the robot.
+    # Sharing one flag would make an operator-visible annoyance indistinguishable from a fault
+    # that means the arm is no longer tracking.
+    assert FAULT_LEADER_COMMS_ERROR != FAULT_COMMS_ERROR
+    assert FAULT_LEADER_COMMS_ERROR & (FAULT_COMMS_ERROR | FAULT_WATCHDOG_TIMEOUT) == 0

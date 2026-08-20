@@ -95,6 +95,29 @@ pub fn impedance_pwm(
 /// whatever moves `Present_Position` up, regardless of how the hardware's direction bit is wired
 /// (that is applied later, at encode time). Motion back toward the middle is always allowed, so a
 /// joint that is already past a limit can recover instead of being stuck there.
+/// PWM to render on a leader-side joint so the operator feels the follower's tracking error.
+///
+/// `follower_error` is the follower joint's own `target - present` gap, in follower encoder
+/// counts: near zero while the follower moves freely, growing once something blocks it. Scaling
+/// that into leader duty is what turns the trigger into a haptic display, with no force sensor
+/// anywhere in the loop.
+///
+/// `feedback_gain` is signed on purpose. Which way "closed" runs depends on each gripper's own
+/// calibration, and the two arms need not agree, so the correct sign is a property of a particular
+/// pair of arms -- measured like `--invert-pwm` was, not derived. `damping` is separate and always
+/// opposes leader motion, so it stays correct whichever sign the gain takes, and it is what keeps
+/// the operator from feeling a bare spring.
+pub fn force_feedback_pwm(
+    feedback_gain: f32,
+    damping: f32,
+    follower_error: f32,
+    leader_vel: f32,
+    pwm_max: f32,
+) -> f32 {
+    let raw = feedback_gain * follower_error - damping * leader_vel;
+    raw.clamp(-pwm_max, pwm_max)
+}
+
 pub fn apply_soft_limits(pwm: f32, present_pos: f32, pos_min: f32, pos_max: f32) -> f32 {
     if present_pos <= pos_min && pwm < 0.0 {
         return 0.0;
@@ -216,6 +239,14 @@ fn set_operating_mode(bus: &mut FeetechBus, motor_id: u8, mode: u32) -> std::io:
         }
     }
     Err(last_err.expect("loop runs at least once"))
+}
+
+/// Puts one servo into PWM mode with torque enabled, the state the impedance and force-feedback
+/// laws both assume. Split out so the leader's single gripper can reach it without going through
+/// the shared-memory command channel, which only the follower's Python client drives.
+pub fn prepare_pwm_motor(bus: &mut FeetechBus, motor_id: u8) -> std::io::Result<()> {
+    set_operating_mode(bus, motor_id, feetech::OPERATING_MODE_PWM)?;
+    bus.write_register(motor_id, feetech::REG_TORQUE_ENABLE, 1)
 }
 
 /// One-time hardware fixups applied to every servo at daemon startup, mirroring

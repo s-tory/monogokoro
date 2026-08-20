@@ -54,6 +54,11 @@ pub const REG_MAX_POSITION_LIMIT: (u8, u8) = (11, 2);
 /// **EPROM register.** Everything below address 40 lives in EPROM and is write-protected while
 /// `REG_LOCK` is 1 -- see `write_operating_mode`, which does the required unlock dance.
 pub const REG_OPERATING_MODE: (u8, u8) = (33, 1);
+
+/// `Operating_Mode` value for open-loop PWM control, mirroring `OperatingMode.PWM` in
+/// `src/lerobot/motors/feetech/feetech.py`. This is EPROM: writing it needs the torque-off +
+/// unlock dance in `control.rs`, which is why nothing writes it directly.
+pub const OPERATING_MODE_PWM: u32 = 2;
 pub const REG_TORQUE_ENABLE: (u8, u8) = (40, 1);
 /// EPROM write-protect latch: 0 = EPROM writable, 1 = locked. Mirrors the `Lock` writes in
 /// `FeetechMotorsBus.disable_torque`/`enable_torque` on the Python side.

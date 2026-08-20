@@ -86,6 +86,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cpu-core", type=int, default=None, help="Forwarded to the daemon if starting it.")
     parser.add_argument("--priority", type=int, default=None, help="Forwarded to the daemon if starting it.")
     parser.add_argument("--loop-hz", type=float, default=None, help="Forwarded to the daemon if starting it.")
+    parser.add_argument(
+        "--leader-port",
+        default=None,
+        help="Leader arm's serial port, to include its gripper in the loop. Forwarded to the "
+        "daemon if starting it. On its own this only measures the cost of the second bus -- no "
+        "force is rendered until --force-feedback-gain is nonzero.",
+    )
+    parser.add_argument(
+        "--force-feedback-gain",
+        type=float,
+        default=None,
+        help="Leader duty per count of follower gripper error. Signed: if the trigger ASSISTS "
+        "your squeeze rather than resisting it, negate this and stop -- that polarity is positive "
+        "feedback through your own hand.",
+    )
 
     parser.add_argument(
         "--calibration",
@@ -135,6 +150,10 @@ def main() -> None:
         daemon_args["priority"] = args.priority
     if args.loop_hz is not None:
         daemon_args["loop-hz"] = args.loop_hz
+    if args.leader_port is not None:
+        daemon_args["leader-port"] = args.leader_port
+    if args.force_feedback_gain is not None:
+        daemon_args["force-feedback-gain"] = args.force_feedback_gain
 
     with SO101ImpedanceChecker(
         shm_name=args.shm_name,
@@ -182,6 +201,13 @@ def main() -> None:
             print(f"Holding at: { {m: round(p, 1) for m, p in hold_targets.items()} }\n")
         else:
             print("Monitor mode: no commands are sent, motors are torque-limp. Move joints by hand.\n")
+            if checker.read_leader() is not None:
+                print(
+                    "A leader gripper is attached. Force feedback is gated on fresh input, so in\n"
+                    "monitor mode the trigger stays slack no matter what --force-feedback-gain\n"
+                    "says -- use this to confirm the LEADER row tracks your trigger, then switch\n"
+                    "to --hold to feel actual force.\n"
+                )
 
         start = time.perf_counter()
         try:
@@ -193,7 +219,14 @@ def main() -> None:
 
                 state = checker.read_state()
                 print("\x1b[2J\x1b[H", end="")  # clear terminal for a live-updating view
-                print(format_state_table(state, checker.describe_faults(), targets=hold_targets))
+                print(
+                    format_state_table(
+                        state,
+                        checker.describe_faults(),
+                        targets=hold_targets,
+                        leader=checker.read_leader(),
+                    )
+                )
                 if hold_targets is not None:
                     print(
                         "\nerr = target - pos (ticks, 11.4/deg)."

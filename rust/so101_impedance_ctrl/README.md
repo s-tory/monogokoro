@@ -122,6 +122,75 @@ Validate with **monitor mode**, which cannot run away: Python writes nothing, so
 PWM at zero and the arm stays limp. Move each joint by hand and confirm the positions track it with
 no comms errors in the daemon's per-second summary. Fall back with `--sync-read false --loop-hz 300`.
 
+## Force feedback on the leader gripper
+
+With `--leader-port`, the daemon also owns the leader arm's gripper servo and drives it as a haptic
+display, so the operator feels what the follower is holding. Only the gripper: the other five leader
+servos stay torque-off and backdrivable, and Python keeps reading their positions as before.
+
+Grip force is the one thing a demonstrator currently cannot express -- a torque-off leader is a
+position sensor and nothing else, so every recorded demonstration squeezes with whatever K the
+config happened to hold. It is also the axis where being wrong breaks the object, and the axis where
+an unstable loop only buzzes a trigger rather than an arm with the operator attached to it.
+
+### How it works
+
+The feedback is driven by the **follower's own tracking error**, not by a measured force. Free
+gripper: it reaches its target, error ~0, trigger slack. Blocked gripper: the commanded position
+runs ahead of the achieved one, and that gap grows with how hard the operator is asking it to
+squeeze. Render the gap as leader duty and it becomes resistance in their hand. This is classic
+position-position bilateral -- no load cell, no current sensing.
+
+Deliberately *not* driven by the follower's `Present_Current`: that is averaged over ~0.5 s so it is
+usable as an ACT observation, which is an eternity for haptics.
+
+### Bring-up, in this order
+
+`--leader-port` alone renders nothing (`--force-feedback-gain` defaults to 0) but pays the full bus
+cost, so step 1 measures whether bilateral fits before any force reaches a hand:
+
+```bash
+# 1. Measure. Trigger is read and held at zero duty; check the per-second timing summary.
+./target/release/so101_impedance_ctrl --port /dev/ttyACM0 --leader-port /dev/ttyACM1 ...
+
+# 2. Confirm the LEADER row tracks the trigger, in monitor mode (the watchdog holds it slack).
+python examples/check_so101_impedance.py --shm-name so101_impedance
+
+# 3. Only then, a small gain, and hold something soft.
+./target/release/so101_impedance_ctrl ... --leader-port /dev/ttyACM1 --force-feedback-gain 0.5
+```
+
+**The gain is signed and the sign must be measured.** Which encoder direction means "closed" is a
+property of each gripper's calibration and the two arms need not agree. If the trigger *assists*
+your squeeze instead of resisting it, stop and negate the gain: that polarity is positive feedback
+through your own hand. `--leader-pwm-max` (default 250, far below `--pwm-max`) is what bounds a
+wrong sign to something you can overpower.
+
+### Cost, and why the rate matters more here
+
+The two arms are on separate ports, so the half-duplex constraint does not couple them; the leader
+adds 2 transactions to the tick's 3. Sequentially that is ~1.3 ms against a 2.5 ms period at 400 Hz,
+which fits without doing anything clever. If it ever stops fitting, the lever is that ~256 us per
+transaction is USB *waiting*, not work: issuing both ports' requests before blocking on either reply
+overlaps the two round trips. Measure before reaching for it -- the summary reports the leader's
+share separately for exactly this decision.
+
+Do not trade rate away here the way you can for unilateral control. A haptic display's maximum
+stable stiffness goes as `b / T`, so halving the rate halves the stiffness renderable before the
+trigger buzzes in the operator's hand.
+
+### One loop, two arms
+
+The leader shares the follower's control loop rather than running its own thread. Two independent
+loops would let their phase free-run, injecting up to a full period of *variable* delay into the
+coupling -- and variable delay is what destabilises a bilateral loop. A single tick keeps both
+arms' samples in lockstep by construction, which is simpler and also more correct.
+
+A missing or unconfigurable leader degrades to follower-only with a logged error: force feedback
+enhances teleoperation, it is never a prerequisite for it. `FAULT_LEADER_COMMS_ERROR` is likewise
+kept distinct from `FAULT_COMMS_ERROR`, because losing the leader's bus drops force feedback while
+losing the follower's stops the robot.
+
 ## Sizing K and D
 
 Gains are per joint because the load is. `shoulder_lift` and `elbow_flex` hold the arm's weight;

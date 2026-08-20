@@ -129,3 +129,48 @@ fn velocity_filter_preserves_a_steady_velocity() {
     }
     assert!((filtered - 800.0).abs() < 1e-2, "got {filtered}");
 }
+
+#[test]
+fn force_feedback_is_slack_until_the_follower_is_actually_blocked() {
+    use so101_impedance_ctrl::control::force_feedback_pwm;
+    // A gripper closing freely tracks its target, so the operator should feel nothing. Any
+    // standing resistance with no object present would be felt as a stiff, lying trigger.
+    let pwm = force_feedback_pwm(2.0, 0.2, 0.0, 0.0, 250.0);
+    assert!((pwm - 0.0).abs() < 1e-6, "got {pwm}");
+}
+
+#[test]
+fn force_feedback_scales_with_the_followers_tracking_error() {
+    use so101_impedance_ctrl::control::force_feedback_pwm;
+    // Squeezing harder against a blocked gripper widens target-vs-present, which is the whole
+    // signal: the operator feels the object push back harder the harder they ask for.
+    let light = force_feedback_pwm(2.0, 0.0, 10.0, 0.0, 250.0);
+    let hard = force_feedback_pwm(2.0, 0.0, 40.0, 0.0, 250.0);
+    assert!((light - 20.0).abs() < 1e-3, "got {light}");
+    assert!((hard - 80.0).abs() < 1e-3, "got {hard}");
+}
+
+#[test]
+fn force_feedback_damping_opposes_motion_whichever_way_the_gain_points() {
+    use so101_impedance_ctrl::control::force_feedback_pwm;
+    // The correct sign of the gain depends on the two grippers' calibrations, but damping must
+    // resist the operator's hand regardless -- otherwise negating the gain would turn the damper
+    // into an accelerator.
+    for gain in [2.0_f32, -2.0_f32] {
+        let opening = force_feedback_pwm(gain, 0.5, 0.0, 100.0, 250.0);
+        let closing = force_feedback_pwm(gain, 0.5, 0.0, -100.0, 250.0);
+        assert!(opening < 0.0, "gain {gain}: got {opening}");
+        assert!(closing > 0.0, "gain {gain}: got {closing}");
+    }
+}
+
+#[test]
+fn force_feedback_clamps_to_the_leaders_own_lower_limit() {
+    use so101_impedance_ctrl::control::force_feedback_pwm;
+    // This bound is what a human hand is holding, not a gearbox: a mis-signed or over-large gain
+    // must saturate somewhere the operator can still overpower.
+    let pwm = force_feedback_pwm(50.0, 0.0, 500.0, 0.0, 250.0);
+    assert!((pwm - 250.0).abs() < 1e-3, "got {pwm}");
+    let pwm = force_feedback_pwm(-50.0, 0.0, 500.0, 0.0, 250.0);
+    assert!((pwm + 250.0).abs() < 1e-3, "got {pwm}");
+}

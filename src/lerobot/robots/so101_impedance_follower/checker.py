@@ -51,6 +51,7 @@ from lerobot.motors.feetech import OperatingMode
 
 from .shm_client import (
     FAULT_COMMS_ERROR,
+    FAULT_LEADER_COMMS_ERROR,
     FAULT_OVERCURRENT,
     FAULT_WATCHDOG_TIMEOUT,
     CommandKind,
@@ -155,6 +156,22 @@ class SO101ImpedanceChecker:
             for i, motor in enumerate(MOTOR_NAMES)
         }
 
+    def read_leader(self) -> dict[str, float] | None:
+        """Leader gripper telemetry, or None when the daemon runs without `--leader-port`.
+
+        Distinguished by the PWM being driven rather than by the position: a leader that is
+        attached but idle reports a real position too, so position alone cannot tell you whether
+        force feedback exists.
+        """
+        telemetry = self.client.read_output()
+        if "leader_gripper_pos" not in telemetry:
+            return None
+        return {
+            "pos": telemetry["leader_gripper_pos"],
+            "vel": telemetry["leader_gripper_vel"],
+            "pwm": telemetry["leader_gripper_pwm"],
+        }
+
     @property
     def fault_flags(self) -> int:
         return self.client.read_output()["fault_flags"]
@@ -168,6 +185,8 @@ class SO101ImpedanceChecker:
             faults.append("comms_error (a register read/write to a servo failed)")
         if flags & FAULT_OVERCURRENT:
             faults.append("overcurrent")
+        if flags & FAULT_LEADER_COMMS_ERROR:
+            faults.append("leader_comms_error (force feedback dropped; the follower is unaffected)")
         return faults
 
     def move_to(
@@ -330,6 +349,7 @@ def format_state_table(
     faults: list[str],
     targets: dict[str, float] | None = None,
     pwm_max: float = 1000.0,
+    leader: dict[str, float] | None = None,
 ) -> str:
     """Renders `read_state()`'s output as a fixed-width table for terminal printing.
 
@@ -338,6 +358,11 @@ def format_state_table(
     that look identical from the outside: a joint that drifts away with **near-zero PWM** is simply
     too soft to hold itself (raise K), whereas one that drifts away with **saturated PWM** is being
     driven the wrong way (positive feedback -- flip `--invert-pwm`).
+
+    Passing `leader` (from `read_leader()`) adds the operator's trigger as a final row. Its `pwm`
+    is the force being rendered into their hand, which is the one number that distinguishes a
+    trigger that feels slack because nothing is blocking the follower from one that feels slack
+    because the daemon is not driving it.
     """
     show_target = targets is not None
     header = f"{'motor':<14}{'pos':>9}{'vel':>9}{'cur_avg':>9}"
@@ -353,6 +378,13 @@ def format_state_table(
             pwm = s.get("pwm_cmd", float("nan"))
             pct = abs(pwm) / pwm_max * 100 if pwm_max else float("nan")
             row += f"{target:>9.1f}{err:>9.1f}{pwm:>9.1f}{pct:>6.0f}%"
+        lines.append(row)
+    if leader is not None:
+        lines.append("-" * len(header))
+        row = f"{'LEADER grip':<14}{leader['pos']:>9.1f}{leader['vel']:>9.1f}{'':>9}"
+        if show_target:
+            pwm = leader["pwm"]
+            row += f"{'':>9}{'':>9}{pwm:>9.1f}{abs(pwm) / pwm_max * 100:>6.0f}%"
         lines.append(row)
     if faults:
         lines.append("FAULTS: " + "; ".join(faults))

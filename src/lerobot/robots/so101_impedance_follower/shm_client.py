@@ -39,12 +39,15 @@ SHM_DIR = "/dev/shm"
 # the same compliant K/D law as the arm is what makes gentle grasping possible.
 NUM_MOTORS = 6
 
-LAYOUT_VERSION = 2
+LAYOUT_VERSION = 3
 SHM_MAGIC = 0x534F3130  # ASCII "SO10", matches shm::SHM_MAGIC in shm.rs
 
 FAULT_WATCHDOG_TIMEOUT = 1 << 0
 FAULT_COMMS_ERROR = 1 << 1
 FAULT_OVERCURRENT = 1 << 2
+# The *leader* arm's bus failed, so force feedback is dropped. Deliberately distinct from
+# FAULT_COMMS_ERROR: this one does not mean the robot stopped tracking.
+FAULT_LEADER_COMMS_ERROR = 1 << 3
 
 
 class CommandKind:
@@ -83,6 +86,11 @@ class OutputData(ctypes.Structure):
         ("present_current_avg", ctypes.c_float * NUM_MOTORS),
         ("pwm_cmd_debug", ctypes.c_float * NUM_MOTORS),
         ("fault_flags", ctypes.c_uint32),
+        # Leader-side gripper, populated only when the daemon runs with `--leader-port`; zero
+        # otherwise. Distinct from the follower arrays above -- this is the *operator's* trigger.
+        ("leader_gripper_pos", ctypes.c_float),
+        ("leader_gripper_vel", ctypes.c_float),
+        ("leader_gripper_pwm", ctypes.c_float),
     ]
 
 
@@ -258,6 +266,9 @@ class ImpedanceShmClient:
                 "present_current_avg": list(region.data.present_current_avg),
                 "pwm_cmd": list(region.data.pwm_cmd_debug),
                 "fault_flags": region.data.fault_flags,
+                "leader_gripper_pos": region.data.leader_gripper_pos,
+                "leader_gripper_vel": region.data.leader_gripper_vel,
+                "leader_gripper_pwm": region.data.leader_gripper_pwm,
             }
             s2 = region.seq
             if s1 == s2:

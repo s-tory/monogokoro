@@ -3,5 +3,6 @@
 
 pub mod control;
 pub mod feetech;
+pub mod leader;
 pub mod rt;
 pub mod shm;
