@@ -20,6 +20,7 @@ import pytest
 
 from lerobot.motors import MotorCalibration
 from lerobot.motors.feetech import OperatingMode
+from lerobot.processor import ImpedanceGainDefaultsProcessorStep
 from lerobot.robots.so101_impedance_follower import (
     SO101ImpedanceFollower,
     SO101ImpedanceFollowerRobotConfig,
@@ -171,3 +172,50 @@ def test_make_robot_from_config_dispatches_impedance_follower():
     cfg = SO101ImpedanceFollowerRobotConfig(shm_name="test_shm_dispatch", id="test_dispatch")
     robot = make_robot_from_config(cfg)
     assert isinstance(robot, SO101ImpedanceFollower)
+
+
+def test_teleop_action_processor_steps_seeds_gains_from_the_robots_own_config():
+    # The gains recorded into a dataset have to be the gains the arm actually applied while the
+    # demonstration happened -- otherwise the policy learns a K/D pair that does not correspond to
+    # the compliance visible in the videos. So the step is built from this robot's config, not from
+    # the processor step's own fallback defaults.
+    config = SO101ImpedanceFollowerRobotConfig(
+        shm_name="unused",
+        default_k=(1.0, 2.0, 3.0, 4.0, 5.0, 6.0),
+        default_d=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6),
+    )
+    robot = SO101ImpedanceFollower(config)
+
+    (step,) = robot.teleop_action_processor_steps()
+
+    assert isinstance(step, ImpedanceGainDefaultsProcessorStep)
+    assert step.impedance_joints == robot.impedance_joints
+    assert step.default_k == config.default_k
+    assert step.default_d == config.default_d
+
+
+def test_teleop_action_processor_steps_fill_every_recorded_action_dimension():
+    # A position-only leader arm supplies 6 keys; the dataset's action feature is 18 wide. The gap
+    # is exactly what this step closes, and it has to close it here rather than in `send_action`,
+    # which runs after the frame is written.
+    robot = SO101ImpedanceFollower(SO101ImpedanceFollowerRobotConfig(shm_name="unused"))
+    (step,) = robot.teleop_action_processor_steps()
+
+    teleop_action = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
+    filled = step.action(teleop_action)
+
+    assert set(filled) == set(robot.action_features)
+    assert len(filled) == 18
+
+
+def test_teleop_action_processor_steps_do_not_override_supplied_gains():
+    # During policy rollout the action already carries predicted K/D; the step must leave those be.
+    robot = SO101ImpedanceFollower(SO101ImpedanceFollowerRobotConfig(shm_name="unused"))
+    (step,) = robot.teleop_action_processor_steps()
+
+    action = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
+    action["gripper.k"] = 99.0
+    filled = step.action(action)
+
+    assert filled["gripper.k"] == 99.0
+    assert filled["shoulder_lift.k"] == robot.config.default_k[1]

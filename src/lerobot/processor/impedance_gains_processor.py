@@ -47,9 +47,13 @@ class ImpedanceGainDefaultsProcessorStep(RobotActionProcessorStep):
     so filling in K/D here (not inside the robot's `send_action`) is what makes them show up as
     recorded ground truth for ACT to train on.
 
+    `lerobot-record` inserts this automatically for robots that ask for it via
+    `teleop_action_processor_steps()`, seeded from the robot's own configured gains; constructing
+    it by hand is only needed to record gains that differ from the ones the robot will apply.
+
     Recording constant default gains this way is a known v1 limitation, not variable
     teleop-taught gains: ACT will initially learn to reproduce the configured default K/D rather
-    than gains that vary with the demonstration. See `examples/record_so101_impedance.py`.
+    than gains that vary with the demonstration.
 
     Attributes:
         impedance_joints: Names of the impedance-controlled motors, in order (arm joints, then
@@ -58,9 +62,10 @@ class ImpedanceGainDefaultsProcessorStep(RobotActionProcessorStep):
         default_d: Default damper constant per motor, same order as `impedance_joints`.
     """
 
-    # Kept identical to `SO101ImpedanceFollowerConfig.default_k`/`default_d`, which document how
-    # they were measured. Recording with gains the robot would not actually apply would teach the
-    # policy to predict a K/D pair that does not correspond to the compliance seen in the videos.
+    # Fallback only. `lerobot-record` overrides these from the robot's own config, because
+    # recording gains the robot would not actually apply would teach the policy a K/D pair that
+    # does not correspond to the compliance visible in the videos. These mirror
+    # `SO101ImpedanceFollowerConfig`, which documents how they were measured.
     impedance_joints: tuple[str, ...] = DEFAULT_IMPEDANCE_JOINTS
     default_k: tuple[float, ...] = (10.0, 20.0, 15.0, 10.0, 8.0, 5.0)
     default_d: tuple[float, ...] = (0.3, 0.5, 0.4, 0.3, 0.2, 0.15)

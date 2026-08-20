@@ -17,6 +17,7 @@
 import logging
 import time
 from functools import cached_property
+from typing import TYPE_CHECKING
 
 from lerobot.cameras import make_cameras_from_configs
 from lerobot.motors import MotorNormMode
@@ -30,6 +31,9 @@ from ..robot import Robot
 from ..utils import ensure_safe_goal_position
 from .config_so101_impedance_follower import SO101ImpedanceFollowerRobotConfig
 from .shm_client import CommandKind, ImpedanceShmClient, ImpedanceShmClientError
+
+if TYPE_CHECKING:
+    from lerobot.processor import ProcessorStep
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +124,29 @@ class SO101ImpedanceFollower(Robot):
     @cached_property
     def action_features(self) -> dict[str, type]:
         return {**self._motors_ft, **self._gains_ft}
+
+    def teleop_action_processor_steps(self) -> list["ProcessorStep"]:
+        """Extra teleop-pipeline steps this robot needs when driven by a plain position teleoperator.
+
+        `lerobot-record` calls this (duck-typed, so it stays robot-agnostic) and prepends the
+        result to the teleop action pipeline. That placement is the whole point: `record_loop()`
+        writes the teleop pipeline's *output* to the dataset, not what the robot actually receives,
+        so K/D filled in by `send_action` would drive the arm correctly but be absent from the
+        recorded action columns -- leaving the dataset's `.k`/`.d` features declared but never
+        populated.
+
+        The gains come from this robot's own config, so a dataset is always labeled with the gains
+        that were actually applied while it was demonstrated.
+        """
+        from lerobot.processor import ImpedanceGainDefaultsProcessorStep
+
+        return [
+            ImpedanceGainDefaultsProcessorStep(
+                impedance_joints=self.impedance_joints,
+                default_k=tuple(self.config.default_k),
+                default_d=tuple(self.config.default_d),
+            )
+        ]
 
     @property
     def is_connected(self) -> bool:

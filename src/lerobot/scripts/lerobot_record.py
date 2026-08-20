@@ -358,6 +358,26 @@ def record_loop(
         timestamp = time.perf_counter() - start_episode_t
 
 
+def _robot_teleop_action_steps(robot: Robot) -> list:
+    """Extra teleop-pipeline steps a robot asks for, or none if it does not define any.
+
+    Duck-typed on purpose: `record` should not have to import or know about every robot that has
+    action dimensions its teleoperator cannot supply.
+    """
+    hook = getattr(robot, "teleop_action_processor_steps", None)
+    if hook is None:
+        return []
+    steps = list(hook())
+    if steps:
+        logging.info(
+            "%s requested %d extra teleop action step(s): %s",
+            robot,
+            len(steps),
+            ", ".join(type(step).__name__ for step in steps),
+        )
+    return steps
+
+
 @parser.wrap()
 def record(
     cfg: RecordConfig,
@@ -387,6 +407,14 @@ def record(
         or robot_observation_processor is None
     ):
         _t, _r, _o = make_default_processors()
+        # Some robots need action dimensions a plain position teleoperator never produces -- an
+        # impedance-controlled arm's per-joint K/D, for instance. Those have to be filled in here,
+        # in the *teleop* pipeline, because `record_loop` writes this pipeline's output to the
+        # dataset; a robot that defaulted them inside `send_action` would move correctly but record
+        # empty columns. Asked of the robot rather than branched on its type, so this stays
+        # robot-agnostic. Only for the pipelines we built: a caller who passed their own owns it.
+        if teleop_action_processor is None:
+            _t.steps = [*_robot_teleop_action_steps(robot), *_t.steps]
         teleop_action_processor = teleop_action_processor or _t
         robot_action_processor = robot_action_processor or _r
         robot_observation_processor = robot_observation_processor or _o
