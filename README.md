@@ -1,4 +1,4 @@
-# monogokoro
+# monogokoro, ものごころ, Thinks of Things, 物心
 
 A fork of [LeRobot](https://github.com/huggingface/lerobot) that makes the SO-101 **compliant**:
 its joints and its gripper yield to contact instead of driving through it, and the ACT policy both
