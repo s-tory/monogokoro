@@ -17,7 +17,7 @@ a laptop, and a mainline kernel.
 
 Stock SO-101 control writes `Goal_Position` and lets the servo's internal PID drive there. That
 controller has no notion of contact: blocked by an object, it keeps increasing effort toward a
-position it will never reach. A paper cup is crushed before the arm can be said to have felt it.
+position it will never reach. A potato chip snaps before the arm can be said to have felt it.
 And the policy has no vocabulary for the difference between *press firmly* and *hold gently* --
 `Goal_Position` is the only thing it can say.
 
@@ -79,7 +79,7 @@ for **all six motors, the gripper included**, at **400 Hz** on a `SCHED_FIFO` th
 a `#[repr(C)]` shared-memory segment guarded by a seqlock.
 
 The gripper is deliberately not left in position mode. A rigid gripper is exactly the thing that
-crushes the cup, so it runs the same K/D law as the arm with a much softer default K.
+snaps the chip, so it runs the same K/D law as the arm with a much softer default K.
 
 Open-loop PWM, because the STS3215 exposes no host-streamable torque register. Noisier than true
 torque control, and an accepted trade-off rather than a hidden one.
