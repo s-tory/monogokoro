@@ -1,181 +1,174 @@
-<p align="center">
-  <img alt="LeRobot, Hugging Face Robotics Library" src="./media/readme/lerobot-logo-thumbnail.png" width="100%">
-</p>
+# monogokoro
 
-<div align="center">
+A fork of [LeRobot](https://github.com/huggingface/lerobot) that makes the SO-101 **compliant**:
+its joints and its gripper yield to contact instead of driving through it, and the ACT policy both
+sees the resulting forces and commands how hard to resist them.
 
-[![Tests](https://github.com/huggingface/lerobot/actions/workflows/latest_deps_tests.yml/badge.svg?branch=main)](https://github.com/huggingface/lerobot/actions/workflows/latest_deps_tests.yml?query=branch%3Amain)
-[![Tests](https://github.com/huggingface/lerobot/actions/workflows/docker_publish.yml/badge.svg?branch=main)](https://github.com/huggingface/lerobot/actions/workflows/docker_publish.yml?query=branch%3Amain)
-[![Python versions](https://img.shields.io/pypi/pyversions/lerobot)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/huggingface/lerobot/blob/main/LICENSE)
-[![Status](https://img.shields.io/pypi/status/lerobot)](https://pypi.org/project/lerobot/)
-[![Version](https://img.shields.io/pypi/v/lerobot)](https://pypi.org/project/lerobot/)
-[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-v2.1-ff69b4.svg)](https://github.com/huggingface/lerobot/blob/main/CODE_OF_CONDUCT.md)
-[![Discord](https://img.shields.io/badge/Discord-Join_Us-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/q8Dzzpym3f)
+Forked at upstream [`0d383d09`](https://github.com/huggingface/lerobot/commit/0d383d09) (2026-07-24,
+on the 0.6.1 line). Everything upstream still works unchanged -- this adds a robot, a real-time
+controller, and two extra dimensions of what ACT reasons about. It does not modify any policy
+architecture.
 
-</div>
+## Why
 
-**LeRobot** aims to provide models, datasets, and tools for real-world robotics in PyTorch. The goal is to lower the barrier to entry so that everyone can contribute to and benefit from shared datasets and pretrained models.
+Stock SO-101 control writes `Goal_Position` and lets the servo's internal PID drive there. That
+controller has no notion of contact: blocked by an object, it keeps increasing effort toward a
+position it will never reach. A paper cup is crushed before the arm can be said to have felt it.
+And the policy has no vocabulary for the difference between *press firmly* and *hold gently* --
+`Goal_Position` is the only thing it can say.
 
-🤗 A hardware-agnostic, Python-native interface that standardizes control across diverse platforms, from low-cost arms (SO-100) to humanoids.
+Compliance fixes both ends. The arm is driven by a spring-damper law instead of a position
+servo, so contact produces a bounded force. And because that law is parameterised, the policy can
+choose its own stiffness per joint, per timestep.
 
-🤗 A standardized, scalable LeRobotDataset format (Parquet + MP4 or images) hosted on the Hugging Face Hub, enabling efficient storage, streaming and visualization of massive robotic datasets.
+## What this fork adds
 
-🤗 State-of-the-art policies that have been shown to transfer to the real-world ready for training and deployment.
+```
+   operator's hand                                                        camera
+        │  ▲                                                                 │
+   ┌────┴──┴────┐                                                            │
+   │ SO-101     │  gripper: force feedback ──┐                               │
+   │ leader     │  5 joints: backdriven      │                               │
+   └────────────┘                            │                               │
+        │ pos                                │                               │
+        ▼                                    │                               ▼
+   ╔═══════════════════════════════════════╗ │                    ┌──────────────────┐
+   ║ Rust RT daemon  ·  400 Hz             ║◄┘                    │ ACT              │
+   ║ SCHED_FIFO, isolated core             ║                      │                  │
+   ║                                       ║   shared memory      │ in:  images      │
+   ║  pwm = K·Δx + D·Δv     (all 6 motors) ║◄────── seqlock ─────► │      pos    ×6   │
+   ║  owns both serial buses               ║                      │      current×6   │
+   ╚═══════════════════════════════════════╝                      │                  │
+        │ PWM              ▲ pos, current                         │ out: pos ×6 ┐    │
+        ▼                  │                                      │      K   ×6 ├ ×N │
+   ┌────────────┐                                                 │      D   ×6 ┘    │
+   │ SO-101     │  6× Feetech STS3215                             └──────────────────┘
+   │ follower   │  all impedance-controlled
+   └────────────┘
+```
 
-🤗 Comprehensive support for the open-source ecosystem to democratize physical AI.
+### 1. Impedance control on a PREEMPT_RT isolated core
 
-## Quick Start
+[`rust/so101_impedance_ctrl/`](rust/so101_impedance_ctrl/) is a standalone Rust daemon that
+exclusively owns the follower's serial bus and runs
 
-LeRobot can be installed directly from PyPI.
+```
+pwm = clamp(K · (target_pos − present_pos) + D · (target_vel − present_vel))
+```
+
+for **all six motors, the gripper included**, at **400 Hz** on a `SCHED_FIFO` thread pinned to an
+`isolcpus`-isolated core. Python never touches the bus; it exchanges targets and telemetry through
+a `#[repr(C)]` shared-memory segment guarded by a seqlock.
+
+The gripper is deliberately not left in position mode. A rigid gripper is exactly the thing that
+crushes the cup, so it runs the same K/D law as the arm with a much softer default K.
+
+Open-loop PWM, because the STS3215 exposes no host-streamable torque register. Noisier than true
+torque control, and an accepted trade-off rather than a hidden one.
+
+Loop rate is bounded by the servo link, not the CPU: three bus transactions per tick at ~256 µs of
+USB round trip each is ~0.8 ms against a 2.5 ms period. Beyond 400 Hz there is nothing to gain --
+what limits how the arm feels is open-loop PWM and gearbox friction, and 400 Hz is already far past
+the arm's mechanical bandwidth.
+
+### 2. Force feedback on the leader gripper
+
+With `--leader-port`, the same loop also drives the **leader** arm's gripper as a haptic display, so
+the operator feels what the follower is holding. The other five leader servos stay torque-off and
+backdrivable.
+
+The force is derived from the follower's own tracking error, not from a force sensor: a free gripper
+reaches its target and the trigger stays slack; a blocked one lets the commanded position run ahead
+of the achieved one, and that gap grows with how hard the operator is asking it to squeeze.
+
+Both arms share **one loop on one core**. Their ports are separate, so the half-duplex constraint
+does not couple them, and a single tick keeps the two arms' samples in lockstep -- two independent
+loops would let their phase free-run, injecting a full period of variable delay into the coupling,
+which is precisely what destabilises a bilateral loop.
+
+### 3. ACT reasons about force and compliance
+
+No changes to `modeling_act.py`. Both projections already derive their width from the feature
+shapes, so widening the robot's declared features is sufficient.
+
+| | stock SO-101 | this fork |
+| --- | --- | --- |
+| `observation.state` | `pos` ×6 → **6** | `pos` ×6 + `current_avg` ×6 → **12** |
+| `action` (per chunk step) | `pos` ×6 → **6** | `pos` ×6 + `K` ×6 + `D` ×6 → **18** |
+
+**Input.** Each motor's `Present_Current` is sampled one servo per tick round-robin and averaged in
+Rust over a fixed window (~0.5 s at the defaults). ACT reads the pre-averaged value at camera rate,
+so it sees contact force without the per-tick noise.
+
+**Output.** ACT's action chunking is unchanged -- it still predicts `chunk_size` steps ahead -- but
+each step now carries a per-joint stiffness and damping alongside the position. The policy chooses
+its own compliance over the horizon; K/D are clamped in Python and again in Rust before reaching a
+servo.
+
+## Quick start
 
 ```bash
-pip install lerobot
-lerobot-info
+# 1. Build and grant the one privileged capability. setcap is lost on every rebuild.
+cd rust/so101_impedance_ctrl && cargo build --release
+sudo setcap cap_sys_nice+ep ./target/release/so101_impedance_ctrl
+
+# 2. Start the daemon. It must be running before any Python attaches.
+./target/release/so101_impedance_ctrl \
+  --port /dev/ttyACM0 --shm-name so101_impedance --cpu-core 3 --priority 99
+
+# 3. Confirm telemetry, with the arm torque-limp and safe to move by hand.
+python examples/check_so101_impedance.py --shm-name so101_impedance
 ```
 
-> [!IMPORTANT]
-> For detailed installation guide, please see the [Installation Documentation](https://huggingface.co/docs/lerobot/installation).
+Then teleoperate or record with `--robot.type=so101_follower_impedance`; both fill in per-joint K/D
+from the robot's config automatically.
 
-## Robots & Control
+- Setting up the isolated core: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
+- Tuning gains, force-feedback bring-up, protocol notes: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)
+- General LeRobot usage (recording, training, eval): [`AGENT_GUIDE.md`](AGENT_GUIDE.md)
 
-<div align="center">
-  <img src="./media/readme/robots_control_video.webp" width="640px" alt="Reachy 2 Demo">
-</div>
+## Measured, not assumed
 
-LeRobot provides a unified `Robot` class interface that decouples control logic from hardware specifics. It supports a wide range of robots and teleoperation devices.
+Several constants here were settled on real hardware after their documented or intuitive values
+turned out to be wrong. They are specific to this arm and worth re-measuring on another:
 
-```python
-from lerobot.robots.myrobot import MyRobot
+| constant | value | how it was settled |
+| --- | --- | --- |
+| PWM sign bit | **10** | bit 11 (per upstream's docstring) does not reverse the joint -- it is consumed as extra magnitude |
+| `--invert-pwm` | **true** | with the right sign bit, positive duty still lowers the encoder |
+| per-joint K | 10/20/15/10/8/5 | holding at K=1 makes the reported PWM read out as each joint's gravity+friction duty |
+| per-joint D | ≈ K/40 | bounded from above by the velocity quantisation noise floor, not by stability |
 
-# Connect to a robot
-robot = MyRobot(config=...)
-robot.connect()
+The tooling for re-deriving them ships too: `--probe-direction` measures drive direction with a
+bounded, auto-aborting nudge, and the checker's live table separates "too soft" from "driven the
+wrong way", which look identical from across the room.
 
-# Read observation and send action
-obs = robot.get_observation()
-action = model.select_action(obs)
-robot.send_action(action)
-```
+## Known limitations
 
-**Supported Hardware:** SO100, LeKiwi, Koch, HopeJR, OMX, EarthRover, Reachy2, Gamepads, Keyboards, Phones, OpenARM, Unitree G1, reBot B601.
+- **Recorded K/D are constant.** A torque-off leader is a position sensor and nothing else, so
+  demonstrations are labelled with the config's default gains. ACT trained on such data learns to
+  reproduce those gains, not to vary them. The leader gripper's force feedback is the first step
+  toward fixing this; deriving stiffness from cross-demonstration variance is the likely next one.
+- **Open-loop PWM** is noisier than torque control, and no gravity feedforward is implemented, so a
+  gravity-loaded joint droops by `holding_duty / K`.
+- **The daemon is not part of the Python build.** It is a separate Cargo project, deployed by hand.
+- **Interactive calibration** for the impedance robot is not implemented; copy a calibration
+  produced with the stock `so101_follower` against the same servos.
 
-While these devices are natively integrated into the LeRobot codebase, the library is designed to be extensible. You can easily implement the Robot interface to utilize LeRobot's data collection, training, and visualization tools for your own custom robot.
+## Upstream
 
-For detailed hardware setup guides, see the [Hardware Documentation](https://huggingface.co/docs/lerobot/integrate_hardware).
+Everything not listed above is upstream LeRobot, unmodified, including all other robots, policies,
+datasets and scripts. Upstream documentation applies directly:
 
-## LeRobot Dataset
-
-To solve the data fragmentation problem in robotics, we utilize the **LeRobotDataset** format.
-
-- **Structure:** Synchronized MP4 videos (or images) for vision and Parquet files for state/action data.
-- **HF Hub Integration:** Explore thousands of robotics datasets on the [Hugging Face Hub](https://huggingface.co/lerobot).
-- **Tools:** Seamlessly delete episodes, split by indices/fractions, add/remove features, and merge multiple datasets.
-
-```python
-from lerobot.datasets.lerobot_dataset import LeRobotDataset
-
-# Load a dataset from the Hub
-dataset = LeRobotDataset("lerobot/aloha_mobile_cabinet")
-
-# Access data (automatically handles video decoding)
-episode_index=0
-print(f"{dataset[episode_index]['action'].shape=}\n")
-```
-
-Learn more about it in the [LeRobotDataset Documentation](https://huggingface.co/docs/lerobot/lerobot-dataset-v3).
-
-## SoTA Models
-
-LeRobot implements state-of-the-art policies in pure PyTorch, covering Imitation Learning, Reinforcement Learning, Vision-Language-Action (VLA) models, World Models, and Reward Models, with more coming soon. It also provides you with the tools to instrument and inspect your training process.
-
-<p align="center">
-  <img alt="Gr00t Architecture" src="./media/readme/VLA_architecture.jpg" width="640px">
-</p>
-
-Training a policy is as simple as running a script configuration:
-
-```bash
-lerobot-train \
-  --policy.type=act \
-  --dataset.repo_id=lerobot/aloha_mobile_cabinet
-```
-
-| Category                   | Models                                                                                                                                                                                                                                                                                                                                                                                     |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Imitation Learning**     | [ACT](./docs/source/policy_act_README.md), [Diffusion](./docs/source/policy_diffusion_README.md), [VQ-BeT](./docs/source/policy_vqbet_README.md), [Multitask DiT Policy](./docs/source/policy_multi_task_dit_README.md)                                                                                                                                                                    |
-| **Reinforcement Learning** | [HIL-SERL](./docs/source/hilserl.mdx), [TDMPC](./docs/source/policy_tdmpc_README.md) & QC-FQL (coming soon)                                                                                                                                                                                                                                                                                |
-| **VLAs Models**            | [Pi0](./docs/source/pi0.mdx), [Pi0Fast](./docs/source/pi0fast.mdx), [Pi0.5](./docs/source/pi05.mdx), [GR00T N1.7](./docs/source/policy_groot_README.md), [SmolVLA](./docs/source/policy_smolvla_README.md), [XVLA](./docs/source/xvla.mdx), [EO-1](./docs/source/eo1.mdx), [MolmoAct2](./docs/source/molmoact2.mdx), [WALL-OSS](./docs/source/walloss.mdx), [EVO1](./docs/source/evo1.mdx) |
-| **World Models**           | [VLA-JEPA](./docs/source/vla_jepa.mdx), [LingBot-VA](./docs/source/lingbot_va.mdx), [FastWAM](./docs/source/fastwam.mdx)                                                                                                                                                                                                                                                                   |
-| **Reward Models**          | [SARM](./docs/source/sarm.mdx), [TOPReward](./docs/source/topreward.mdx), [Robometer](./docs/source/robometer.mdx)                                                                                                                                                                                                                                                                         |
-
-Similarly to the hardware, you can easily implement your own policy & leverage LeRobot's data collection, training, and visualization tools, and share your model to the HF Hub.
-
-For detailed policy setup guides, see the [Policy Documentation](https://huggingface.co/docs/lerobot/bring_your_own_policies). For GPU/RAM requirements and expected training time per policy, see the [Compute Hardware Guide](https://huggingface.co/docs/lerobot/hardware_guide).
-
-## Inference & Evaluation
-
-Evaluate your policies in simulation or on real hardware using the unified evaluation script. LeRobot supports standard benchmarks like **LIBERO**, **MetaWorld** and more to come.
-
-```bash
-# Evaluate a policy on the LIBERO benchmark
-lerobot-eval \
-  --policy.path=lerobot/pi0_libero_finetuned \
-  --env.type=libero \
-  --env.task=libero_object \
-  --eval.n_episodes=10
-```
-
-Learn how to implement your own simulation environment or benchmark and distribute it from the HF Hub by following the [EnvHub Documentation](https://huggingface.co/docs/lerobot/envhub).
-
-## Resources
-
-- **[Documentation](https://huggingface.co/docs/lerobot/index):** The complete guide to tutorials & API.
-- **[Chinese Tutorials: LeRobot+SO-ARM101中文教程-同济子豪兄](https://zihao-ai.feishu.cn/wiki/space/7589642043471924447)** Detailed doc for assembling, teleoperate, dataset, train, deploy. Verified by Seed Studio and 5 global hackathon players.
-- **[Discord](https://discord.gg/q8Dzzpym3f):** Join the `LeRobot` server to discuss with the community.
-- **[X](https://x.com/LeRobotHF):** Follow us on X to stay up-to-date with the latest developments.
-- **[Robot Learning Tutorial](https://huggingface.co/spaces/lerobot/robot-learning-tutorial):** A free, hands-on course to learn robot learning using LeRobot.
-- **[T-Shirt Folding Experiment](https://huggingface.co/spaces/lerobot/robot-folding):** An end-to-end demonstration of folding t-shirts with LeRobot.
-- **[LeLab](https://github.com/huggingface/leLab):** A web interface for LeRobot — teleoperate, calibrate, record datasets, replay, and train your SO arm from the browser, no CLI required.
-
-## Citation
-
-If you use LeRobot in your project, please cite the GitHub repository to acknowledge the ongoing development and contributors:
+- [Documentation](https://huggingface.co/docs/lerobot) · [Hub](https://huggingface.co/lerobot) · [Discord](https://discord.gg/q8Dzzpym3f)
 
 ```bibtex
 @misc{cadene2024lerobot,
-    author = {Cadene, Remi and Alibert, Simon and Soare, Alexander and Gallouedec, Quentin and Zouitine, Adil and Palma, Steven and Kooijmans, Pepijn and Aractingi, Michel and Shukor, Mustafa and Aubakirova, Dana and Russi, Martino and Capuano, Francesco and Pascal, Caroline and Choghari, Jade and Meftah, Khalil and Ellerbach, Maxime and Moss, Jess and Wolf, Thomas},
+    author = {Cadene, Remi and Alibert, Simon and Soare, Alexander and Gallouedec, Quentin and Zouitine, Adil and Palma, Steven and Kooijmans, Pepijn and Aractingi, Michel and Shukor, Mustafa and Aubakirova, Dana and Russi, Martino and Capuano, Francesco and Pascale, Caroline and Choghari, Jade and Moss, Jess and Wolf, Thomas},
     title = {LeRobot: State-of-the-art Machine Learning for Real-World Robotics in Pytorch},
     howpublished = "\url{https://github.com/huggingface/lerobot}",
     year = {2024}
 }
 ```
 
-If you are referencing our research or the academic paper, please also cite our ICLR publication:
-
-<details>
-<summary><b>ICLR 2026 Paper</b></summary>
-
-```bibtex
-@inproceedings{cadenelerobot,
-  title={LeRobot: An Open-Source Library for End-to-End Robot Learning},
-  author={Cadene, Remi and Alibert, Simon and Capuano, Francesco and Aractingi, Michel and Zouitine, Adil and Kooijmans, Pepijn and Choghari, Jade and Russi, Martino and Pascal, Caroline and Palma, Steven and Shukor, Mustafa and Moss, Jess and Soare, Alexander and Aubakirova, Dana and Lhoest, Quentin and Gallou\'edec, Quentin and Wolf, Thomas},
-  booktitle={The Fourteenth International Conference on Learning Representations},
-  year={2026},
-  url={https://arxiv.org/abs/2602.22818}
-}
-```
-
-</details>
-
-## Contribute
-
-We welcome contributions from everyone in the community! To get started, please read our [CONTRIBUTING.md](https://github.com/huggingface/lerobot/blob/main/CONTRIBUTING.md) guide. Whether you're adding a new feature, improving documentation, or fixing a bug, your help and feedback are invaluable. We're incredibly excited about the future of open-source robotics and can't wait to work with you on what's next—thank you for your support!
-
-<p align="center">
-  <img alt="SO101 Video" src="./media/readme/so100_video.webp" width="640px">
-</p>
-
-<div align="center">
-<sub>Built by the <a href="https://huggingface.co/lerobot">LeRobot</a> team at <a href="https://huggingface.co">Hugging Face</a> with ❤️</sub>
-</div>
+Apache 2.0, as upstream. See [LICENSE](LICENSE).
