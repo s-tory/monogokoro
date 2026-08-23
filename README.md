@@ -11,15 +11,33 @@ architecture.
 
 ## Why
 
+The goal is to build the **reflex layer** -- the part that behaves like a spinal cord -- out of
+hardware anyone can buy and software anyone can read. Not a lab rig: 3D-printed arms, hobby servos,
+a laptop, and a mainline kernel.
+
 Stock SO-101 control writes `Goal_Position` and lets the servo's internal PID drive there. That
 controller has no notion of contact: blocked by an object, it keeps increasing effort toward a
 position it will never reach. A paper cup is crushed before the arm can be said to have felt it.
 And the policy has no vocabulary for the difference between *press firmly* and *hold gently* --
 `Goal_Position` is the only thing it can say.
 
-Compliance fixes both ends. The arm is driven by a spring-damper law instead of a position
-servo, so contact produces a bounded force. And because that law is parameterised, the policy can
-choose its own stiffness per joint, per timestep.
+Biology does not solve this in the brain. The stretch reflex is a spring-damper closed in the
+spinal cord, and descending commands do not specify force -- they set an equilibrium position and,
+via gamma motor neurons, the *gain* of that reflex. Which is why the split here is what it is:
+
+| | biology | here |
+| --- | --- | --- |
+| fast local loop, brain not involved | stretch reflex | Rust daemon, 400 Hz, isolated core |
+| descending command | equilibrium point + reflex gain | ACT's `pos` + `K` + `D` |
+| slow loop through perception | visual feedback | ACT at camera rate, ~30 Hz |
+
+The ~13x separation between the two loop rates is roughly the one biology runs at, and it is the
+reason the control law does not live in Python.
+
+This is a spinal cord, not a cerebellum. The cerebellum's job is prediction -- learning the
+feedforward term that cancels a load *before* the error appears -- and none of that is implemented.
+Its absence is visible and measurable: with no gravity feedforward, a loaded joint droops by
+exactly `holding_duty / K` (see [Known limitations](#known-limitations)).
 
 ## What this fork adds
 
@@ -149,8 +167,12 @@ wrong way", which look identical from across the room.
   demonstrations are labelled with the config's default gains. ACT trained on such data learns to
   reproduce those gains, not to vary them. The leader gripper's force feedback is the first step
   toward fixing this; deriving stiffness from cross-demonstration variance is the likely next one.
-- **Open-loop PWM** is noisier than torque control, and no gravity feedforward is implemented, so a
-  gravity-loaded joint droops by `holding_duty / K`.
+- **No gravity feedforward**, so a loaded joint droops by `holding_duty / K` and the only way to
+  reduce the droop is to raise K, i.e. to give up compliance. Adding `g(q)` decouples the two, and
+  is the first genuinely cerebellar piece: a fixed basis over the joint angles with an error-driven
+  linear readout, where the standing PWM is already the error signal.
+- **Open-loop PWM** is noisier than true torque control -- the STS3215 has no host-streamable
+  torque register, so this is a constraint of the hardware rather than a choice.
 - **The daemon is not part of the Python build.** It is a separate Cargo project, deployed by hand.
 - **Interactive calibration** for the impedance robot is not implemented; copy a calibration
   produced with the stock `so101_follower` against the same servos.
