@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "PREEMPT_RT impedance controller for the SO101 arm (Feetech STS3215 servos), driven over shared memory by the monogokoro ACT policy."
 license = "Apache-2.0"
+build = "build.rs"
 
 [lib]
 name = "so101_impedance_ctrl"
@@ -24,9 +25,16 @@ shared_memory = "0.12"
 libc = "0.2"
 log = "0.4"
 env_logger = "0.11"
+# Raw Vulkan for the cerebellum's compute layer. `ash` and not `wgpu`/`vulkano` because this
+# submits into an RT-adjacent loop: the whole design rests on knowing exactly when a submission
+# happens and what it waits on, and a wrapper that manages queues and caches internally hides the
+# one number that matters. `default-features` keeps only the runtime loader.
+ash = { version = "0.38", default-features = false, features = ["loaded", "std"] }
 
 [dev-dependencies]
-# none beyond std -- tests are pure unit tests over control.rs/feetech.rs/shm.rs
+# `libc` only, for CLOCK_MONOTONIC in the cerebellum handle tests -- they drive the same
+# timestamped exchange the control loop does, so they need the same clock.
+libc = "0.2"
 
 [profile.release]
 # Predictable timing over raw throughput for an RT control loop.

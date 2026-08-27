@@ -1,0 +1,39 @@
+#version 450
+// Granule layer: the fixed random expansion, Golgi inhibition, and the eligibility trace.
+//
+// One invocation per granule cell. Each reads only GC_FAN_IN mossy fibres, so the whole layer is
+// `gc_dim * 4` multiply-adds regardless of how many mossy fibres exist -- this is why a 16k-cell
+// expansion is affordable at all, and it is the same sparse fan-in a real granule cell has.
+//
+// Nothing here is learned. See net.rs's module docs for why that is what removes the need for
+// backpropagation rather than merely simplifying the code.
+
+#include "common.glsl"
+
+layout(local_size_x = 256) in;
+
+void main() {
+    uint j = gl_GlobalInvocationID.x;
+    if (j >= gc_dim) {
+        return;
+    }
+
+    float sum = gc_bias[j];
+    for (uint k = 0u; k < GC_FAN_IN; ++k) {
+        uint slot = j * GC_FAN_IN + k;
+        sum += gc_w[slot] * mf[gc_idx[slot]];
+    }
+
+    // Golgi cells pool granule output and inhibit the whole field in proportion: a single global
+    // subtractive threshold, then rectification. The threshold itself is a slow host-side
+    // integrator on the active count below, which is what makes this a feedback loop on total
+    // activity rather than an assumption about the distribution of `sum`.
+    float g = max(tanh(sum) - theta, 0.0);
+    gc[j] = g;
+
+    // Normalisation and the eligibility trace both need the whole field, so they are the next
+    // dispatch (`normalise.comp`) rather than part of this one.
+    if (g > 0.0) {
+        atomicAdd(active_count, 1u);
+    }
+}

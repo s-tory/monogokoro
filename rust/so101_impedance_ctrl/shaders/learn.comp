@@ -1,0 +1,41 @@
+#version 450
+// Plasticity: three-factor Hebbian with heterosynaptic decay, on the only learned layer.
+//
+//   dW[i][j] = rate * ( cf[i] * e[j] - leak * W[i][j] * e[j] )
+//
+// The three factors are the parallel fibre's eligibility (pre), the climbing fibre (the error /
+// reinforcement signal), and nothing else -- there is no backward pass, because there is no layer
+// below this one whose credit needs assigning.
+//
+// The `leak` term is the "modified" half of the rule. A bare Hebbian product grows without bound
+// once the sign of cf is consistent, which is exactly the situation gravity creates. Making the
+// decay proportional to e[j] confines forgetting to synapses that are currently active, so poses
+// the arm is not visiting keep what they learned.
+//
+// One invocation per granule cell, updating that cell's whole column. Consecutive threads touch
+// consecutive addresses for each output row, so the writes coalesce.
+
+#include "common.glsl"
+
+layout(local_size_x = 256) in;
+
+void main() {
+    if (learn == 0u) {
+        return;
+    }
+    uint j = gl_GlobalInvocationID.x;
+    if (j >= gc_dim) {
+        return;
+    }
+
+    float e = trace[j];
+    if (e == 0.0) {
+        return; // silent parallel fibre: no eligibility, no plasticity
+    }
+
+    for (uint i = 0u; i < NUM_OUTPUTS; ++i) {
+        uint idx = i * gc_dim + j;
+        float w = weights[idx];
+        weights[idx] = w + rate * (cf[i] * e - leak * w * e);
+    }
+}

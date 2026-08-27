@@ -1,0 +1,59 @@
+#version 450
+// Normalises the granule code to unit length, then advances the eligibility trace.
+//
+// # Why this stage exists
+//
+// Without it the effective learning rate is `rate * sum_j g_j^2`, which depends on how many
+// granule cells there are, what sparsity the Golgi loop settled at, and how far above threshold
+// the active cells happen to sit. Changing `--cerebellum-gc-dim` or `--cerebellum-sparsity` would
+// silently change how fast the arm learns -- by more than an order of magnitude between plausible
+// settings -- and `--cerebellum-rate` would have to be retuned every time.
+//
+// With `|g| = 1`, the feedforward moves by `rate * cf` per step no matter what the layer looks
+// like, so `rate` means one thing: the fraction of the remaining error corrected per step, i.e. a
+// time constant of `1 / rate` steps. Everything downstream inherits that: the heterosynaptic leak
+// settles at a residual error of `leak / (1 + leak)`, independent of layer size.
+//
+// It also turns the readout from a weighted sum into a genuine interpolation between the stored
+// values of nearby granule codes, which is the same property a normalised radial-basis network
+// gets from dividing by its activation sum.
+//
+// One workgroup, because the reduction has to see the whole field before anything can be rescaled
+// and a cross-workgroup barrier does not exist inside a dispatch. At 16k cells that is two passes
+// over 64 KB, which is nothing next to the submission latency that dominates a step anyway.
+
+#include "common.glsl"
+
+layout(local_size_x = 256) in;
+shared float partial[256];
+
+void main() {
+    uint t = gl_LocalInvocationID.x;
+
+    float acc = 0.0;
+    for (uint j = t; j < gc_dim; j += 256u) {
+        float g = gc[j];
+        acc += g * g;
+    }
+    partial[t] = acc;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (t < s) {
+            partial[t] += partial[t + s];
+        }
+        barrier();
+    }
+
+    // Every thread reads the same reduced total; the barrier above already published it.
+    float total = partial[0];
+    // A silenced layer (threshold above every cell) must scale to zero, not to infinity.
+    float inv = total > 1e-12 ? inversesqrt(total) : 0.0;
+
+    for (uint j = t; j < gc_dim; j += 256u) {
+        float g = gc[j] * inv;
+        gc[j] = g;
+        // The trace is built from the normalised code, so the eligibility a synapse accumulates is
+        // in the same units as the activity the readout uses.
+        trace[j] = trace[j] * trace_decay + g * (1.0 - trace_decay);
+    }
+}

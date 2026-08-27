@@ -1,0 +1,43 @@
+#version 450
+// Purkinje readout: ff[i] = sum_j weights[i][j] * gc[j].
+//
+// One workgroup per output, each thread striding over the granule field and finishing with a
+// shared-memory tree reduction. The reduction order differs from the CPU reference's sequential
+// sum, so the two agree to floating-point tolerance rather than bit-exactly -- expected, and what
+// the cross-check test asserts.
+//
+// Must run before `learn.comp` in the same submission: the readout has to see the weights as they
+// were, not half-updated. The command buffer places a memory barrier between them.
+
+#include "common.glsl"
+
+layout(local_size_x = 256) in;
+shared float partial[256];
+
+void main() {
+    uint i = gl_WorkGroupID.x;
+    uint t = gl_LocalInvocationID.x;
+
+    float acc = 0.0;
+    for (uint j = t; j < gc_dim; j += 256u) {
+        float g = gc[j];
+        // The granule code is ~2% dense, so skipping silent cells avoids most of the weight
+        // fetches -- the sparsity is a bandwidth saving here, not just a coding property.
+        if (g != 0.0) {
+            acc += weights[i * gc_dim + j] * g;
+        }
+    }
+
+    partial[t] = acc;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (t < s) {
+            partial[t] += partial[t + s];
+        }
+        barrier();
+    }
+
+    if (t == 0u) {
+        ff[i] = partial[0];
+    }
+}
