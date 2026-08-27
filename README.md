@@ -14,6 +14,9 @@ about. No policy architecture is modified.
 
 ## Why
 
+Almost everything called *Physical AI* is a story about the cortex. The layer that actually touches
+physics -- the one that answers contact in real time -- has been left empty.
+
 The goal is to build the layers below the policy out of hardware anyone can buy and software anyone
 can read. Not a lab rig: 3D-printed arms, hobby servos, a laptop, a mainline kernel, and the
 integrated GPU that was already in it.
