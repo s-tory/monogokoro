@@ -1,5 +1,7 @@
 # Monogokoro, ものごころ, Thinks of Things, 物心
 
+**English** | [日本語](README_JP.md)
+
 A fork of [LeRobot](https://github.com/huggingface/lerobot) that gives the SO-101 the two motor
 layers that sit *underneath* a policy: a **spinal reflex** whose joints and gripper yield to contact
 instead of driving through it, and a **cerebellum** that learns, online, to cancel a load before the
