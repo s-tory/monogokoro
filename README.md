@@ -1,43 +1,48 @@
 # Monogokoro, ものごころ, Thinks of Things, 物心
 
-A fork of [LeRobot](https://github.com/huggingface/lerobot) that makes the SO-101 **compliant**:
-its joints and its gripper yield to contact instead of driving through it, and the ACT policy both
-sees the resulting forces and commands how hard to resist them.
+A fork of [LeRobot](https://github.com/huggingface/lerobot) that gives the SO-101 the two motor
+layers that sit *underneath* a policy: a **spinal reflex** whose joints and gripper yield to contact
+instead of driving through it, and a **cerebellum** that learns, online, to cancel a load before the
+reflex has to feel it. ACT sees the resulting forces and commands how hard to resist them.
 
 Forked at upstream [`0d383d09`](https://github.com/huggingface/lerobot/commit/0d383d09) (2026-07-24,
 on the 0.6.1 line). Everything upstream still works unchanged -- this adds a robot, a real-time
-controller, and two extra dimensions of what ACT reasons about. It does not modify any policy
-architecture.
+controller, an online-learning feedforward layer, and two extra dimensions of what ACT reasons
+about. No policy architecture is modified.
 
 ## Why
 
-The goal is to build the **reflex layer** -- the part that behaves like a spinal cord -- out of
-hardware anyone can buy and software anyone can read. Not a lab rig: 3D-printed arms, hobby servos,
-a laptop, and a mainline kernel.
+The goal is to build the layers below the policy out of hardware anyone can buy and software anyone
+can read. Not a lab rig: 3D-printed arms, hobby servos, a laptop, a mainline kernel, and the
+integrated GPU that was already in it.
 
 Stock SO-101 control writes `Goal_Position` and lets the servo's internal PID drive there. That
 controller has no notion of contact: blocked by an object, it keeps increasing effort toward a
-position it will never reach. A potato chip snaps before the arm can be said to have felt it.
-And the policy has no vocabulary for the difference between *press firmly* and *hold gently* --
+position it will never reach. A potato chip snaps before the arm can be said to have felt it. And
+the policy has no vocabulary for the difference between *press firmly* and *hold gently* --
 `Goal_Position` is the only thing it can say.
 
 Biology does not solve this in the brain. The stretch reflex is a spring-damper closed in the
 spinal cord, and descending commands do not specify force -- they set an equilibrium position and,
-via gamma motor neurons, the *gain* of that reflex. Which is why the split here is what it is:
+via gamma motor neurons, the *gain* of that reflex.
 
-| | biology | here |
-| --- | --- | --- |
-| fast local loop, brain not involved | stretch reflex | Rust daemon, 400 Hz, isolated core |
-| descending command | equilibrium point + reflex gain | ACT's `pos` + `K` + `D` |
-| slow loop through perception | visual feedback | ACT at camera rate, ~30 Hz |
+A reflex alone is not enough, and its shortfall is exactly measurable. It can only answer an error
+that has already happened, so a joint carrying a standing load sits `holding_duty / K` below its
+target forever, and the only way a feedback law can shrink that droop is to raise `K` -- to hand
+back the compliance it was there to provide. Cancelling the load *before* the error appears is a
+different job, and biology gives it to a different structure.
 
-The ~13x separation between the two loop rates is roughly the one biology runs at, and it is the
-reason the control law does not live in Python.
+So there are three layers here, and each is where it is for a reason:
 
-This is a spinal cord, not a cerebellum. The cerebellum's job is prediction -- learning the
-feedforward term that cancels a load *before* the error appears -- and none of that is implemented.
-Its absence is visible and measurable: with no gravity feedforward, a loaded joint droops by
-exactly `holding_duty / K` (see [Known limitations](#known-limitations)).
+| | biology | here | rate |
+| --- | --- | --- | --- |
+| fast local loop, brain not involved | stretch reflex | Rust daemon, `SCHED_FIFO`, isolated core | 400 Hz |
+| prediction, learned from its own errors | cerebellum | Vulkan compute on the iGPU, own thread | 200 Hz |
+| slow loop through perception | visual feedback | ACT | ~30 Hz |
+
+The ~13x separation between the first and the last is roughly the one biology runs at, and it is
+the reason the control law does not live in Python. The cerebellum sits between them and, like its
+namesake, *outside* the reflex arc -- it corrects the loop without ever being inside it.
 
 ## What this fork adds
 
@@ -46,23 +51,24 @@ exactly `holding_duty / K` (see [Known limitations](#known-limitations)).
         │  ▲                                                                 │
    ┌────┴──┴────┐                                                            │
    │ SO-101     │  gripper: force feedback ──┐                               │
-   │ leader     │  5 joints: backdriven      │                               │
-   └────────────┘                            │                               │
-        │ pos                                │                               │
-        ▼                                    │                               ▼
-   ╔═══════════════════════════════════════╗ │                    ┌──────────────────┐
-   ║ Rust RT daemon  ·  400 Hz             ║◄┘                    │ ACT              │
-   ║ SCHED_FIFO, isolated core             ║                      │                  │
-   ║                                       ║   shared memory      │ in:  images      │
-   ║  pwm = K·Δx + D·Δv     (all 6 motors) ║◄────── seqlock ─────► │      pos    ×6   │
-   ║  owns both serial buses               ║                      │      current×6   │
-   ╚═══════════════════════════════════════╝                      │                  │
-        │ PWM              ▲ pos, current                         │ out: pos ×6 ┐    │
-        ▼                  │                                      │      K   ×6 ├ ×N │
-   ┌────────────┐                                                 │      D   ×6 ┘    │
-   │ SO-101     │  6× Feetech STS3215                             └──────────────────┘
-   │ follower   │  all impedance-controlled
-   └────────────┘
+   │ leader     │  5 joints: backdriven      │                               ▼
+   └────────────┘                            │                    ┌──────────────────┐
+        │ pos                                │                    │ ACT              │
+        ▼                                    │                    │                  │
+   ╔═══════════════════════════════════════╗ │                    │ in:  images      │
+   ║ Rust RT daemon  ·  400 Hz             ║◄┘   shared memory    │      pos    ×6   │
+   ║ SCHED_FIFO, isolated core             ║◄──── seqlock ───────►│      current×6   │
+   ║  pwm = K·Δx + D·Δv + ff   (6 motors)  ║                      │                  │
+   ║  owns both serial buses               ║                      │ out: pos ×6 ┐    │
+   ╚═══════════════════════════════════════╝                      │      K   ×6 ├ ×N │
+     │ PWM   ▲ pos, current    │ state  ▲ ff                      │      D   ×6 ┘    │
+     ▼       │                 ▼        │                         └──────────────────┘
+   ┌───────────┐          ╔═════════════════════════╗
+   │ SO-101    │          ║ cerebellum · 200 Hz     ║
+   │ follower  │          ║ Vulkan on the Intel iGPU║
+   │ 6×STS3215 │          ║ 16384 granule → 6 PC    ║
+   └───────────┘          ║ three-factor Hebbian    ║
+                          ╚═════════════════════════╝
 ```
 
 ### 1. Impedance control on a PREEMPT_RT isolated core
@@ -123,6 +129,57 @@ each step now carries a per-joint stiffness and damping alongside the position. 
 its own compliance over the horizon; K/D are clamped in Python and again in Rust before reaching a
 servo.
 
+### 4. A cerebellum, learned online on the integrated GPU
+
+[`rust/so101_impedance_ctrl/src/cerebellum/`](rust/so101_impedance_ctrl/src/cerebellum/) predicts
+the load the reflex would otherwise carry as a standing error:
+
+```
+pwm = K·(x_t − x) + D·(v_t − v) + ff(sensory state)
+```
+
+The structure is Marr-Albus-Ito, mapped onto the hardware directly:
+
+| cerebellum | here |
+| --- | --- |
+| mossy fibres | 30 signals -- per joint: encoder phase as `sin`/`cos`, velocity, tracking error, current |
+| granule cells | 16384 units, each reading 4 mossy fibres through a **fixed random**, never-learned projection |
+| Golgi inhibition | one global threshold, on a feedback loop against measured sparsity (~2% left active) |
+| parallel fibres | that sparse code, normalised, carrying a ~150 ms eligibility trace |
+| Purkinje cells | a linear readout, 6 outputs -- **the only learned layer** |
+| climbing fibres | the reflex's own standing duty |
+
+```
+ΔW = rate · (cf · e  −  leak · W · e)
+```
+
+Three factors -- parallel-fibre eligibility, climbing fibre, and nothing else. The `leak` term is
+what makes it a *modified* Hebbian rule rather than a runaway: a bare Hebbian product only grows
+once the error has a consistent sign, which is exactly what gravity produces.
+
+**No backpropagation, and none is needed.** Only one layer has adjustable synapses, and its error is
+already expressed in the units its output is in (PWM), so the credit-assignment problem backprop
+exists to solve never arises. What it costs instead is parameters rather than depth -- 16k granule
+cells to get the separation a trained hidden layer would get with a few hundred, which is precisely
+the trade an otherwise idle iGPU absorbs for nothing.
+
+The teaching signal is a quantity the daemon already computes every tick: whatever duty the spring
+is *still* having to hold is, by definition, what the prediction failed to cancel. So learning is
+online and unconditional -- no dataset, no training phase, no episode boundary. The arm learns while
+it is teleoperated, while ACT drives it, and while it sits still; point `--cerebellum-weights` at a
+file and what it learns accumulates across runs.
+
+It never runs inside the control loop; see [Measured, not assumed](#measured-not-assumed) for the
+two numbers that make that non-negotiable. The handoff is a seqlock in both directions, so a slow or
+dead cerebellum cannot stall the reflex, and nothing is lost by the delay -- the load being
+predicted is quasi-static.
+
+**Off by default**, and safe to switch on mid-hold: the weights start at zero, so an untrained
+network contributes exactly nothing. Its output is clamped, slew-limited in both directions, and
+zeroed by every fail-safe the reflex has. The gripper is excluded from it entirely -- a gripper that
+learns its own grasp keeps squeezing after the object is gone. Full safety envelope and tuning:
+[`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md#cerebellum-an-adaptive-feedforward-on-the-igpu).
+
 ## Quick start
 
 ```bash
@@ -141,38 +198,69 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 Then teleoperate or record with `--robot.type=so101_follower_impedance`; both fill in per-joint K/D
 from the robot's config automatically.
 
+The cerebellum is opt-in. Add to step 2 (needs `glslc` to build, a Vulkan ICD to run, and a
+housekeeping core that is **not** `--cpu-core`):
+
+```bash
+  --cerebellum-backend gpu --cerebellum-cpu-core 1 \
+  --cerebellum-weights ~/.local/share/so101/cerebellum.bin
+```
+
 - Setting up the isolated core: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
-- Tuning gains, force-feedback bring-up, protocol notes: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)
+- Tuning gains, cerebellum bring-up, protocol notes: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)
 - General LeRobot usage (recording, training, eval): [`AGENT_GUIDE.md`](AGENT_GUIDE.md)
 
 ## Measured, not assumed
 
-Several constants here were settled on real hardware after their documented or intuitive values
-turned out to be wrong. They are specific to this arm and worth re-measuring on another:
+Several numbers here were settled on real hardware after their documented or intuitive values turned
+out to be wrong. They are specific to this machine and worth re-measuring on another:
 
-| constant | value | how it was settled |
+| what | value | how it was settled |
 | --- | --- | --- |
 | PWM sign bit | **10** | bit 11 (per upstream's docstring) does not reverse the joint -- it is consumed as extra magnitude |
 | `--invert-pwm` | **true** | with the right sign bit, positive duty still lowers the encoder |
 | per-joint K | 10/20/15/10/8/5 | holding at K=1 makes the reported PWM read out as each joint's gravity+friction duty |
 | per-joint D | ≈ K/40 | bounded from above by the velocity quantisation noise floor, not by stability |
+| iGPU compute queues | **1** | one queue family, one queue, shared with graphics -- a compute submission cannot be scheduled around the compositor, and no CPU isolation changes that |
+| cerebellum step | 307 µs mean idle, **2969 µs max under load** | one step can outlast an entire 2.5 ms control period; the max barely moves with layer size, so it is submission jitter rather than compute |
 
-The tooling for re-deriving them ships too: `--probe-direction` measures drive direction with a
-bounded, auto-aborting nudge, and the checker's live table separates "too soft" from "driven the
-wrong way", which look identical from across the room.
+Those last two are why the cerebellum has its own thread rather than a slot in the tick. That it
+stays out of the way was then checked rather than assumed -- 3 × 20 s each way, alternating,
+10800 control ticks per condition. (Against a stub serial port, so the absolute tick cost is
+timeout-dominated and means nothing on its own; the *comparison* is what is being made.)
+
+| control loop | mean tick | overruns | worst tick |
+| --- | --- | --- | --- |
+| cerebellum off | 3219 µs | 10 / 10800 | 7344 µs |
+| cerebellum on the iGPU | 3228 µs | 9 / 10800 | 10971 µs |
+
+Mean cost and overrun rate are indistinguishable. The worst-case tick swings by milliseconds in
+*both* columns -- one repetition had the quiet run produce the worse outlier -- so that tail belongs
+to the laptop, not to the cerebellum.
+
+The tooling for re-deriving all of it ships too: `--probe-direction` measures drive direction with a
+bounded, auto-aborting nudge; the checker's live table separates "too soft" from "driven the wrong
+way", which look identical from across the room; and `cargo test --test cerebellum_gpu_tests --
+--nocapture` reprints the latency table on whatever host you are on.
 
 ## Known limitations
 
-- **Recorded K/D are constant.** A torque-off leader is a position sensor and nothing else, so
-  demonstrations are labelled with the config's default gains. ACT trained on such data learns to
-  reproduce those gains, not to vary them. The leader gripper's force feedback is the first step
-  toward fixing this; deriving stiffness from cross-demonstration variance is the likely next one.
-- **No gravity feedforward**, so a loaded joint droops by `holding_duty / K` and the only way to
-  reduce the droop is to raise K, i.e. to give up compliance. Adding `g(q)` decouples the two, and
-  is the first genuinely cerebellar piece: a fixed basis over the joint angles with an error-driven
-  linear readout, where the standing PWM is already the error signal.
-- **Open-loop PWM** is noisier than true torque control -- the STS3215 has no host-streamable
-  torque register, so this is a constraint of the hardware rather than a choice.
+- **The cerebellum is unproven on hardware.** Its math is checked against a CPU reference and its
+  shaders are cross-checked against that reference step-by-step through learning, but no droop
+  measurement on a real arm has been taken yet. The claim it has to make good on is narrow and
+  falsifiable: with the feedforward on, `err` in the checker's table should shrink **at unchanged
+  K**. If it only improves when K goes up, the feedforward is doing nothing.
+- **What it can learn is bounded by its mossy fibres.** They carry pose, velocity, tracking error
+  and current, so it can learn gravity, joint friction and a fixed payload -- but nothing tells it
+  which of two payloads is in the gripper, so it cannot tell them apart. Camera features are the
+  obvious missing bundle.
+- **Demonstrations do not label the layers below the policy.** A torque-off leader is a position
+  sensor and nothing else, so episodes are labelled with the config's default K/D and ACT trained on
+  them learns to reproduce those gains, not to vary them. The cerebellum's weights likewise persist
+  to a file and not into any dataset. The leader gripper's force feedback is the first step toward
+  fixing the first half; deriving stiffness from cross-demonstration variance is the likely next.
+- **Open-loop PWM** is noisier than true torque control -- the STS3215 has no host-streamable torque
+  register, so this is a constraint of the hardware rather than a choice.
 - **The daemon is not part of the Python build.** It is a separate Cargo project, deployed by hand.
 - **Interactive calibration** for the impedance robot is not implemented; copy a calibration
   produced with the stock `so101_follower` against the same servos.

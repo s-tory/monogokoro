@@ -119,7 +119,40 @@ sudo setcap cap_sys_nice+ep ./target/release/so101_impedance_ctrl
 plus a realtime `ulimit -r` / `/etc/security/limits.d/*.conf rtprio` entry for the invoking user.
 Also disable CPU frequency scaling / turbo boost on the isolated core for consistent loop timing.
 
-## 5. Out-of-tree kernel modules
+## 5. The cerebellum's GPU thread: do not give it a second isolated core
+
+The obvious next move once one core is isolated is to isolate a second for the cerebellum's Vulkan
+thread. Don't. It buys nothing here, and it costs a P-core.
+
+- **There is no compute queue to escape to.** `vulkaninfo` on the reference machine reports the
+  iGPU with **one queue family, `queueCount = 1`**, carrying `GRAPHICS | COMPUTE | TRANSFER`.
+  Compute submissions share a queue with the desktop compositor. No CPU-side scheduling decision
+  changes what that queue is doing.
+- **The GPU's service path is on housekeeping cores by construction.** Driver workqueues, the DRM
+  scheduler and GPU completion interrupts all run wherever the kernel puts them -- and §1's whole
+  purpose is to steer interrupts *away* from the isolated core. So a `SCHED_FIFO` thread pinned to
+  an isolated core would submit deterministically and then wait on a fence completed by threads
+  that are not isolated at all.
+- **The thread has no deadline.** The load it predicts is quasi-static, so a feedforward a few
+  milliseconds late is a feedforward that is still correct.
+
+What actually has to be true is that the cerebellum can never preempt or block the control loop,
+and `isolcpus` on the control loop's core already guarantees that. So:
+
+```bash
+--cerebellum-cpu-core 1     # a housekeeping P-core; the daemon refuses --cpu-core's core
+--cerebellum-priority 0     # normal scheduling (the default)
+```
+
+If you do raise `--cerebellum-priority`, it must stay below `--priority`; the daemon refuses
+otherwise, so that a mistake in core assignment cannot let the cerebellum outrank the reflex.
+
+Verify the split is real the same way §2 verifies IRQ isolation -- by looking at the loop timing
+summary before and after enabling the cerebellum. If `--cerebellum-backend gpu` changes the control
+loop's `max` or its overrun count at all, the two are not actually decoupled and the core
+assignment is wrong.
+
+## 6. Out-of-tree kernel modules
 
 On PREEMPT_RT most spinlocks become sleeping locks, so a module written for a non-RT kernel can
 hold an atomic context across one. It then floods the log with `BUG: scheduling while atomic` and

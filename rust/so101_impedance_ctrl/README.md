@@ -27,6 +27,10 @@ torque control, but usable without different servo hardware.
 cargo build --release
 ```
 
+Building needs `glslc` on `PATH` (`sudo apt install glslc`) to compile the cerebellum's compute
+shaders. Running needs only a Vulkan ICD (`mesa-vulkan-drivers`), and only if you actually enable
+`--cerebellum-backend gpu`.
+
 > **Every build wipes the `setcap` capability**, because `cargo` writes a fresh binary and file
 > capabilities live on the inode. Re-run the `setcap` line from [Run](#run) after _every_ build --
 > otherwise the daemon starts fine but silently falls back to non-RT scheduling.
@@ -215,6 +219,201 @@ duty. Raising `--loop-hz` makes this *worse*, which is why `--vel-filter-window`
 N per-tick differences telescopes exactly to the N-tick difference, dividing the noise by N for
 N/2 ticks of lag, with no attenuation of a real velocity.
 
+## Cerebellum: an adaptive feedforward on the iGPU
+
+The impedance law is a spinal reflex -- it only ever reacts to an error that has already happened.
+Under a standing load that is a permanent offset: a joint carrying `g` PWM of gravity settles
+exactly `g / K` counts below its target, and the only way a pure feedback law can shrink that droop
+is to raise `K`, i.e. to trade away the compliance this daemon exists to provide. Predicting the
+load decouples the two:
+
+```
+pwm = K*(x_t - x) + D*(v_t - v)  +  ff(sensory state)
+      \___________ ____________/    \_______ _______/
+      reflex, 400 Hz, isolated core   cerebellum, Vulkan compute
+```
+
+Off by default (`--cerebellum-backend off`). Turning it on is safe with the arm already holding a
+position: the learned weights start at zero, so an untrained network contributes precisely nothing.
+
+### Architecture
+
+Marr-Albus-Ito, mapped onto the hardware more or less directly:
+
+| cerebellum | here |
+| --- | --- |
+| mossy fibres | 30 signals: per joint, encoder phase as `(sin, cos)`, velocity, tracking error, current |
+| granule cells | 16384 units, each reading 4 mossy fibres through a **fixed random** projection |
+| Golgi inhibition | one global subtractive threshold, driven by feedback on the measured active fraction |
+| parallel fibres | the granule code, L2-normalised, with a ~150 ms eligibility trace |
+| Purkinje cells | 6 outputs, a linear readout -- **the only learned layer** |
+| climbing fibres | the reflex's own standing duty, low-passed and gated |
+| PF->PC plasticity | `dW = rate * (cf * e - leak * W * e)` -- three-factor Hebbian with heterosynaptic decay |
+
+**There is no backpropagation, and none is needed.** The expansion layer is not learned, so there
+is exactly one layer of adjustable synapses, and its error is already expressed in the units the
+output is in (PWM). The credit-assignment problem backprop exists to solve does not arise. What it
+costs instead is parameters: 16k granule cells to get the separation a trained hidden layer would
+get with a few hundred -- which is precisely the trade an idle iGPU is there to absorb.
+
+Position enters as a phase pair rather than a count for the same reason `wrapped_delta` exists:
+`Present_Position` rolls over mid-travel, and `wrist_roll` is calibrated over the full turn, so a
+raw count would make the network see a full-scale jump where the joint moved one tick -- and learn
+a feedforward with a cliff in it.
+
+The granule code is normalised to unit length so that `--cerebellum-rate` means one thing
+regardless of layer size: *the fraction of the remaining error corrected per step*, i.e. a time
+constant of `1 / rate` steps. Without it the effective step size scales with `sum_j g_j^2`, and
+changing `--cerebellum-gc-dim` would silently retune how fast the arm learns.
+
+### Why it does not run in the control loop
+
+Measured on the reference machine (Arc 140V / Mesa ANV 26.0.3), one full step -- submit plus fence
+wait, four dispatches:
+
+| `gc_dim` | mean | max |
+| -------- | ---- | --- |
+| 1 024    | 174 us | 1036 us |
+| 4 096    | 190 us | 1078 us |
+| 16 384   | 307 us | 933 us |
+| 65 536   | 748 us | 1705 us |
+
+Two things fall out of that. Below ~4k cells the cost is *entirely* submission latency and the
+compute is free, so a large granule layer is nearly as cheap as a small one. And the **max** is
+about a millisecond whatever the size -- on an otherwise idle desktop. A 400 Hz tick is 2.5 ms and
+already spends ~0.8 ms on the bus.
+
+That max is a floor, not a bound. The same 16384-cell configuration measured from inside the
+running daemon (the per-second `cerebellum [...]` log line, with the control loop and the rest of
+the machine competing for the GPU) reports mean 450-650 us and **max 2969 us** -- a single step
+longer than the entire control period.
+
+That the control loop does not pay for any of it was checked rather than assumed, by alternating
+the two configurations 3 x 20 s each against a dead bus at 200 Hz, 10800 ticks per condition:
+
+| control loop | mean tick | overruns | worst tick |
+| --- | --- | --- | --- |
+| `--cerebellum-backend off` | 3219 us | 10 / 10800 | 7344 us |
+| `--cerebellum-backend gpu --cerebellum-cpu-core 1` | 3228 us | 9 / 10800 | 10971 us |
+
+Mean cost and overrun rate are indistinguishable -- 0.3% and one fewer overrun, i.e. nothing. The
+worst-case tick swings by milliseconds in *both* columns, and one repetition had the cerebellum-off
+run produce the worse outlier, so that tail belongs to the laptop rather than to the GPU thread.
+Reproduce it by watching the daemon's own `loop timing` line with and without the flag; if enabling
+the cerebellum moves the mean or the overrun count, the core assignment is wrong.
+
+That jitter is not something core isolation can remove:
+
+- The iGPU exposes **one queue family with one queue**, shared with graphics. Compute submissions
+  queue behind whatever the compositor is doing; there is no async compute queue to escape to.
+- The GPU's kernel-side service path -- driver workqueues, the DRM scheduler, completion interrupts
+  -- runs on housekeeping cores *by construction*, because steering interrupts away from the RT
+  core is exactly what `irqaffinity=` does.
+
+So the cerebellum runs on its own thread, exchanging data with the control loop through two
+seqlocks (the same non-blocking pattern `shm.rs` uses across the process boundary, and for the same
+reason -- a mutex shared between a `SCHED_FIFO` loop and a normal-priority thread is a textbook
+priority inversion). The control loop publishes a snapshot and reads whatever feedforward is
+currently available. It never waits, and nothing is lost by that: the load being predicted is
+quasi-static, so a feedforward a few milliseconds old is still correct. Biology puts the cerebellum
+outside the stretch reflex's arc too.
+
+`--cerebellum-cpu-core` pins the thread; a **housekeeping** core, and the daemon refuses the RT
+core outright. A second *isolated* core is not worth taking, for the two reasons above -- there is
+nothing about a fence wait that isolation can make deterministic, and the isolation that actually
+matters (this thread can never preempt the reflex) already follows from the reflex's core being
+isolated from everything else.
+
+### Safety envelope
+
+A learned term that can push a compliant arm around is the one genuinely new hazard here, so it is
+bounded four ways, none of which depend on the network having learned anything sensible:
+
+1. **Zero at rest.** Weights start at zero; enabling it cannot change the arm's behaviour until it
+   has learned.
+2. **Clamped** to `--cerebellum-ff-max` (300), far below `--pwm-max` (1000).
+3. **Slew-limited** to `--cerebellum-ff-slew` (500/s), in both directions -- including on the way
+   back to zero, since dropping a held feedforward instantly is a step input into a compliant
+   joint.
+4. **Fail-safe.** Zeroed on watchdog timeout, on blind ticks, if the thread stops publishing, and
+   if the backend faults. A learned term must not be the one part of the controller that survives
+   its own fail-safe.
+
+Two gates decide when it may learn at all:
+
+- `--cerebellum-vel-gate` (80 counts/s): a moving joint's duty is inertia and damping, neither of
+  which is a function of pose.
+- `--cerebellum-error-gate` (200 counts): **this is what separates droop from contact.** Gravity
+  droop settles small, at `duty / K`; an arm resting on the table holds a large standing error that
+  never closes. Both look identical to the velocity gate.
+
+And the gripper is **not** in `--cerebellum-joints` by default, deliberately. A gripper holding an
+object shows exactly the signature this layer cancels -- a large, motionless, standing duty -- but
+that duty *is the grasp*. Learning it makes the gripper squeeze harder at the same commanded
+position, and keep squeezing after the object is gone. On the arm joints contact is the exception
+and the error gate handles it; on the gripper contact is the normal case, so no gate can, and it is
+left out entirely.
+
+### Running it
+
+```bash
+./target/release/so101_impedance_ctrl \
+  --port /dev/ttyACM0 --shm-name so101_impedance --cpu-core 3 --priority 99 \
+  --cerebellum-backend gpu \
+  --cerebellum-cpu-core 1 \
+  --cerebellum-weights ~/.local/share/so101/cerebellum.bin
+```
+
+`--cerebellum-weights` is loaded at startup and written on a clean exit (Ctrl-C, `SIGTERM`, or
+Python's Shutdown command), so learning accumulates across sessions. The file is refused if
+`--cerebellum-gc-dim` or `--cerebellum-seed` changed: the weights are only meaningful against the
+random projection that produced them, and reusing them under a different one would not be degraded,
+it would be arbitrary -- on a real arm.
+
+The daemon logs a summary alongside the loop timing:
+
+```
+cerebellum [gpu: Intel(R) Graphics (LNL)]: 200 steps (188 with plasticity), 307 us mean /
+  933 us max per step, 0 errors; granule activity 2.01% (theta 0.412); ff [12, 96, 61, 8, 3, 0]
+```
+
+Watch `granule activity` track `--cerebellum-sparsity`: if it is pinned at 0% or 100% the Golgi
+integrator has saturated and nothing downstream can learn.
+
+### Bring-up
+
+The checker's table gained an `ff` column, and watching it against `pwm` *is* the procedure:
+
+```bash
+python examples/check_so101_impedance.py --shm-name so101_impedance
+```
+
+Hold a pose. As the feedforward learns a joint's standing load, `ff` should climb toward the duty
+`pwm` was carrying alone, `pwm` should fall toward zero, and `err` -- the droop -- should shrink
+**without anyone raising K**. That last part is the whole point; if `err` only improves when you
+raise K, the feedforward is not doing anything.
+
+`describe_cerebellum()` reports why the feedforward is what it is, which is otherwise unanswerable
+from the outside: a zero `ff` could mean not enabled, nothing learned yet, gated off this tick, or
+the backend died, and those call for very different responses.
+
+### Backends and build requirements
+
+`--cerebellum-backend cpu` runs the reference implementation in `src/cerebellum/net.rs` instead.
+That module is the *definition* of the math; the shaders are a second implementation of it, and
+`tests/cerebellum_gpu_tests.rs` runs both step-by-step through learning and compares. A compute
+shader is not debuggable by reading it and its failure mode is wrong numbers rather than a crash,
+so the readable version is the authority and the fast one is held against it.
+
+Asking for `gpu` and not getting it **disables** the cerebellum rather than silently falling back
+to `cpu` -- "the feedforward is running" and "the feedforward is running somewhere else at a
+different speed" are things an operator has to be able to tell apart.
+
+Building needs `glslc` on `PATH` (`sudo apt install glslc`); running needs only a Vulkan ICD
+(`mesa-vulkan-drivers`). The `.spv` blobs are compiled by `build.rs` rather than committed, so a
+shader edit cannot ship without its binary being rebuilt.
+
+
 ## Protocol notes
 
 Feetech register addresses in `src/feetech.rs` mirror
@@ -232,10 +431,22 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-All tests are pure unit/integration tests over packet framing, the shared-memory seqlock and
-control-law math -- none need a serial port, shared-memory segment or RT privileges. `rt.rs`'s
-actual `sched_setaffinity`/`SCHED_FIFO` calls only run in `main.rs`, since their success depends on
-host privileges.
+Almost all of it is pure unit/integration tests over packet framing, the shared-memory seqlock,
+the control law and the cerebellum's math -- none need a serial port, shared-memory segment or RT
+privileges. `rt.rs`'s actual `sched_setaffinity`/`SCHED_FIFO` calls only run in `main.rs`, since
+their success depends on host privileges.
+
+The exception is `tests/cerebellum_gpu_tests.rs`, which needs a Vulkan device and **skips** rather
+than fails without one, so the suite still runs headless. On the robot host it has to actually run:
+a skipped cross-check is not a passing one, and it is the only thing standing between a mistake in
+a compute shader and a confidently wrong feedforward on a real arm. Check for the skip line:
+
+```bash
+cargo test --release --test cerebellum_gpu_tests -- --nocapture
+```
+
+That also prints the measured per-step latency table reproduced above, so the numbers in this file
+can be re-derived on any host rather than taken on faith.
 
 ## Drive direction
 
