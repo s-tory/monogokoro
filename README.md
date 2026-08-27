@@ -214,8 +214,9 @@ housekeeping core that is **not** `--cpu-core`):
 
 ## Measured, not assumed
 
-Several numbers here were settled on real hardware after their documented or intuitive values turned
-out to be wrong. They are specific to this machine and worth re-measuring on another:
+Development is on a ThinkPad X1 Carbon Gen 13 -- Core Ultra 7 258V (Lunar Lake), Arc 140V iGPU.
+Several numbers here were settled on that hardware after their documented or intuitive values turned
+out to be wrong. They are specific to it and worth re-measuring on another machine:
 
 | what | value | how it was settled |
 | --- | --- | --- |
