@@ -39,7 +39,7 @@ SHM_DIR = "/dev/shm"
 # the same compliant K/D law as the arm is what makes gentle grasping possible.
 NUM_MOTORS = 6
 
-LAYOUT_VERSION = 3
+LAYOUT_VERSION = 4
 SHM_MAGIC = 0x534F3130  # ASCII "SO10", matches shm::SHM_MAGIC in shm.rs
 
 FAULT_WATCHDOG_TIMEOUT = 1 << 0
@@ -48,6 +48,15 @@ FAULT_OVERCURRENT = 1 << 2
 # The *leader* arm's bus failed, so force feedback is dropped. Deliberately distinct from
 # FAULT_COMMS_ERROR: this one does not mean the robot stopped tracking.
 FAULT_LEADER_COMMS_ERROR = 1 << 3
+
+# `cerebellum_flags` bits, mirroring `cerebellum::mod`'s CEREBELLUM_* constants. They describe why
+# the feedforward is what it is, which is otherwise unanswerable from the outside: a zero
+# feedforward could mean "not learned yet", "gated off", "gone stale" or "the GPU died", and those
+# call for very different responses.
+CEREBELLUM_ACTIVE = 1 << 0  # a feedforward is being applied this tick
+CEREBELLUM_LEARNING = 1 << 1  # at least one joint's climbing fibre passed the gates
+CEREBELLUM_STALE = 1 << 2  # the cerebellum thread has stopped publishing; output discarded
+CEREBELLUM_FAULTED = 1 << 3  # its backend failed unrecoverably; no feedforward for this run
 
 
 class CommandKind:
@@ -85,6 +94,11 @@ class OutputData(ctypes.Structure):
         ("present_vel", ctypes.c_float * NUM_MOTORS),
         ("present_current_avg", ctypes.c_float * NUM_MOTORS),
         ("pwm_cmd_debug", ctypes.c_float * NUM_MOTORS),
+        # The cerebellum's share of pwm_cmd_debug, already clamped, slew-limited and gated; zero
+        # when no cerebellum is running. Separate from the total because the bring-up question is
+        # how much of the holding duty the feedforward has taken over, and a sum cannot answer it.
+        ("ff_pwm_debug", ctypes.c_float * NUM_MOTORS),
+        ("cerebellum_flags", ctypes.c_uint32),
         ("fault_flags", ctypes.c_uint32),
         # Leader-side gripper, populated only when the daemon runs with `--leader-port`; zero
         # otherwise. Distinct from the follower arrays above -- this is the *operator's* trigger.
@@ -265,6 +279,8 @@ class ImpedanceShmClient:
                 "present_vel": list(region.data.present_vel),
                 "present_current_avg": list(region.data.present_current_avg),
                 "pwm_cmd": list(region.data.pwm_cmd_debug),
+                "ff_pwm": list(region.data.ff_pwm_debug),
+                "cerebellum_flags": region.data.cerebellum_flags,
                 "fault_flags": region.data.fault_flags,
                 "leader_gripper_pos": region.data.leader_gripper_pos,
                 "leader_gripper_vel": region.data.leader_gripper_vel,

@@ -95,3 +95,21 @@ fn seqlock_reader_never_observes_a_torn_write() {
     writer.join().unwrap();
     reader.join().unwrap();
 }
+
+#[test]
+fn shm_layout_size_matches_the_python_mirror() {
+    // `shm_client.py`'s `ctypes.Structure` mirror is maintained by hand, and `LAYOUT_VERSION` only
+    // catches the case where someone remembers to bump it. This catches the case where they do not
+    // -- or where the two sides gain the same fields in a different order, which produces matching
+    // versions and mismatched bytes.
+    //
+    // Recompute after any layout change with:
+    //   python -c "import ctypes; from lerobot.robots.so101_impedance_follower.shm_client import \
+    //              ShmLayout; print(ctypes.sizeof(ShmLayout))"
+    assert_eq!(
+        std::mem::size_of::<ShmLayout>(),
+        320,
+        "ShmLayout changed size -- update shm_client.py's mirror and this number together, and \
+         bump LAYOUT_VERSION"
+    );
+}

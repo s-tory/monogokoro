@@ -227,6 +227,7 @@ def main() -> None:
                         leader=checker.read_leader(),
                     )
                 )
+                print(checker.describe_cerebellum())
                 if hold_targets is not None:
                     print(
                         "\nerr = target - pos (ticks, 11.4/deg)."
@@ -238,6 +239,10 @@ def main() -> None:
                         "\n                            the opposite --invert-pwm (K cannot fix it)."
                         "\n  err ~0 but buzzing     -> D too high for the velocity noise floor;"
                         "\n                            lower --d or raise --vel-filter-window."
+                        "\n  ff climbing, pwm falling, err shrinking at unchanged K"
+                        "\n                         -> the cerebellum is taking the load over."
+                        "\n                            That is the whole claim; if err only"
+                        "\n                            improves when you raise K, it is not."
                     )
 
                 elapsed = time.perf_counter() - tick_start

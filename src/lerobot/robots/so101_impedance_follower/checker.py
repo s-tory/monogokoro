@@ -50,6 +50,10 @@ import time
 from lerobot.motors.feetech import OperatingMode
 
 from .shm_client import (
+    CEREBELLUM_ACTIVE,
+    CEREBELLUM_FAULTED,
+    CEREBELLUM_LEARNING,
+    CEREBELLUM_STALE,
     FAULT_COMMS_ERROR,
     FAULT_LEADER_COMMS_ERROR,
     FAULT_OVERCURRENT,
@@ -144,7 +148,8 @@ class SO101ImpedanceChecker:
 
     def read_state(self) -> dict[str, dict[str, float]]:
         """Returns raw-tick telemetry per motor: `present_pos`, `present_vel`,
-        `present_current_avg`, and the `pwm_cmd` the daemon last applied."""
+        `present_current_avg`, the `pwm_cmd` the daemon last applied, and the `ff_pwm` share of it
+        that came from the cerebellum (zero when the daemon runs without one)."""
         telemetry = self.client.read_output()
         return {
             motor: {
@@ -152,6 +157,7 @@ class SO101ImpedanceChecker:
                 "present_vel": telemetry["present_vel"][i],
                 "present_current_avg": telemetry["present_current_avg"][i],
                 "pwm_cmd": telemetry["pwm_cmd"][i],
+                "ff_pwm": telemetry["ff_pwm"][i],
             }
             for i, motor in enumerate(MOTOR_NAMES)
         }
@@ -188,6 +194,29 @@ class SO101ImpedanceChecker:
         if flags & FAULT_LEADER_COMMS_ERROR:
             faults.append("leader_comms_error (force feedback dropped; the follower is unaffected)")
         return faults
+
+    def describe_cerebellum(self) -> str:
+        """One line on what the adaptive feedforward is doing, or why it is doing nothing.
+
+        Worth reporting explicitly, because a zero feedforward has four completely different
+        causes -- not enabled, nothing learned yet, gated off this tick, or the backend died -- and
+        only the flags separate them.
+        """
+        flags = self.client.read_output()["cerebellum_flags"]
+        if flags & CEREBELLUM_FAULTED:
+            return "cerebellum: FAULTED (backend failed; running on the reflex alone)"
+        if flags & CEREBELLUM_STALE:
+            return "cerebellum: STALE (thread stopped publishing; feedforward discarded)"
+        if not flags:
+            return "cerebellum: not running (--cerebellum-backend off, or it failed to start)"
+        parts = []
+        if flags & CEREBELLUM_ACTIVE:
+            parts.append("applying a feedforward")
+        if flags & CEREBELLUM_LEARNING:
+            parts.append("learning")
+        else:
+            parts.append("gated (moving, or too far from target to tell droop from contact)")
+        return "cerebellum: " + ", ".join(parts)
 
     def move_to(
         self,
@@ -363,11 +392,16 @@ def format_state_table(
     is the force being rendered into their hand, which is the one number that distinguishes a
     trigger that feels slack because nothing is blocking the follower from one that feels slack
     because the daemon is not driving it.
+
+    The `ff` column is the cerebellum's share of `pwm`, and watching those two is the whole
+    bring-up procedure for it: as the feedforward learns a joint's standing load, `ff` should climb
+    toward the duty `pwm` used to hold on its own, `pwm` should fall toward zero, and `err` -- the
+    droop -- should shrink without anyone raising K.
     """
     show_target = targets is not None
     header = f"{'motor':<14}{'pos':>9}{'vel':>9}{'cur_avg':>9}"
     if show_target:
-        header += f"{'target':>9}{'err':>9}{'pwm':>9}{'%max':>7}"
+        header += f"{'target':>9}{'err':>9}{'pwm':>9}{'ff':>9}{'%max':>7}"
     lines = [header, "-" * len(header)]
     for motor in MOTOR_NAMES:
         s = state[motor]
@@ -376,15 +410,16 @@ def format_state_table(
             target = targets.get(motor, float("nan"))
             err = target - s["present_pos"]
             pwm = s.get("pwm_cmd", float("nan"))
+            ff = s.get("ff_pwm", 0.0)
             pct = abs(pwm) / pwm_max * 100 if pwm_max else float("nan")
-            row += f"{target:>9.1f}{err:>9.1f}{pwm:>9.1f}{pct:>6.0f}%"
+            row += f"{target:>9.1f}{err:>9.1f}{pwm:>9.1f}{ff:>9.1f}{pct:>6.0f}%"
         lines.append(row)
     if leader is not None:
         lines.append("-" * len(header))
         row = f"{'LEADER grip':<14}{leader['pos']:>9.1f}{leader['vel']:>9.1f}{'':>9}"
         if show_target:
             pwm = leader["pwm"]
-            row += f"{'':>9}{'':>9}{pwm:>9.1f}{abs(pwm) / pwm_max * 100:>6.0f}%"
+            row += f"{'':>9}{'':>9}{pwm:>9.1f}{'':>9}{abs(pwm) / pwm_max * 100:>6.0f}%"
         lines.append(row)
     if faults:
         lines.append("FAULTS: " + "; ".join(faults))

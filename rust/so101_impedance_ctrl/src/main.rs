@@ -5,12 +5,14 @@
 //! protocol in `shm.rs`. See `README.md` for build/run instructions and PREEMPT_RT environment
 //! prerequisites, and the top-level plan doc for the overall architecture.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use clap::Parser;
 use shared_memory::ShmemConf;
 
 use nix::unistd::{Gid, Uid};
+use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConfig, SensoryState};
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_startup_config, finite_difference_velocity, impedance_pwm,
     input_is_fresh, log_homing_offsets, poll_and_apply_commands, wrapped_delta, MovingAverage,
@@ -213,6 +215,163 @@ struct Cli {
     /// that path costs eight transactions per tick instead of three).
     #[arg(long, default_value_t = true)]
     sync_read: bool,
+
+    // ---- cerebellum -------------------------------------------------------------------------
+    /// Where the adaptive feedforward runs: `gpu` (Vulkan compute on the iGPU), `cpu` (the
+    /// reference implementation, for a host with no working Vulkan driver), or `off`.
+    ///
+    /// Defaults to `off`, so this daemon behaves exactly as it did before the cerebellum existed
+    /// until someone asks for it. Turning it on is safe with the arm already holding a position:
+    /// the Purkinje weights start at zero, so an untrained network adds precisely nothing.
+    #[arg(long, value_enum, default_value_t = Backend::Off)]
+    cerebellum_backend: Backend,
+
+    /// Granule cells. The expansion layer is why a single learned linear readout suffices, so this
+    /// trades GPU time for how finely the feedforward can vary with pose.
+    ///
+    /// Measured on the reference machine (Arc 140V, Mesa ANV): a step costs ~174 us at 1024 and
+    /// ~190 us at 4096, i.e. below ~4k the cost is *entirely* submission latency and the compute
+    /// is free. 16384 costs ~307 us and 65536 ~748 us.
+    #[arg(long, default_value_t = 16384)]
+    cerebellum_gc_dim: usize,
+
+    /// Seed for the fixed granule connectivity. A saved weights file is bound to it -- the weights
+    /// mean nothing against a different random projection -- so changing this invalidates one.
+    #[arg(long, default_value_t = 0x5041_524B_494E_4A45)]
+    cerebellum_seed: u64,
+
+    /// How often the cerebellum thread steps. Deliberately unrelated to `--loop-hz`: the reflex
+    /// needs 400 Hz because it closes a mechanical loop, and this closes nothing faster than the
+    /// load changes.
+    #[arg(long, default_value_t = 200.0)]
+    cerebellum_hz: f64,
+
+    /// Hebbian step size. The granule code is normalised to unit length, so this is the fraction
+    /// of the remaining error corrected per step: a time constant of `1 / rate` steps, or
+    /// `1 / (rate * cerebellum_hz)` seconds, independent of how the layer is sized.
+    #[arg(long, default_value_t = 0.01)]
+    cerebellum_rate: f32,
+
+    /// Heterosynaptic decay -- the "modified" half of the Hebbian rule, and what stops a
+    /// permanently-signed error growing the weights without bound. Costs a small steady-state
+    /// residual in exchange (a fraction of a percent of the load at this default).
+    #[arg(long, default_value_t = 0.05)]
+    cerebellum_leak: f32,
+
+    /// Fraction of granule cells the Golgi inhibition aims to leave active.
+    #[arg(long, default_value_t = 0.02)]
+    cerebellum_sparsity: f32,
+
+    /// Integrator gain on the Golgi threshold.
+    #[arg(long, default_value_t = 0.05)]
+    cerebellum_golgi_gain: f32,
+
+    /// Eligibility-trace time constant. Covers the delay between a pose and the climbing-fibre
+    /// signal it eventually produces -- serial round trips, the velocity filter's group delay, and
+    /// the arm's own mechanical response all sit in between.
+    #[arg(long, default_value_t = 0.15)]
+    cerebellum_trace_tau_s: f32,
+
+    /// Low-pass on the climbing-fibre signal, so plasticity integrates load rather than the D
+    /// term's quantisation noise.
+    #[arg(long, default_value_t = 0.1)]
+    cerebellum_cf_tau_s: f32,
+
+    /// Per-joint cap on the feedforward duty. Independent of `--pwm-max` and far below it: this
+    /// one bounds how hard a *learned* term can push an arm nobody is commanding.
+    #[arg(long, default_value_t = 300.0)]
+    cerebellum_ff_max: f32,
+
+    /// Cap on how fast the applied feedforward may change, in duty per second. Applies in both
+    /// directions, including on the way back to zero -- dropping a held feedforward instantly is a
+    /// step input into a compliant joint.
+    #[arg(long, default_value_t = 500.0)]
+    cerebellum_ff_slew: f32,
+
+    /// Learn only below this joint speed, in counts/s. A moving joint's duty is inertia and
+    /// damping, neither of which is a function of pose, so fitting them would attribute them to
+    /// whatever pose the arm was passing through.
+    #[arg(long, default_value_t = 80.0)]
+    cerebellum_vel_gate: f32,
+
+    /// Learn only within this tracking error, in counts.
+    ///
+    /// This is what separates droop from contact. Gravity droop settles small, at `duty / K`; an
+    /// arm resting on the table holds a large standing error that never closes. Both look
+    /// identical to the velocity gate, and only this one refuses to learn the second.
+    #[arg(long, default_value_t = 200.0)]
+    cerebellum_error_gate: f32,
+
+    /// Joints that get a feedforward and a live climbing fibre.
+    ///
+    /// The gripper (5) is absent by default and should stay that way: a gripper holding an object
+    /// shows exactly the signature this module cancels -- a large, motionless, standing duty -- but
+    /// that duty *is* the grasp. Learning it makes the gripper squeeze harder at the same commanded
+    /// position, and keep squeezing after the object is gone.
+    #[arg(long, default_value_t = cerebellum::DEFAULT_JOINTS.to_string())]
+    cerebellum_joints: String,
+
+    /// Discard the feedforward if the cerebellum thread has not published within this long.
+    #[arg(long, default_value_t = 200)]
+    cerebellum_staleness_ms: u64,
+
+    /// CPU core for the cerebellum thread. Must NOT be `--cpu-core`.
+    ///
+    /// A housekeeping core is the right answer, and a second *isolated* core is not worth taking:
+    /// the GPU exposes a single queue shared with graphics, and its completion interrupts and
+    /// driver workqueues are steered onto housekeeping cores by the very `irqaffinity=` setting
+    /// that protects the RT core -- so there is nothing about a fence wait that core isolation can
+    /// make deterministic. The isolation that matters (this thread can never preempt the control
+    /// loop) already comes from the control loop's core being isolated from everything else.
+    #[arg(long)]
+    cerebellum_cpu_core: Option<usize>,
+
+    /// SCHED_FIFO priority for the cerebellum thread; 0 leaves it at normal scheduling.
+    ///
+    /// Normal scheduling is the default because this thread has no deadline. If you do raise it,
+    /// keep it below `--priority`, so that a mistake in core assignment cannot let the cerebellum
+    /// outrank the reflex.
+    #[arg(long, default_value_t = 0)]
+    cerebellum_priority: i32,
+
+    /// File to persist the learned Purkinje weights to, loaded at startup and written on a clean
+    /// shutdown (Ctrl-C, SIGTERM, or the Shutdown command). Omit to start from zero every run.
+    #[arg(long)]
+    cerebellum_weights: Option<std::path::PathBuf>,
+}
+
+/// Set by the signal handler; the control loop leaves at the top of the next tick.
+///
+/// A daemon that only exits through Python's Shutdown command would lose a session's learning to
+/// every Ctrl-C, and would leave the leader gripper energised on the way out. Both are reasons to
+/// have a clean exit path that does not depend on anything else still running.
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_shutdown_signal(_sig: libc::c_int) {
+    // Only an atomic store, which is async-signal-safe; everything else happens on the control
+    // loop's own thread.
+    if SHUTDOWN_REQUESTED.swap(true, Ordering::Relaxed) {
+        // A second signal means the first one did not get us out -- most likely the loop is stuck
+        // on a serial transaction. Leave immediately rather than appear hung.
+        // SAFETY: `_exit` is async-signal-safe by definition; it is the only correct way out here.
+        unsafe { libc::_exit(130) };
+    }
+}
+
+fn install_shutdown_handler() {
+    // SAFETY: installing a handler that does nothing but an atomic store. `signal()` on
+    // Linux/glibc gives BSD semantics -- the handler stays installed and syscalls restart -- which
+    // is what we want.
+    unsafe {
+        libc::signal(
+            libc::SIGINT,
+            on_shutdown_signal as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGTERM,
+            on_shutdown_signal as *const () as libc::sighandler_t,
+        );
+    }
 }
 
 /// Reads one register from every motor, either as one READ per motor (default, well-understood)
@@ -422,8 +581,64 @@ fn main() {
         args.force_feedback_damping,
         args.leader_pwm_max,
     );
+    log::info!(
+        "cerebellum config: backend={:?} gc_dim={} seed={:#x} hz={} rate={} leak={} sparsity={} \
+         trace_tau_s={} cf_tau_s={} ff_max={} ff_slew={} vel_gate={} error_gate={} joints={} \
+         staleness_ms={} cpu_core={:?} priority={} weights={:?}",
+        args.cerebellum_backend,
+        args.cerebellum_gc_dim,
+        args.cerebellum_seed,
+        args.cerebellum_hz,
+        args.cerebellum_rate,
+        args.cerebellum_leak,
+        args.cerebellum_sparsity,
+        args.cerebellum_trace_tau_s,
+        args.cerebellum_cf_tau_s,
+        args.cerebellum_ff_max,
+        args.cerebellum_ff_slew,
+        args.cerebellum_vel_gate,
+        args.cerebellum_error_gate,
+        args.cerebellum_joints,
+        args.cerebellum_staleness_ms,
+        args.cerebellum_cpu_core,
+        args.cerebellum_priority,
+        args.cerebellum_weights,
+    );
 
+    install_shutdown_handler();
     rt::apply_rt_settings("control loop", args.cpu_core, args.priority);
+
+    // The cerebellum is an enhancement, never a prerequisite: no Vulkan driver, a headless host or
+    // a GPU in a bad state must all still leave the arm running. So a failure here degrades to the
+    // pure reflex with a loud warning, exactly as the leader gripper does.
+    let mut cerebellum = match build_cerebellum_config(&args) {
+        Err(e) => {
+            log::error!("cerebellum configuration rejected: {e} -- running without one");
+            None
+        }
+        Ok(cfg) => match Cerebellum::start(cfg) {
+            Ok(c) => {
+                log::info!(
+                    "cerebellum running on {} ({} granule cells, {} Hz)",
+                    c.device_label,
+                    args.cerebellum_gc_dim,
+                    args.cerebellum_hz
+                );
+                Some(c)
+            }
+            Err(e) => {
+                if args.cerebellum_backend == Backend::Off {
+                    log::info!("cerebellum: {e}");
+                } else {
+                    log::error!(
+                        "cerebellum unavailable: {e} -- continuing on the reflex alone; expect a \
+                         loaded joint to droop by holding_duty / K"
+                    );
+                }
+                None
+            }
+        },
+    };
 
     let mut bus = FeetechBus::open(
         &args.port,
@@ -635,11 +850,31 @@ fn main() {
             );
         }
 
+        let safe = fresh && !blind;
+
+        // The cerebellum's contribution, already clamped, slew-limited, masked to the configured
+        // joints, and zeroed if this tick is unsafe or the thread has stopped publishing. Read
+        // rather than computed: the control loop never waits on the GPU (see cerebellum/mod.rs).
+        let (ff_pwm, cerebellum_flags) = match cerebellum.as_mut() {
+            Some(c) => c.feedforward(now_ns, dt_s, safe),
+            None => ([0f32; NUM_MOTORS], 0),
+        };
+
+        let mut pos_error = [0f32; NUM_MOTORS];
+        for i in 0..NUM_MOTORS {
+            pos_error[i] = wrapped_delta(target_pos[i], present_pos[i]);
+        }
+
+        // The feedback term is kept separate from the total because it is the climbing-fibre
+        // signal: what the reflex is still having to supply is exactly what the feedforward has
+        // not yet learned to supply. Handing the cerebellum the *total* instead would make its
+        // teaching signal never reach zero, and it would learn until it saturated.
+        let mut fb_pwm = [0f32; NUM_MOTORS];
         let mut pwm_cmd = [0f32; NUM_MOTORS];
         let mut sync_values: Vec<(u8, u32)> = Vec::with_capacity(NUM_MOTORS);
         for i in 0..NUM_MOTORS {
-            pwm_cmd[i] = if fresh && !blind {
-                let raw_pwm = impedance_pwm(
+            pwm_cmd[i] = if safe {
+                fb_pwm[i] = impedance_pwm(
                     k_gain[i],
                     d_gain[i],
                     target_pos[i],
@@ -648,7 +883,11 @@ fn main() {
                     present_vel[i],
                     args.pwm_max,
                 );
-                apply_soft_limits(raw_pwm, present_pos[i], args.pos_min, args.pos_max)
+                // Re-clamped after the sum: each term is bounded on its own, and the total has to
+                // be too. Soft limits are applied last so they still veto a feedforward that would
+                // drive a joint further past its limit.
+                let total = (fb_pwm[i] + ff_pwm[i]).clamp(-args.pwm_max, args.pwm_max);
+                apply_soft_limits(total, present_pos[i], args.pos_min, args.pos_max)
             } else {
                 0.0 // watchdog / blind: fail-safe zero output, independent of Python
             };
@@ -684,9 +923,23 @@ fn main() {
         // condition the follower's own output is gated on -- rendering force from an error the
         // follower is no longer acting on would push the operator's hand for no reason.
         if let Some(l) = leader.as_mut() {
-            let gripper_error =
-                wrapped_delta(target_pos[GRIPPER_INDEX], present_pos[GRIPPER_INDEX]);
-            l.tick(gripper_error, fresh && !blind, dt_s);
+            l.tick(pos_error[GRIPPER_INDEX], safe, dt_s);
+        }
+
+        // Hand the cerebellum this tick's sensory picture. A seqlock write: no lock, no blocking,
+        // and no way for a slow or dead cerebellum thread to hold up the control loop.
+        if let Some(c) = cerebellum.as_ref() {
+            c.publish(
+                SensoryState {
+                    present_pos,
+                    present_vel,
+                    pos_error,
+                    present_current,
+                    fb_pwm,
+                },
+                safe,
+                now_ns,
+            );
         }
 
         let mut fault_flags = 0u32;
@@ -706,14 +959,22 @@ fn main() {
             o.present_vel = present_vel;
             o.present_current_avg = present_current;
             o.pwm_cmd_debug = pwm_cmd;
+            o.ff_pwm_debug = ff_pwm;
+            o.cerebellum_flags = cerebellum_flags;
             o.fault_flags = fault_flags;
             o.leader_gripper_pos = leader.as_ref().map_or(0.0, |l| l.present_pos);
             o.leader_gripper_vel = leader.as_ref().map_or(0.0, |l| l.present_vel);
             o.leader_gripper_pwm = leader.as_ref().map_or(0.0, |l| l.pwm_cmd);
         });
 
-        if command_applied && layout.command.cmd_kind == shm::CommandKind::Shutdown as u32 {
-            log::info!("received Shutdown command, exiting control loop");
+        let shutdown_command =
+            command_applied && layout.command.cmd_kind == shm::CommandKind::Shutdown as u32;
+        if shutdown_command || SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
+            if shutdown_command {
+                log::info!("received Shutdown command, exiting control loop");
+            } else {
+                log::info!("received SIGINT/SIGTERM, exiting control loop");
+            }
             if let Some(l) = leader.as_mut() {
                 l.release();
             }
@@ -729,11 +990,67 @@ fn main() {
         );
         if let Some(summary) = timing.take_summary_if_due(loop_period) {
             log::info!("{summary}");
+            if let Some(c) = cerebellum.as_ref() {
+                log::info!("{}", c.summarise());
+            }
         }
         if elapsed < loop_period {
             std::thread::sleep(loop_period - elapsed);
         }
     }
+
+    // Joins the cerebellum thread, which persists its weights on the way out. Deliberately after
+    // the loop rather than in a `Drop`, so that a session's learning is only saved on an exit we
+    // actually reached -- and so the log line about it lands before the process goes.
+    if let Some(c) = cerebellum.take() {
+        c.stop();
+    }
+}
+
+/// Turns the parsed CLI into a [`CerebellumConfig`], failing on anything that would otherwise
+/// only show up as strange behaviour on a real arm.
+fn build_cerebellum_config(args: &Cli) -> Result<CerebellumConfig, String> {
+    let joints = cerebellum::parse_joints(&args.cerebellum_joints)
+        .map_err(|e| format!("--cerebellum-joints: {e}"))?;
+
+    // Sharing the RT core would put a thread that blocks on a GPU fence onto the one core the
+    // whole design exists to keep free of anything that blocks. Worth refusing rather than
+    // warning about: the symptom would be control-loop overruns that look like a bus problem.
+    if args.cerebellum_cpu_core == Some(args.cpu_core) && args.cerebellum_backend != Backend::Off {
+        return Err(format!(
+            "--cerebellum-cpu-core {} is the control loop's own core -- pick a housekeeping core",
+            args.cpu_core
+        ));
+    }
+    if args.cerebellum_priority != 0 && args.cerebellum_priority >= args.priority {
+        return Err(format!(
+            "--cerebellum-priority {} is not below --priority {} -- the reflex must always be able \
+             to preempt the cerebellum",
+            args.cerebellum_priority, args.priority
+        ));
+    }
+
+    Ok(CerebellumConfig {
+        backend: args.cerebellum_backend,
+        gc_dim: args.cerebellum_gc_dim,
+        seed: args.cerebellum_seed,
+        hz: args.cerebellum_hz,
+        rate: args.cerebellum_rate,
+        leak: args.cerebellum_leak,
+        sparsity: args.cerebellum_sparsity,
+        golgi_gain: args.cerebellum_golgi_gain,
+        trace_tau_s: args.cerebellum_trace_tau_s,
+        cf_tau_s: args.cerebellum_cf_tau_s,
+        ff_max: args.cerebellum_ff_max,
+        ff_slew: args.cerebellum_ff_slew,
+        vel_gate: args.cerebellum_vel_gate,
+        error_gate: args.cerebellum_error_gate,
+        joints,
+        staleness_ms: args.cerebellum_staleness_ms,
+        cpu_core: args.cerebellum_cpu_core,
+        priority: args.cerebellum_priority,
+        weights_path: args.cerebellum_weights.clone(),
+    })
 }
 
 /// Edge-triggered gate for a repeatedly-failing bus transaction.

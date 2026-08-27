@@ -10,7 +10,7 @@
 
 use std::sync::atomic::{fence, AtomicU32, Ordering};
 
-pub const LAYOUT_VERSION: u32 = 3;
+pub const LAYOUT_VERSION: u32 = 4;
 pub const SHM_MAGIC: u32 = 0x534F_3130; // ASCII "SO10"
 /// All 6 servos -- the 5 arm joints AND the gripper -- are impedance-controlled (K/D over PWM).
 /// A rigid position-mode gripper crushes anything it grips before it can sense resistance;
@@ -49,6 +49,13 @@ pub struct OutputData {
     /// Pre-averaged in Rust (fixed-sample-count moving average), mA.
     pub present_current_avg: [f32; NUM_MOTORS],
     pub pwm_cmd_debug: [f32; NUM_MOTORS],
+    /// The cerebellum's contribution to `pwm_cmd_debug`, already clamped, slew-limited and gated.
+    /// Zero when no cerebellum is running. Published separately because the whole bring-up
+    /// question is how much of the holding duty the feedforward has taken over, and a total that
+    /// mixes the two cannot answer it.
+    pub ff_pwm_debug: [f32; NUM_MOTORS],
+    /// `CEREBELLUM_*` bits from `cerebellum::mod`, describing why the feedforward is what it is.
+    pub cerebellum_flags: u32,
     pub fault_flags: u32,
     /// Leader-side gripper telemetry, present only when the daemon was given `--leader-port`;
     /// all zero otherwise. Exposed so the operator-facing tools can show whether the trigger is
