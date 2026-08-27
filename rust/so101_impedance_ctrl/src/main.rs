@@ -423,7 +423,7 @@ fn main() {
         args.leader_pwm_max,
     );
 
-    rt::apply_rt_settings(args.cpu_core, args.priority);
+    rt::apply_rt_settings("control loop", args.cpu_core, args.priority);
 
     let mut bus = FeetechBus::open(
         &args.port,

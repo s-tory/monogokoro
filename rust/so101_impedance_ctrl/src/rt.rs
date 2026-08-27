@@ -8,20 +8,37 @@ use nix::sched::{sched_setaffinity, CpuSet};
 use nix::unistd::Pid;
 
 /// Pins the calling thread to `core_id` and requests `SCHED_FIFO` at `priority` (1-99, higher =
-/// more urgent).
-pub fn apply_rt_settings(core_id: usize, priority: i32) {
+/// more urgent). Both settings are per-*thread*, so each thread that wants them calls this itself.
+///
+/// `who` names the caller in the log lines. The daemon now has two threads that can ask for this
+/// -- the control loop and the cerebellum -- and two identical "pinned to CPU core N" lines with
+/// no way to tell which is which is exactly the kind of ambiguity that makes an RT misconfiguration
+/// hard to spot.
+///
+/// A `priority` of 0 means "leave scheduling alone": pin, but do not ask for `SCHED_FIFO`. That is
+/// the sensible setting for a thread that wants isolation from the control loop without having any
+/// deadline of its own.
+pub fn apply_rt_settings(who: &str, core_id: usize, priority: i32) {
     match pin_to_core(core_id) {
-        Ok(()) => log::info!("pinned to CPU core {core_id}"),
+        Ok(()) => log::info!("{who}: pinned to CPU core {core_id}"),
         Err(e) => {
-            log::warn!("failed to pin to CPU core {core_id}: {e} (continuing without pinning)")
+            log::warn!(
+                "{who}: failed to pin to CPU core {core_id}: {e} (continuing without pinning)"
+            )
         }
     }
 
+    if priority == 0 {
+        log::info!("{who}: left at default scheduling policy (priority 0)");
+        return;
+    }
+
     match set_sched_fifo(priority) {
-        Ok(()) => log::info!("acquired SCHED_FIFO priority {priority}"),
+        Ok(()) => log::info!("{who}: acquired SCHED_FIFO priority {priority}"),
         Err(e) => log::warn!(
-            "failed to set SCHED_FIFO priority {priority}: {e} (continuing at default scheduling \
-             policy -- run as root or `setcap cap_sys_nice+ep` on this binary; see README.md)"
+            "{who}: failed to set SCHED_FIFO priority {priority}: {e} (continuing at default \
+             scheduling policy -- run as root or `setcap cap_sys_nice+ep` on this binary; see \
+             README.md)"
         ),
     }
 }
