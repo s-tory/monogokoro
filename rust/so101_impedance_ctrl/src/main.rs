@@ -479,6 +479,8 @@ fn main() {
     let mut prev_pos = [0f32; NUM_MOTORS];
     let mut tick: u64 = 0;
     let mut blind_ticks: u32 = 0;
+    let mut current_latches: [CommsFailureLatch; NUM_MOTORS] = Default::default();
+    let mut write_latch = CommsFailureLatch::default();
     let mut timing = LoopTiming::default();
 
     let loop_period = Duration::from_secs_f64(1.0 / args.loop_hz);
@@ -540,14 +542,24 @@ fn main() {
                 for i in 0..NUM_MOTORS {
                     present_pos[i] = values[i] as f32;
                 }
+                if blind_ticks > 0 {
+                    log::warn!(
+                        "read Present_Position recovered after {blind_ticks} failed tick(s)"
+                    );
+                }
                 blind_ticks = 0;
             }
             Err(e) => {
                 blind_ticks += 1;
-                log::warn!(
-                    "read Present_Position failed: {e} (holding last known positions, blind for \
-                     {blind_ticks} tick(s))"
-                );
+                // Edge-triggered, for the reason spelled out on `CommsFailureLatch`.
+                // `blind_ticks` is already the length of the current run, so this path needs no
+                // latch of its own to recognise the first failure.
+                if blind_ticks == 1 {
+                    log::warn!(
+                        "read Present_Position failed: {e} (holding last known positions; \
+                         subsequent failures are counted in the per-second loop timing summary)"
+                    );
+                }
                 comms_error = true;
             }
         }
@@ -565,13 +577,23 @@ fn main() {
             let i = (tick / args.current_read_divisor) as usize % NUM_MOTORS;
             match bus.read_register(MOTOR_IDS[i], feetech::REG_PRESENT_CURRENT) {
                 Ok(value) => {
+                    if let Some(n) = current_latches[i].recover() {
+                        log::warn!(
+                            "read Present_Current recovered for motor {} after {n} failed read(s)",
+                            MOTOR_IDS[i]
+                        );
+                    }
                     current_avgs[i].push(value as f32);
                 }
                 Err(e) => {
-                    log::warn!(
-                        "read Present_Current failed for motor {}: {e} (keeping last average)",
-                        MOTOR_IDS[i]
-                    );
+                    if current_latches[i].fail() {
+                        log::warn!(
+                            "read Present_Current failed for motor {}: {e} (keeping last average; \
+                             subsequent failures are counted in the per-second loop timing \
+                             summary)",
+                            MOTOR_IDS[i]
+                        );
+                    }
                     comms_error = true;
                     // Deliberately do NOT push a placeholder -- feeding a fake 0 into the moving
                     // average would corrupt the value ACT consumes as an observation.
@@ -640,9 +662,21 @@ fn main() {
             let raw = feetech::encode_sign_magnitude(commanded as i32, args.pwm_sign_bit);
             sync_values.push((MOTOR_IDS[i], raw as u32));
         }
-        if let Err(e) = bus.sync_write(feetech::REG_GOAL_PWM, &sync_values) {
-            log::warn!("sync_write Goal_PWM failed: {e}");
-            comms_error = true;
+        match bus.sync_write(feetech::REG_GOAL_PWM, &sync_values) {
+            Ok(()) => {
+                if let Some(n) = write_latch.recover() {
+                    log::warn!("sync_write Goal_PWM recovered after {n} failed tick(s)");
+                }
+            }
+            Err(e) => {
+                if write_latch.fail() {
+                    log::warn!(
+                        "sync_write Goal_PWM failed: {e} (subsequent failures are counted in the \
+                         per-second loop timing summary)"
+                    );
+                }
+                comms_error = true;
+            }
         }
 
         // The leader is driven from the follower's *gripper* tracking error: ~0 while the gripper
@@ -699,6 +733,39 @@ fn main() {
         if elapsed < loop_period {
             std::thread::sleep(loop_period - elapsed);
         }
+    }
+}
+
+/// Edge-triggered gate for a repeatedly-failing bus transaction.
+///
+/// Same reasoning as `LoopTiming` below, applied to the failure path: when the bus is dead or
+/// unplugged *every* tick fails, so a per-tick `warn!` is ~800 lines a second at 400 Hz. Those
+/// writes are not free -- stderr is usually a pipe, and if whatever is on the far end reads
+/// slowly (or, as in a piped smoke test, not until the process exits) the blocking write throttles
+/// the control loop itself. The observable symptom is the per-second timing summary vanishing
+/// entirely, which is precisely the line that would have explained what was wrong.
+///
+/// The *count* still reaches the operator, via `LoopTiming`'s `comms_errors`. This only decides
+/// when the individual error text is worth a line: once entering a run of failures, and once on
+/// leaving it. The `blind_ticks` fail-safe ERROR is left alone -- it is already edge-triggered.
+#[derive(Default)]
+struct CommsFailureLatch {
+    failing: bool,
+    consecutive: u64,
+}
+
+impl CommsFailureLatch {
+    /// Records a failure. Returns true only for the first of a consecutive run, i.e. when the
+    /// error text is new information rather than a repeat.
+    fn fail(&mut self) -> bool {
+        self.consecutive += 1;
+        !std::mem::replace(&mut self.failing, true)
+    }
+
+    /// Records a success. Returns `Some(n)` -- the length of the run that just ended -- only when
+    /// this success is the recovery from a run of failures.
+    fn recover(&mut self) -> Option<u64> {
+        std::mem::replace(&mut self.failing, false).then(|| std::mem::take(&mut self.consecutive))
     }
 }
 
