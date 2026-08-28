@@ -798,7 +798,12 @@ fn main() {
                             MOTOR_IDS[i]
                         );
                     }
-                    current_avgs[i].push(value as f32);
+                    // Sign-magnitude, like every other register here -- pushing the raw `u16`
+                    // makes a negative current read as ~32768 + its magnitude, a 1500x jump in a
+                    // value ACT consumes as an observation and the cerebellum consumes as six of
+                    // its thirty mossy fibres.
+                    current_avgs[i]
+                        .push(feetech::decode_sign_magnitude(value as u16, feetech::CURRENT_SIGN_BIT) as f32);
                 }
                 Err(e) => {
                     if current_latches[i].fail() {

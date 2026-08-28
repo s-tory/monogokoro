@@ -2,7 +2,7 @@
 
 use so101_impedance_ctrl::feetech::{
     build_packet, checksum, decode_sign_magnitude, encode_sign_magnitude, parse_status_packet,
-    BROADCAST_ID, INST_READ, INST_SYNC_READ,
+    BROADCAST_ID, CURRENT_SIGN_BIT, INST_READ, INST_SYNC_READ,
 };
 
 #[test]
@@ -129,6 +129,26 @@ fn sign_magnitude_negative_zero_decodes_as_zero() {
     // Sign bit set but zero magnitude -- some firmwares emit this for "no direction" at rest.
     let raw = 1u16 << 11;
     assert_eq!(decode_sign_magnitude(raw, 11), 0);
+}
+
+/// The four `Present_Current` samples that exposed the raw-`u16` read, decoded at the bit the
+/// register actually signs at.
+///
+/// Bit 10 is the plausible wrong answer -- it is what the neighbouring `Present_Load` uses -- and
+/// it fails silently rather than loudly: it recovers the right magnitude from every one of these
+/// and just drops the sign, so the joint's load reads positive while it pushes the other way.
+#[test]
+fn present_current_decodes_sign_magnitude_at_bit_15() {
+    for &(raw, expected) in &[
+        (0x800Au16, -10i32),
+        (0x8016, -22),
+        (0x8019, -25),
+        (0x8045, -69),
+        (0x0016, 22),
+    ] {
+        assert_eq!(decode_sign_magnitude(raw, CURRENT_SIGN_BIT), expected);
+        assert_eq!(decode_sign_magnitude(raw, 10), expected.abs(), "bit 10 loses the sign");
+    }
 }
 
 /// A stray byte before a reply must not blame the wrong servo.

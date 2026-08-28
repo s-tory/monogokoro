@@ -83,6 +83,18 @@ pub const PWM_SIGN_BIT: u32 = 10;
 /// Bit index of the sign bit for `Present_Position`/`Goal_Position` (full 16-bit range, bit 15).
 pub const POSITION_SIGN_BIT: u32 = 15;
 
+/// Bit index of the direction flag in `Present_Current` (addr 69).
+///
+/// **Measured as bit 15**, and it had to be measured: this is the one register the upstream
+/// `STS_SMS_SERIES_ENCODINGS_TABLE` omits, and its neighbours disagree -- `Present_Load` signs at
+/// bit 10 while `Present_Position` signs at bit 15, so neither is a safe guess.
+///
+/// Holding a gravity-loaded joint at a steady duty read `22` with the load one way and `0x8016`
+/// with it the other: the same magnitude, with bit 15 set. Bits 11-14 stayed clear at every
+/// magnitude observed (`0x800A`, `0x8016`, `0x8019`, `0x8045`), which is what rules bit 10 out --
+/// decoding those with a bit-10 sign recovers the magnitude but silently drops the sign.
+pub const CURRENT_SIGN_BIT: u32 = 15;
+
 /// Sign-magnitude decode: `sign_bit` holds the sign (1 = negative), the lower bits hold the
 /// magnitude. Mirrors `lerobot.motors.encoding_utils.decode_sign_magnitude`.
 pub fn decode_sign_magnitude(value: u16, sign_bit: u32) -> i32 {
