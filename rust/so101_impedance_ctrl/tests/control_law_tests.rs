@@ -3,7 +3,7 @@
 
 use so101_impedance_ctrl::control::{
     apply_soft_limits, finite_difference_velocity, first_implausible_step, impedance_pwm,
-    input_is_fresh, MovingAverage,
+    input_is_fresh, MovingAverage, PositionGate,
 };
 
 /// One tick's worth of budget at the shipped defaults: 20000 counts/s at 400 Hz.
@@ -211,17 +211,59 @@ fn crossing_the_encoder_wrap_is_not_a_glitch() {
     assert_eq!(first_implausible_step(&values, &prev, TICK_BUDGET), None);
 }
 
-/// The budget is per elapsed time, not per tick, so a real excursion during a blind run survives
-/// the return of telemetry. Measured case: the bus went quiet for ~1 s, the fail-safe zeroed PWM,
-/// and the gravity-loaded arm fell ~500 counts before the next accepted sample.
+/// A real excursion during a blind run gets in, but only once a second read agrees with it.
+///
+/// Measured case: the bus went quiet for ~1 s, the fail-safe zeroed PWM, and the gravity-loaded
+/// arm fell ~500 counts before telemetry returned.
 #[test]
-fn a_fall_during_a_blind_run_is_accepted_on_the_way_back() {
+fn a_fall_during_a_blind_run_is_admitted_once_a_second_read_agrees() {
     let prev = [400.0, 961.0, 3400.0, 170.0, 2900.0, 3900.0];
-    let values = [400, 1505, 3400, 170, 2900, 3900];
-    // In a single tick that step is a glitch...
-    assert!(first_implausible_step(&values, &prev, TICK_BUDGET).is_some());
-    // ...but after 400 blind ticks (1 s at 400 Hz) it is just an arm that fell.
-    assert_eq!(first_implausible_step(&values, &prev, TICK_BUDGET * 400.0), None);
+    let fallen = [400, 1505, 3400, 170, 2900, 3900];
+    let mut gate = PositionGate::new(TICK_BUDGET);
+    gate.accept(&fallen, None).expect("the first batch seeds the gate");
+
+    // Now with a history: one tick cannot cover 544 counts, so the batch is held, not used.
+    assert!(gate.accept(&fallen, Some(&prev)).is_err());
+    // The next read says the same thing, so the arm really is down there.
+    assert!(gate.accept(&fallen, Some(&prev)).is_ok());
+}
+
+/// The measured failure of the first version: a misparse that arrives *after* a blackout.
+///
+/// `wrist_flex` was really at 1187 and one reply put it at 0. The gate that widened with the
+/// length of the blind run accepted it, because by then it had stopped checking. Corroboration
+/// does not, because the next read disagrees -- which is what a misparse looks like and what a
+/// real position does not.
+#[test]
+fn a_misparse_after_a_blackout_is_still_refused() {
+    let prev = [400.0, 961.0, 3400.0, 1187.0, 2900.0, 3900.0];
+    let garbage = [400, 961, 3400, 0, 2900, 3900];
+    let truth = [400, 961, 3400, 1187, 2900, 3900];
+    let mut gate = PositionGate::new(TICK_BUDGET);
+    gate.accept(&truth, None).expect("seed");
+
+    let first = gate.accept(&garbage, Some(&prev)).expect_err("held, not used");
+    assert_eq!(first.motor, 3);
+    assert!(!first.corroborating, "nothing was being held yet");
+
+    // The real position comes back next tick. It must not be mistaken for corroboration of the
+    // garbage, and it agrees with `prev`, so it is simply accepted.
+    assert!(gate.accept(&truth, Some(&prev)).is_ok());
+}
+
+/// Two different wrong readings in a row do not corroborate each other.
+#[test]
+fn corroboration_needs_the_same_answer_twice() {
+    let prev = [400.0, 961.0, 3400.0, 1187.0, 2900.0, 3900.0];
+    let mut gate = PositionGate::new(TICK_BUDGET);
+    gate.accept(&[400, 961, 3400, 1187, 2900, 3900], None).expect("seed");
+
+    let a = gate.accept(&[400, 961, 3400, 0, 2900, 3900], Some(&prev)).expect_err("held");
+    assert!(!a.corroborating);
+    let b = gate
+        .accept(&[400, 961, 3400, 2500, 2900, 3900], Some(&prev))
+        .expect_err("a different wrong answer is not agreement");
+    assert!(b.corroborating, "the gate was holding one when this arrived");
 }
 
 /// A batch is condemned by its first bad slot, whichever motor that is -- a reply whose framing

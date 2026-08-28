@@ -15,8 +15,8 @@ use nix::unistd::{Gid, Uid};
 use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConfig, SensoryState};
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_startup_config, finite_difference_velocity, impedance_pwm,
-    first_implausible_step, input_is_fresh, log_homing_offsets, poll_and_apply_commands,
-    wrapped_delta, MovingAverage,
+    input_is_fresh, log_homing_offsets, poll_and_apply_commands, wrapped_delta, MovingAverage,
+    PositionGate,
 };
 use so101_impedance_ctrl::feetech::{self, FeetechBus};
 use so101_impedance_ctrl::leader::LeaderGripper;
@@ -202,11 +202,18 @@ struct Cli {
     /// 3100 counts/s, so the default sits ~6x above anything the arm can do (including falling
     /// limp) and ~75x below what the glitch did. Three orders of magnitude of daylight.
     ///
-    /// The budget scales with how long it has been since the last accepted sample, so a real
-    /// excursion during a blind run is not rejected on the way back. It counts *nominal* ticks,
-    /// not measured ones, so an overrun gives the arm more time to move than the budget allows --
-    /// which is the other thing the 6x margin is paying for. A spurious rejection costs one tick
-    /// of staleness anyway; it takes `max_blind_ticks` in a row to reach the fail-safe.
+    /// This is one *tick's* worth of travel and it never relaxes. An arm that really moved further
+    /// than that -- because the bus went quiet and it fell -- is admitted by a second read
+    /// agreeing with the first (see `PositionGate`), not by widening the gate. The first version
+    /// did widen it, in proportion to how long the loop had been blind, and the arm showed why
+    /// that is backwards: after a ~24-tick blackout the budget had grown past a thousand counts,
+    /// and a misparsed reply putting `wrist_flex` at 0 while it was really at 1187 went straight
+    /// through. The longer it had been since anyone could see, the less this checked.
+    ///
+    /// It counts *nominal* ticks rather than measured ones, so an overrun gives the arm more time
+    /// to move than the budget allows -- which is the other thing the 6x margin is paying for. A
+    /// spurious rejection costs a tick of staleness; it takes `max_blind_ticks` in a row to reach
+    /// the fail-safe.
     #[arg(long, default_value_t = 20000.0)]
     max_pos_slew: f32,
 
@@ -731,6 +738,7 @@ fn main() {
 
     let loop_period = Duration::from_secs_f64(1.0 / args.loop_hz);
     let max_pos_step = args.max_pos_slew * loop_period.as_secs_f32();
+    let mut pos_gate = PositionGate::new(max_pos_step);
     let watchdog_timeout_ns = args.watchdog_timeout_ms * 1_000_000;
 
     // Seeded to all-zero (zero targets/gains -> zero PWM) so the very first tick, before Python
@@ -790,18 +798,16 @@ fn main() {
                 // one implausible motor condemns the whole batch rather than just its own slot.
                 // Distrusting all six costs one tick of staleness; trusting the rest risks driving
                 // five joints from another joint's position.
-                let budget = max_pos_step * (blind_ticks + 1) as f32;
-                let implausible = pos_seeded
-                    .then(|| first_implausible_step(&values, &prev_pos, budget))
-                    .flatten();
-                if let Some((i, step)) = implausible {
+                let verdict = pos_gate.accept(&values, pos_seeded.then_some(&prev_pos[..]));
+                if let Err(r) = verdict {
                     blind_ticks += 1;
                     if blind_ticks == 1 {
                         log::warn!(
-                            "rejected Present_Position: motor {} moved {step:+.0} counts since the \
-                             last accepted sample, over a {budget:.0} budget (holding last known \
-                             positions; see --max-pos-slew)",
-                            MOTOR_IDS[i]
+                            "rejected Present_Position: motor {} moved {:+.0} counts in one tick, \
+                             over a {max_pos_step:.0} budget (holding last known positions until a \
+                             second read agrees with it; see --max-pos-slew)",
+                            MOTOR_IDS[r.motor],
+                            r.step
                         );
                     }
                     comms_error = true;

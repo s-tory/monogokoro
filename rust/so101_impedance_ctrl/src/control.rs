@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 
 use crate::feetech::{self, FeetechBus};
-use crate::shm::{CommandKind, CommandRegion};
+use crate::shm::{CommandKind, CommandRegion, NUM_MOTORS};
 
 /// Fixed-sample-count moving average of `Present_Current` for one motor (per the plan's decision:
 /// fixed window size, not a time window).
@@ -115,9 +115,10 @@ pub fn force_feedback_pwm(
 /// The first motor in a freshly read batch whose position could not have got there, given the
 /// last accepted batch and a budget in counts.
 ///
-/// Returns the motor's index and its (wrapped) step, so the caller can name it. `budget` is the
-/// caller's slew limit times the time since the last *accepted* sample -- not since the last tick
-/// -- so a joint that really did move during a blind run is not rejected on the way back.
+/// Returns the motor's index and its (wrapped) step, so the caller can name it. `budget` is one
+/// tick's worth of the caller's slew limit: a joint that really did move further than that, during
+/// a blind run, is admitted by corroboration instead (see [`PositionGate`]) rather than by
+/// relaxing this.
 ///
 /// The comparison goes through [`wrapped_delta`] because a joint crossing the 4095/0 boundary
 /// moves one count while its raw reading moves 4095, and rejecting that would make the check fire
@@ -131,6 +132,84 @@ pub fn first_implausible_step(values: &[i32], prev: &[f32], budget: f32) -> Opti
             let step = wrapped_delta(value as f32, previous);
             (step.abs() > budget).then_some((i, step))
         })
+}
+
+/// Admits position batches, holding back one that could not have happened until a second read
+/// agrees with it.
+///
+/// The naive version of this scaled the budget by how long the loop had been blind, so that an arm
+/// that really fell during a bus blackout would not have its recovery rejected. That is the right
+/// goal and the wrong mechanism, and the arm demonstrated why: after a ~24-tick blackout the
+/// budget had grown past a thousand counts, and a single misparsed reply putting `wrist_flex` at 0
+/// -- while it was really at 1187 -- sailed straight through. The longer the loop had been blind,
+/// the less it checked, which is exactly backwards.
+///
+/// Corroboration inverts that. A batch that fails the one-tick budget is not accepted and not
+/// discarded: it is held, and the *next* read is measured against it. Two consecutive reads that
+/// agree describe a joint that is really there, however far it travelled while nobody was looking;
+/// a misparse has to be wrong the same way twice to get through. The cost is one extra tick of
+/// staleness on a genuine excursion, against a check that never weakens.
+pub struct PositionGate {
+    /// One tick's worth of slew, in counts.
+    budget: f32,
+    /// A batch that failed against the last accepted one, waiting to see if the next read agrees.
+    pending: Option<[f32; NUM_MOTORS]>,
+}
+
+/// Why a batch was not accepted, for the caller to log.
+#[derive(Debug, Clone, Copy)]
+pub struct GateRejection {
+    pub motor: usize,
+    pub step: f32,
+    /// True once a batch is being held and the next read will be measured against it, so the
+    /// caller can say whether it is waiting for corroboration or has just started.
+    pub corroborating: bool,
+}
+
+impl PositionGate {
+    pub fn new(budget: f32) -> Self {
+        Self {
+            budget,
+            pending: None,
+        }
+    }
+
+    /// Offers a freshly read batch. `Ok(())` means the caller may use `values`.
+    ///
+    /// `prev` is the last accepted batch. The first call after construction is accepted
+    /// unconditionally: there is nothing to be implausible against yet.
+    pub fn accept(&mut self, values: &[i32], prev: Option<&[f32]>) -> Result<(), GateRejection> {
+        let Some(prev) = prev else {
+            self.pending = None;
+            return Ok(());
+        };
+        match first_implausible_step(values, prev, self.budget) {
+            None => {
+                self.pending = None;
+                Ok(())
+            }
+            Some((motor, step)) => {
+                // Does it agree with what we were holding? Then the joint is really there.
+                if let Some(held) = self.pending {
+                    if first_implausible_step(values, &held, self.budget).is_none() {
+                        self.pending = None;
+                        return Ok(());
+                    }
+                }
+                let mut held = [0f32; NUM_MOTORS];
+                for (h, &v) in held.iter_mut().zip(values.iter()) {
+                    *h = v as f32;
+                }
+                let corroborating = self.pending.is_some();
+                self.pending = Some(held);
+                Err(GateRejection {
+                    motor,
+                    step,
+                    corroborating,
+                })
+            }
+        }
+    }
 }
 
 /// Zeroes any command that would drive a servo further past a soft position limit.
