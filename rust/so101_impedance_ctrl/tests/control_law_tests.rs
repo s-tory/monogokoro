@@ -2,8 +2,12 @@
 //! shared memory involved.
 
 use so101_impedance_ctrl::control::{
-    finite_difference_velocity, impedance_pwm, input_is_fresh, MovingAverage,
+    finite_difference_velocity, first_implausible_step, impedance_pwm, input_is_fresh,
+    MovingAverage,
 };
+
+/// One tick's worth of budget at the shipped defaults: 20000 counts/s at 400 Hz.
+const TICK_BUDGET: f32 = 50.0;
 
 #[test]
 fn impedance_law_computes_spring_damper_sum() {
@@ -173,4 +177,59 @@ fn force_feedback_clamps_to_the_leaders_own_lower_limit() {
     assert!((pwm - 250.0).abs() < 1e-3, "got {pwm}");
     let pwm = force_feedback_pwm(-50.0, 0.0, 500.0, 0.0, 250.0);
     assert!((pwm + 250.0).abs() < 1e-3, "got {pwm}");
+}
+
+/// Ordinary motion is not a glitch. The servo's own no-load speed is ~3100 counts/s, which is
+/// ~8 counts per 2.5 ms tick -- well inside one tick's budget.
+#[test]
+fn plausible_motion_is_accepted() {
+    let prev = [400.0, 900.0, 3400.0, 170.0, 2900.0, 3900.0];
+    let values = [408, 892, 3406, 170, 2900, 3900];
+    assert_eq!(first_implausible_step(&values, &prev, TICK_BUDGET), None);
+}
+
+/// The sample that ran the arm into its encoder wrap: `wrist_flex` reported 3784 counts of travel
+/// in one 2.5 ms tick. Nothing raised, nothing timed out -- the reflex simply answered it.
+#[test]
+fn the_measured_misparse_is_rejected_and_names_its_motor() {
+    let prev = [400.0, 900.0, 3400.0, 121.0, 2900.0, 3900.0];
+    let values = [400, 900, 3400, 3905, 2900, 3900];
+    let (i, step) = first_implausible_step(&values, &prev, TICK_BUDGET).expect("rejected");
+    assert_eq!(i, 3);
+    // Wrapped, the shorter way round: the joint apparently went 312 counts *down* through zero,
+    // not 3784 counts up. Either way it is ~125,000 counts/s, and neither is a thing an SO-101
+    // joint does.
+    assert!((step + 312.0).abs() < 1e-3, "got {step}");
+}
+
+/// A joint crossing 4095/0 moves one count while its raw reading moves 4095. Comparing raw would
+/// make the check fire hardest exactly where the encoder is most awkward.
+#[test]
+fn crossing_the_encoder_wrap_is_not_a_glitch() {
+    let prev = [400.0, 900.0, 3400.0, 4090.0, 2900.0, 3900.0];
+    let values = [400, 900, 3400, 5, 2900, 3900];
+    assert_eq!(first_implausible_step(&values, &prev, TICK_BUDGET), None);
+}
+
+/// The budget is per elapsed time, not per tick, so a real excursion during a blind run survives
+/// the return of telemetry. Measured case: the bus went quiet for ~1 s, the fail-safe zeroed PWM,
+/// and the gravity-loaded arm fell ~500 counts before the next accepted sample.
+#[test]
+fn a_fall_during_a_blind_run_is_accepted_on_the_way_back() {
+    let prev = [400.0, 961.0, 3400.0, 170.0, 2900.0, 3900.0];
+    let values = [400, 1505, 3400, 170, 2900, 3900];
+    // In a single tick that step is a glitch...
+    assert!(first_implausible_step(&values, &prev, TICK_BUDGET).is_some());
+    // ...but after 400 blind ticks (1 s at 400 Hz) it is just an arm that fell.
+    assert_eq!(first_implausible_step(&values, &prev, TICK_BUDGET * 400.0), None);
+}
+
+/// A batch is condemned by its first bad slot, whichever motor that is -- a reply whose framing
+/// slipped shifts every slot after it, so the rest of the batch is not evidence of anything.
+#[test]
+fn the_first_implausible_motor_is_the_one_reported() {
+    let prev = [400.0, 900.0, 3400.0, 121.0, 2900.0, 3900.0];
+    let values = [400, 2000, 3400, 3905, 2900, 3900];
+    let (i, _) = first_implausible_step(&values, &prev, TICK_BUDGET).expect("rejected");
+    assert_eq!(i, 1);
 }

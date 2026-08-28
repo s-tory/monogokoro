@@ -15,7 +15,8 @@ use nix::unistd::{Gid, Uid};
 use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConfig, SensoryState};
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_startup_config, finite_difference_velocity, impedance_pwm,
-    input_is_fresh, log_homing_offsets, poll_and_apply_commands, wrapped_delta, MovingAverage,
+    first_implausible_step, input_is_fresh, log_homing_offsets, poll_and_apply_commands,
+    wrapped_delta, MovingAverage,
 };
 use so101_impedance_ctrl::feetech::{self, FeetechBus};
 use so101_impedance_ctrl::leader::LeaderGripper;
@@ -188,6 +189,26 @@ struct Cli {
     /// gone bad. Better to drop torque and let the arm go limp.
     #[arg(long, default_value_t = 5)]
     max_blind_ticks: u32,
+
+    /// Reject a position sample that would need more than this speed, in counts/s, to be real.
+    ///
+    /// A dropped reply is loud -- it times out, and `max_blind_ticks` handles it. A *misparsed*
+    /// reply is silent: it returns a plausible-looking but wrong position, and the impedance law
+    /// answers it with full duty toward a place the joint never was. Measured on this arm, one
+    /// sample moved `wrist_flex` 3784 counts in a single 2.5 ms tick -- about 1.5 M counts/s --
+    /// and the reflex drove the joint through its encoder wrap in response.
+    ///
+    /// The threshold is not delicate, which is the point: the servo's own no-load speed is about
+    /// 3100 counts/s, so the default sits ~6x above anything the arm can do (including falling
+    /// limp) and ~75x below what the glitch did. Three orders of magnitude of daylight.
+    ///
+    /// The budget scales with how long it has been since the last accepted sample, so a real
+    /// excursion during a blind run is not rejected on the way back. It counts *nominal* ticks,
+    /// not measured ones, so an overrun gives the arm more time to move than the budget allows --
+    /// which is the other thing the 6x margin is paying for. A spurious rejection costs one tick
+    /// of staleness anyway; it takes `max_blind_ticks` in a row to reach the fail-safe.
+    #[arg(long, default_value_t = 20000.0)]
+    max_pos_slew: f32,
 
     /// Serial round-trip timeout per register transaction.
     ///
@@ -561,7 +582,8 @@ fn main() {
     // to guess wrong.
     log::info!(
         "config: invert_pwm={} pwm_sign_bit={} loop_hz={} pwm_max={} sync_read={} current_read_divisor={} \
-         vel_filter_window={} pos_limits=[{}, {}] max_blind_ticks={} watchdog_ms={} \
+         vel_filter_window={} pos_limits=[{}, {}] max_blind_ticks={} max_pos_slew={} \
+         watchdog_ms={} \
          serial_timeout_ms={} leader_port={:?} force_feedback_gain={} force_feedback_damping={} \
          leader_pwm_max={}",
         args.invert_pwm,
@@ -574,6 +596,7 @@ fn main() {
         args.pos_min,
         args.pos_max,
         args.max_blind_ticks,
+        args.max_pos_slew,
         args.watchdog_timeout_ms,
         args.serial_timeout_ms,
         args.leader_port,
@@ -694,11 +717,14 @@ fn main() {
     let mut prev_pos = [0f32; NUM_MOTORS];
     let mut tick: u64 = 0;
     let mut blind_ticks: u32 = 0;
+    // The first accepted read has nothing to be implausible against -- `prev_pos` is still zeros.
+    let mut pos_seeded = false;
     let mut current_latches: [CommsFailureLatch; NUM_MOTORS] = Default::default();
     let mut write_latch = CommsFailureLatch::default();
     let mut timing = LoopTiming::default();
 
     let loop_period = Duration::from_secs_f64(1.0 / args.loop_hz);
+    let max_pos_step = args.max_pos_slew * loop_period.as_secs_f32();
     let watchdog_timeout_ns = args.watchdog_timeout_ms * 1_000_000;
 
     // Seeded to all-zero (zero targets/gains -> zero PWM) so the very first tick, before Python
@@ -754,15 +780,37 @@ fn main() {
 
         match read_register_all(&mut bus, feetech::REG_PRESENT_POSITION, args.sync_read) {
             Ok(values) => {
-                for i in 0..NUM_MOTORS {
-                    present_pos[i] = values[i] as f32;
+                // A reply whose framing slipped shifts every slot after the one it slipped in, so
+                // one implausible motor condemns the whole batch rather than just its own slot.
+                // Distrusting all six costs one tick of staleness; trusting the rest risks driving
+                // five joints from another joint's position.
+                let budget = max_pos_step * (blind_ticks + 1) as f32;
+                let implausible = pos_seeded
+                    .then(|| first_implausible_step(&values, &prev_pos, budget))
+                    .flatten();
+                if let Some((i, step)) = implausible {
+                    blind_ticks += 1;
+                    if blind_ticks == 1 {
+                        log::warn!(
+                            "rejected Present_Position: motor {} moved {step:+.0} counts since the \
+                             last accepted sample, over a {budget:.0} budget (holding last known \
+                             positions; see --max-pos-slew)",
+                            MOTOR_IDS[i]
+                        );
+                    }
+                    comms_error = true;
+                } else {
+                    for i in 0..NUM_MOTORS {
+                        present_pos[i] = values[i] as f32;
+                    }
+                    if blind_ticks > 0 {
+                        log::warn!(
+                            "read Present_Position recovered after {blind_ticks} failed tick(s)"
+                        );
+                    }
+                    blind_ticks = 0;
+                    pos_seeded = true;
                 }
-                if blind_ticks > 0 {
-                    log::warn!(
-                        "read Present_Position recovered after {blind_ticks} failed tick(s)"
-                    );
-                }
-                blind_ticks = 0;
             }
             Err(e) => {
                 blind_ticks += 1;

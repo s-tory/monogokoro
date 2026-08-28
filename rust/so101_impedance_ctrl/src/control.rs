@@ -118,6 +118,27 @@ pub fn force_feedback_pwm(
     raw.clamp(-pwm_max, pwm_max)
 }
 
+/// The first motor in a freshly read batch whose position could not have got there, given the
+/// last accepted batch and a budget in counts.
+///
+/// Returns the motor's index and its (wrapped) step, so the caller can name it. `budget` is the
+/// caller's slew limit times the time since the last *accepted* sample -- not since the last tick
+/// -- so a joint that really did move during a blind run is not rejected on the way back.
+///
+/// The comparison goes through [`wrapped_delta`] because a joint crossing the 4095/0 boundary
+/// moves one count while its raw reading moves 4095, and rejecting that would make the check fire
+/// hardest exactly where the encoder is most awkward.
+pub fn first_implausible_step(values: &[i32], prev: &[f32], budget: f32) -> Option<(usize, f32)> {
+    values
+        .iter()
+        .zip(prev)
+        .enumerate()
+        .find_map(|(i, (&value, &previous))| {
+            let step = wrapped_delta(value as f32, previous);
+            (step.abs() > budget).then_some((i, step))
+        })
+}
+
 pub fn apply_soft_limits(pwm: f32, present_pos: f32, pos_min: f32, pos_max: f32) -> f32 {
     if present_pos <= pos_min && pwm < 0.0 {
         return 0.0;
