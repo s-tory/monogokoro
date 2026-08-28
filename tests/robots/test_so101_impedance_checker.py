@@ -34,16 +34,20 @@ from lerobot.robots.so101_impedance_follower.shm_client import (
 _CLIENT_PATCH_TARGET = "lerobot.robots.so101_impedance_follower.checker.ImpedanceShmClient"
 
 
-def _telemetry(positions=None, currents=None, fault_flags=0, pwm_cmd=None) -> dict:
+def _telemetry(positions=None, currents=None, fault_flags=0, pwm_cmd=None, ff_pwm=None) -> dict:
     positions = positions or list(range(6))
     currents = currents or [0.0] * 6
     pwm_cmd = pwm_cmd if pwm_cmd is not None else [0.0] * 6
+    # `read_state` reads this unconditionally, so a fake without it fails with a bare KeyError
+    # rather than telling you the fake has fallen behind the client.
+    ff_pwm = ff_pwm if ff_pwm is not None else [0.0] * 6
     return {
         "timestamp_mono_ns": 0,
         "present_pos": positions,
         "present_vel": [0.0] * 6,
         "present_current_avg": currents,
         "pwm_cmd": pwm_cmd,
+        "ff_pwm": ff_pwm,
         "fault_flags": fault_flags,
     }
 
