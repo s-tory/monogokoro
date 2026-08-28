@@ -274,6 +274,8 @@ struct Exchange {
     step_ns_total: AtomicU64,
     step_ns_max: AtomicU64,
     errors: AtomicU64,
+    /// Steps skipped because the sensory snapshot could not have come from this arm.
+    rejected: AtomicU64,
     /// Set once the backend has failed unrecoverably, so the control loop can stop trusting the
     /// last published feedforward even before it goes stale.
     faulted: AtomicBool,
@@ -364,6 +366,7 @@ impl Cerebellum {
             learn_steps: AtomicU64::new(0),
             step_ns_total: AtomicU64::new(0),
             step_ns_max: AtomicU64::new(0),
+            rejected: AtomicU64::new(0),
             errors: AtomicU64::new(0),
             faulted: AtomicBool::new(false),
         });
@@ -447,11 +450,12 @@ impl Cerebellum {
         let total = e.step_ns_total.swap(0, Ordering::Relaxed);
         let max = e.step_ns_max.swap(0, Ordering::Relaxed);
         let errors = e.errors.swap(0, Ordering::Relaxed);
+        let rejected = e.rejected.swap(0, Ordering::Relaxed);
         let out = e.output.read(4).unwrap_or_default();
         let mean_us = total.checked_div(steps).unwrap_or(0) / 1000;
         format!(
             "cerebellum [{}]: {steps} steps ({learn_steps} with plasticity), {mean_us} us mean / \
-             {} us max per step, {errors} errors; granule activity {:.2}% (theta {:.3}); ff [{}]",
+             {} us max per step, {errors} errors, {rejected} rejected inputs; granule activity {:.2}% (theta {:.3}); ff [{}]",
             self.device_label,
             max / 1000,
             out.active_frac * 100.0,
@@ -561,6 +565,7 @@ fn run(
 
     let mut theta = 0.0f32;
     let mut cf_lp = [0f32; NUM_OUTPUTS];
+    let mut rejecting = false;
     let mut last_sensory = SensoryPacket::default();
 
     while exchange.running.load(Ordering::Acquire) {
@@ -576,6 +581,32 @@ fn run(
         let sensory_fresh = last_sensory.timestamp_ns != 0
             && monotonic_ns().saturating_sub(last_sensory.timestamp_ns) <= staleness_ns;
         let state = last_sensory.state;
+
+        // Refuse to step on a sensory snapshot the arm could not have produced. Skipping publishes
+        // nothing, which is the graded response this already has machinery for: one bad snapshot
+        // costs a step the control loop never notices, while a persistent one lets the last packet
+        // age past `--cerebellum-staleness-ms` and the feedforward is zeroed by the existing
+        // fail-safe. Nothing new to get wrong.
+        if let Some((channel, joint, value)) = net::implausible_input(&state) {
+            exchange.rejected.fetch_add(1, Ordering::Relaxed);
+            // Edge-triggered, like the daemon's other comms warnings: a wedged sensor would
+            // otherwise log at 200 Hz. The per-second summary carries the count.
+            if !rejecting {
+                rejecting = true;
+                log::warn!(
+                    "cerebellum: refusing to step on motor {}'s {channel} of {value:.0} -- outside \
+                     anything this arm produces, so the readout would be extrapolating",
+                    joint + 1
+                );
+            }
+            std::thread::sleep(period);
+            continue;
+        }
+        if rejecting {
+            rejecting = false;
+            log::info!("cerebellum: sensory input is believable again");
+        }
+
         let mf = net::encode_mossy_fibres(&state);
 
         // The climbing fibre. Filtered unconditionally so that a gate opening mid-motion does not

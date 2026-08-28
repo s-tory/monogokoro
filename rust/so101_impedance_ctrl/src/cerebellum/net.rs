@@ -64,6 +64,58 @@ const VEL_SCALE: f32 = 500.0; // counts/s
 const ERR_SCALE: f32 = 100.0; // counts
 const CURRENT_SCALE: f32 = 200.0; // raw Present_Current units
 
+/// Multiples of a channel's own scale beyond which a sensory value cannot be believed.
+///
+/// Derived rather than tuned. Every squashed channel enters as `tanh(raw / scale)`, and `tanh`
+/// reaches 1.0 in `f32` by about ten scales -- past that the network cannot tell one value from
+/// another, so nothing is lost by refusing them. Twenty is double that point, which leaves every
+/// legitimate reading untouched (`pos_error` is bounded by +/-2048 by construction, and 20 x
+/// `ERR_SCALE` is 2000) while still sitting well inside the corruption this exists for: a raw
+/// `Present_Current` word read as 32790 is 164 scales out.
+///
+/// The check runs on the raw snapshot, *before* the encoding, because the encoding is what
+/// destroys the evidence -- through `tanh` a corrupted 32790 and a merely large 4000 are both
+/// exactly 1.0.
+pub const MF_SATURATION_FACTOR: f32 = 20.0;
+
+/// The first sensory reading that could not have come from this arm, as `(channel, joint, value)`.
+///
+/// The cerebellum's inputs are the one part of this daemon with no plausibility check of their
+/// own: a position is guarded by `--max-pos-slew`, and velocity and tracking error are computed
+/// from positions, but `Present_Current` is read straight off the bus and believed. It is also
+/// what broke -- an undecoded sign-magnitude word put six of the thirty mossy fibres on the rail
+/// at once, and the readout, a linear function over a random projection, extrapolated a
+/// feedforward to its clamp on a joint carrying no load.
+///
+/// Asking here rather than at the granule layer is deliberate, and it was measured: the Golgi loop
+/// holds the granule code at a fixed sparsity whatever the input, so a corrupted state produces a
+/// perfectly ordinary-looking code. Scaling the readout by how much of that code had been taught
+/// gave 0.994 for the corruption against 0.99999 for a normal pose -- no separation at all,
+/// because the same excitable cells win the threshold competition for almost any input. The
+/// anomaly is visible in the input and normalised away by the time it reaches the cells.
+pub fn implausible_input(state: &SensoryState) -> Option<(&'static str, usize, f32)> {
+    let k = MF_SATURATION_FACTOR;
+    for j in 0..NUM_MOTORS {
+        let checks = [
+            ("velocity", state.present_vel[j], k * VEL_SCALE),
+            ("tracking error", state.pos_error[j], k * ERR_SCALE),
+            ("current", state.present_current[j], k * CURRENT_SCALE),
+        ];
+        for (name, value, limit) in checks {
+            if !value.is_finite() || value.abs() > limit {
+                return Some((name, j, value));
+            }
+        }
+        // Position is not squashed -- it enters as a phase, which is defined for any number. The
+        // bound is the encoder instead: outside its range the reading is not a pose at all.
+        let pos = state.present_pos[j];
+        if !pos.is_finite() || pos < 0.0 || pos >= ENCODER_RESOLUTION {
+            return Some(("position", j, pos));
+        }
+    }
+    None
+}
+
 /// The sensory snapshot the RT loop hands to the cerebellum each tick.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SensoryState {

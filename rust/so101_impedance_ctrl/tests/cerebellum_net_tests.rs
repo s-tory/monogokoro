@@ -2,6 +2,7 @@
 //! persistence, and -- when a Vulkan device is present -- agreement between the shaders and the
 //! CPU reference they were written against.
 
+use so101_impedance_ctrl::cerebellum::net::{implausible_input, MF_SATURATION_FACTOR};
 use so101_impedance_ctrl::cerebellum::net::{
     encode_mossy_fibres, golgi_inhibit, granule_preactivation, CpuNet, GranuleParams, SensoryState,
     GC_FAN_IN, MF_DIM, MF_PER_JOINT, NUM_OUTPUTS,
@@ -498,4 +499,68 @@ fn the_gripper_never_receives_a_feedforward() {
         "the arm joints learned nothing, so this proves little"
     );
     cb.stop();
+}
+
+/// An ordinary snapshot is believable, including one working hard.
+///
+/// The bounds have to leave the arm's whole real operating range alone, or the cerebellum stops
+/// stepping exactly when it is most useful.
+#[test]
+fn a_normal_sensory_snapshot_is_believable() {
+    let mut state = state_at(1200.0);
+    state.present_vel = [1650.0; NUM_MOTORS]; // the fastest hand-driven motion measured
+    state.pos_error = [-19.0; NUM_MOTORS];
+    state.present_current = [-69.0; NUM_MOTORS]; // the largest holding current measured
+    assert_eq!(implausible_input(&state), None);
+}
+
+/// The measured corruption: `Present_Current` read as a raw sign-magnitude word.
+///
+/// This is the reading that put six of the thirty mossy fibres on the rail at once and drove the
+/// feedforward for an unloaded joint to its clamp. It is 164 encoding scales out; the bound is 20.
+#[test]
+fn the_measured_current_corruption_is_refused() {
+    let mut state = state_at(1200.0);
+    state.present_current[3] = 32790.0;
+    let (channel, joint, value) = implausible_input(&state).expect("should be refused");
+    assert_eq!(channel, "current");
+    assert_eq!(joint, 3);
+    assert_eq!(value, 32790.0);
+}
+
+/// A position outside the encoder is not a pose. Unlike the squashed channels this one has a hard
+/// bound rather than a derived one -- the reading is defined modulo 4096, so anything outside it
+/// came from somewhere other than the encoder.
+#[test]
+fn a_position_outside_the_encoder_is_refused() {
+    let mut state = state_at(1200.0);
+    state.present_pos[1] = 5000.0;
+    let (channel, joint, _) = implausible_input(&state).expect("should be refused");
+    assert_eq!((channel, joint), ("position", 1));
+
+    let mut nan = state_at(1200.0);
+    nan.present_pos[0] = f32::NAN;
+    assert!(implausible_input(&nan).is_some(), "NaN is not a pose either");
+}
+
+/// The bound sits past where the encoding stops carrying information, so refusing a value cannot
+/// discard anything the network could have used.
+///
+/// `tanh` reaches 1.0 in `f32` by about ten scales; the factor is twice that. Both of these encode
+/// to exactly the same mossy fibre, and only one of them is refused -- which is the point: by then
+/// the input is indistinguishable, so the only question left is whether it is plausible.
+#[test]
+fn the_bound_sits_where_the_encoding_has_already_saturated() {
+    let mut at_bound = state_at(1200.0);
+    at_bound.present_current[0] = 200.0 * MF_SATURATION_FACTOR;
+    let mut past_bound = state_at(1200.0);
+    past_bound.present_current[0] = 200.0 * MF_SATURATION_FACTOR * 2.0;
+
+    let a = encode_mossy_fibres(&at_bound);
+    let b = encode_mossy_fibres(&past_bound);
+    assert_eq!(a[4], b[4], "both saturate to the same mossy fibre");
+    assert_eq!(a[4], 1.0);
+
+    assert_eq!(implausible_input(&at_bound), None);
+    assert!(implausible_input(&past_bound).is_some());
 }
