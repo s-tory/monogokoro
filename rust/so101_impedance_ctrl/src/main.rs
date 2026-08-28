@@ -15,7 +15,8 @@ use nix::unistd::{Gid, Uid};
 use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConfig, SensoryState};
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_startup_config, finite_difference_velocity, impedance_pwm,
-    input_is_fresh, log_homing_offsets, poll_and_apply_commands, wrapped_delta, MovingAverage,
+    input_is_fresh, log_homing_offsets, log_supply_and_temperature, poll_and_apply_commands,
+    wrapped_delta, MovingAverage,
     PositionGate,
 };
 use so101_impedance_ctrl::feetech::{self, FeetechBus};
@@ -679,6 +680,7 @@ fn main() {
 
     apply_startup_config(&mut bus, &MOTOR_IDS);
     log_homing_offsets(&mut bus, &MOTOR_IDS);
+    log_supply_and_temperature(&mut bus, &MOTOR_IDS);
 
     // Force feedback is an enhancement to teleoperation, never a prerequisite for it: if the
     // leader's port is missing or its gripper will not go into PWM mode, the follower must still

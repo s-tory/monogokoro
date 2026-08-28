@@ -70,6 +70,11 @@ pub const REG_GOAL_POSITION: (u8, u8) = (42, 2);
 pub const REG_GOAL_PWM: (u8, u8) = (44, 2);
 pub const REG_PRESENT_POSITION: (u8, u8) = (56, 2);
 pub const REG_PRESENT_CURRENT: (u8, u8) = (69, 2);
+/// Supply voltage as the servo sees it, in units of 0.1 V per the datasheet. Read once at startup
+/// rather than in the loop: it costs a transaction, and the control law has no use for it.
+pub const REG_PRESENT_VOLTAGE: (u8, u8) = (62, 1);
+/// Case temperature in degrees C.
+pub const REG_PRESENT_TEMPERATURE: (u8, u8) = (63, 1);
 
 /// Bit index of the direction flag in the PWM command register (see [`REG_GOAL_PWM`]).
 ///

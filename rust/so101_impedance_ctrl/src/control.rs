@@ -410,6 +410,30 @@ pub fn apply_startup_config(bus: &mut FeetechBus, motor_ids: &[u8]) {
 /// Logs each servo's stored `Homing_Offset` so it is obvious from the daemon's own output whether
 /// a calibration is in effect. An all-zero column here means positions are raw encoder counts and
 /// any joint whose travel crosses 4095/0 will report a full-scale jump.
+/// Logs each servo's supply voltage and case temperature.
+///
+/// Neither feeds the control law, which is exactly why they were missing: the loop had no use for
+/// them, so nothing read them, so the daemon had no vocabulary for "something physical is wrong"
+/// at all. `fault_flags` names the watchdog, the two buses and overcurrent -- every one of them a
+/// symptom. When this arm's bus started dropping a position read every four seconds, the only way
+/// to reason about why was to read the corrupted bytes out of the log and infer from their shape.
+///
+/// One transaction per motor per register, at startup only. Whether it is worth paying for these
+/// periodically is a question to answer with the numbers this prints, not before.
+pub fn log_supply_and_temperature(bus: &mut FeetechBus, motor_ids: &[u8]) {
+    for &id in motor_ids {
+        let volts = match bus.read_register(id, feetech::REG_PRESENT_VOLTAGE) {
+            Ok(raw) => format!("{:.1} V (raw {raw})", raw as f32 / 10.0),
+            Err(e) => format!("unreadable ({e})"),
+        };
+        let temp = match bus.read_register(id, feetech::REG_PRESENT_TEMPERATURE) {
+            Ok(raw) => format!("{raw} C"),
+            Err(e) => format!("unreadable ({e})"),
+        };
+        log::info!("motor {id}: supply {volts}, temperature {temp}");
+    }
+}
+
 pub fn log_homing_offsets(bus: &mut FeetechBus, motor_ids: &[u8]) {
     for &id in motor_ids {
         match bus.read_register(id, feetech::REG_HOMING_OFFSET) {
