@@ -289,6 +289,12 @@ way", which look identical from across the room; and `cargo test --test cerebell
   reflex's standing duty -- which is the teaching signal -- falls to zero while the load is still
   entirely there. Whether that band is a property of the gearboxes or an artefact of the supply
   collapsing is exactly what the re-measurement has to separate.
+- **Touch stops at how hard, not where or whether it is slipping.** A compliant fingertip turns grip
+  force into encoder counts, and that is the whole of the tactile sense here: one scalar per jaw,
+  available to the reflex at 400 Hz. Where on the finger contact happened, and the micro-vibration
+  that says an object has *begun* to slip, both need a purpose-built sensor rather than a commodity
+  part -- and what this repository is trying to show is how much of the stack can be built without
+  one. The wrist camera can see that something has slipped, at ~30 Hz; it cannot see it starting.
 - **What it can learn is bounded by its mossy fibres.** They carry pose, velocity, tracking error
   and current, so it can learn gravity, joint friction and a fixed payload -- but nothing tells it
   which of two payloads is in the gripper, so it cannot tell them apart. Camera features are the
