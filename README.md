@@ -37,17 +37,39 @@ target forever, and the only way a feedback law can shrink that droop is to rais
 back the compliance it was there to provide. Cancelling the load *before* the error appears is a
 different job, and biology gives it to a different structure.
 
-So there are three layers here, and each is where it is for a reason:
+So there are four layers here, and each is where it is for a reason:
 
 | | biology | here | rate |
 | --- | --- | --- | --- |
+| answers contact with no loop at all | preflex: muscle and tissue | packing foam under a finger cot, on each jaw | -- |
 | fast local loop, brain not involved | stretch reflex | Rust daemon, `SCHED_FIFO`, isolated core | 400 Hz |
 | prediction, learned from its own errors | cerebellum | Vulkan compute on the iGPU, own thread | 200 Hz |
 | slow loop through perception | visual feedback | ACT | ~30 Hz |
 
-The ~13x separation between the first and the last is roughly the one biology runs at, and it is
-the reason the control law does not live in Python. The cerebellum sits between them and, like its
+The ~13x separation between the reflex and ACT is roughly the one biology runs at, and it is the
+reason the control law does not live in Python. The cerebellum sits between them and, like its
 namesake, *outside* the reflex arc -- it corrects the loop without ever being inside it.
+
+The top row is the cheapest thing in this repository and possibly the most load-bearing. Contact
+transients are faster than any loop on the list: a fingertip meeting an object produces its force
+spike well inside the reflex's 2.5 ms tick, so whatever answers it *first* cannot be a controller at
+all. Biology's answer is the **preflex** -- the intrinsic mechanical response of muscle and tissue,
+at zero latency, before any reflex arc has been traversed. Here it is packing foam under a finger
+cot, and it is why a soft-fingered animal can be careless with a fragile object in a way this arm
+cannot.
+
+<p align="center">
+  <img src="media/readme/gripper_fingertips.jpg" width="360"
+       alt="The SO-101 gripper held in a hand, an orange finger cot over packing foam on each jaw" />
+</p>
+
+It also gives the gripper a finer sense of touch, which is less obvious. Grip force was always
+readable -- after contact the commanded position keeps advancing while the achieved one stops, and
+`pwm = K * err` follows the squeeze. What a compliant fingertip changes is the *scale*: the same
+range of force now spreads across far more encoder counts, which is exactly why a load cell has a
+flexure, to turn force into a displacement large enough to measure. The signal was already there;
+the padding gives it a finer ruler. By how much, on this arm, is not measured yet -- and the
+candidate that could eat the whole effect is the static friction described under Known limitations.
 
 ## What this fork adds
 
@@ -251,11 +273,22 @@ way", which look identical from across the room; and `cargo test --test cerebell
 
 ## Known limitations
 
-- **The cerebellum is unproven on hardware.** Its math is checked against a CPU reference and its
-  shaders are cross-checked against that reference step-by-step through learning, but no droop
-  measurement on a real arm has been taken yet. The claim it has to make good on is narrow and
-  falsifiable: with the feedforward on, `err` in the checker's table should shrink **at unchanged
-  K**. If it only improves when K goes up, the feedforward is doing nothing.
+- **The cerebellum cancels droop on a real arm; the numbers around that are not yet trustworthy.**
+  The narrow claim held on 2026-08-28, over four runs across two poses, at unchanged K:
+  `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00, `shoulder_lift` 12.57 -> 3.00 counts of
+  droop, against baselines that were `err = holding_duty / K` to the decimal. What is not
+  trustworthy is everything *absolute* from that session. `shoulder_pan`'s servo failed partway
+  through it, and writing to a servo whose power stage has shorted pulls the shared supply from
+  4.6 V to 2.4 V for ~820 ms at a time. The comparison survives -- both sides of it ran under the
+  same fault -- but the holding duties, the `--cerebellum-ff-max` clamp being reached on two joints,
+  and the friction band below all have to be re-taken on a healthy arm.
+- **The feedforward does not obviously settle.** In both learning runs it decayed under the
+  heterosynaptic leak with a time constant of minutes while the joint sat perfectly still, then
+  snapped back to the clamp once the arm finally slipped. The mechanism would be that static
+  friction makes the climbing fibre lie: inside the friction band the joint reports no error, so the
+  reflex's standing duty -- which is the teaching signal -- falls to zero while the load is still
+  entirely there. Whether that band is a property of the gearboxes or an artefact of the supply
+  collapsing is exactly what the re-measurement has to separate.
 - **What it can learn is bounded by its mossy fibres.** They carry pose, velocity, tracking error
   and current, so it can learn gravity, joint friction and a fixed payload -- but nothing tells it
   which of two payloads is in the gripper, so it cannot tell them apart. Camera features are the
