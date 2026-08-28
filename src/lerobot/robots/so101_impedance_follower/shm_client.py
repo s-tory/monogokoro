@@ -48,6 +48,10 @@ FAULT_OVERCURRENT = 1 << 2
 # The *leader* arm's bus failed, so force feedback is dropped. Deliberately distinct from
 # FAULT_COMMS_ERROR: this one does not mean the robot stopped tracking.
 FAULT_LEADER_COMMS_ERROR = 1 << 3
+# At least one joint is outside the daemon's `--pos-min`/`--pos-max`. Worth its own bit because a
+# joint the limits are holding at zero PWM looks exactly like the watchdog, a blind run, or a gain
+# that is simply too soft.
+FAULT_POS_LIMIT = 1 << 4
 
 # `cerebellum_flags` bits, mirroring `cerebellum::mod`'s CEREBELLUM_* constants. They describe why
 # the feedforward is what it is, which is otherwise unanswerable from the outside: a zero

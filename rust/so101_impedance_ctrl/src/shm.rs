@@ -78,6 +78,10 @@ pub const FAULT_OVERCURRENT: u32 = 1 << 2;
 /// consequences differ: the follower losing its bus stops the robot, whereas the leader losing
 /// its bus only drops force feedback -- the follower keeps tracking normally.
 pub const FAULT_LEADER_COMMS_ERROR: u32 = 1 << 3;
+/// At least one joint is outside `--pos-min`/`--pos-max`. Reported because the symptom is
+/// otherwise indistinguishable from several unrelated ones: a joint the limits are holding at zero
+/// PWM looks exactly like the watchdog, a blind run, or a gain that is simply too soft.
+pub const FAULT_POS_LIMIT: u32 = 1 << 4;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -26,6 +26,7 @@ from lerobot.robots.so101_impedance_follower.checker import (
 )
 from lerobot.robots.so101_impedance_follower.shm_client import (
     FAULT_COMMS_ERROR,
+    FAULT_POS_LIMIT,
     FAULT_WATCHDOG_TIMEOUT,
     CommandKind,
     ImpedanceShmClientError,
@@ -158,6 +159,18 @@ def test_describe_faults_reports_known_flags(checker):
 
     assert any("watchdog_timeout" in f for f in faults)
     assert any("comms_error" in f for f in faults)
+
+
+def test_describe_faults_reports_a_joint_past_its_soft_limits(checker):
+    """The symptom is otherwise ambiguous: a joint the limits hold at zero PWM looks exactly like
+    the watchdog, a blind run, or a gain that is simply too soft."""
+    c, client_mock = checker
+    client_mock.read_output.return_value = _telemetry(fault_flags=FAULT_POS_LIMIT)
+
+    faults = c.describe_faults()
+
+    assert len(faults) == 1
+    assert "pos_limit" in faults[0]
 
 
 def test_describe_faults_empty_when_no_faults(checker):

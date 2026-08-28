@@ -719,6 +719,12 @@ fn main() {
     let mut blind_ticks: u32 = 0;
     // The first accepted read has nothing to be implausible against -- `prev_pos` is still zeros.
     let mut pos_seeded = false;
+    // Where each joint was last seen inside the soft limits, which is what tells `apply_soft_limits`
+    // which way "back" is when the short way round runs through the encoder seam. `None` until the
+    // joint has been observed in range at least once; a daemon started with the arm already outside
+    // its limits has nothing to appeal to and says so rather than guessing.
+    let mut last_in_range: [Option<f32>; NUM_MOTORS] = [None; NUM_MOTORS];
+    let mut pos_limit_latch: [CommsFailureLatch; NUM_MOTORS] = Default::default();
     let mut current_latches: [CommsFailureLatch; NUM_MOTORS] = Default::default();
     let mut write_latch = CommsFailureLatch::default();
     let mut timing = LoopTiming::default();
@@ -888,6 +894,43 @@ fn main() {
         }
         prev_pos = present_pos;
 
+        let mut past_limits = false;
+        for i in 0..NUM_MOTORS {
+            if present_pos[i] > args.pos_min && present_pos[i] < args.pos_max {
+                last_in_range[i] = Some(present_pos[i]);
+                if let Some(n) = pos_limit_latch[i].recover() {
+                    log::info!("motor {} is back inside its limits after {n} tick(s)", MOTOR_IDS[i]);
+                }
+            } else {
+                past_limits = true;
+                // Edge-triggered, and worth a line each way: a joint the limits are holding looks
+                // identical from the outside to the watchdog, a blind run, or a K that is too low.
+                if pos_limit_latch[i].fail() {
+                    match last_in_range[i] {
+                        Some(back) => log::warn!(
+                            "motor {} is outside [{}, {}] at {:.0} -- driving it back toward {back:.0} \
+                             only ({:+.0} counts, the short way round)",
+                            MOTOR_IDS[i],
+                            args.pos_min,
+                            args.pos_max,
+                            present_pos[i],
+                            wrapped_delta(back, present_pos[i]),
+                        ),
+                        None => log::error!(
+                            "motor {} is outside [{}, {}] at {:.0} and has not been seen inside them \
+                             since startup -- both ways back are a guess, so it is not being driven \
+                             back. Move it into range by hand, or command it a target on its own \
+                             side of the seam",
+                            MOTOR_IDS[i],
+                            args.pos_min,
+                            args.pos_max,
+                            present_pos[i],
+                        ),
+                    }
+                }
+            }
+        }
+
         // All 6 motors -- including the gripper -- go through the same impedance law. A rigidly
         // position-controlled gripper has no compliance: it keeps commanding full force toward
         // its target position regardless of contact, which crushes fragile objects before it can
@@ -940,7 +983,13 @@ fn main() {
                 // be too. Soft limits are applied last so they still veto a feedforward that would
                 // drive a joint further past its limit.
                 let total = (fb_pwm[i] + ff_pwm[i]).clamp(-args.pwm_max, args.pwm_max);
-                apply_soft_limits(total, present_pos[i], args.pos_min, args.pos_max)
+                apply_soft_limits(
+                    total,
+                    present_pos[i],
+                    args.pos_min,
+                    args.pos_max,
+                    last_in_range[i],
+                )
             } else {
                 0.0 // watchdog / blind: fail-safe zero output, independent of Python
             };
@@ -1004,6 +1053,9 @@ fn main() {
         }
         if leader.as_ref().is_some_and(|l| l.comms_error) {
             fault_flags |= shm::FAULT_LEADER_COMMS_ERROR;
+        }
+        if past_limits {
+            fault_flags |= shm::FAULT_POS_LIMIT;
         }
 
         shm::seqlock_write(&layout.output.seq, &mut layout.output.data, |o| {

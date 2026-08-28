@@ -2,8 +2,8 @@
 //! shared memory involved.
 
 use so101_impedance_ctrl::control::{
-    finite_difference_velocity, first_implausible_step, impedance_pwm, input_is_fresh,
-    MovingAverage,
+    apply_soft_limits, finite_difference_velocity, first_implausible_step, impedance_pwm,
+    input_is_fresh, MovingAverage,
 };
 
 /// One tick's worth of budget at the shipped defaults: 20000 counts/s at 400 Hz.
@@ -232,4 +232,44 @@ fn the_first_implausible_motor_is_the_one_reported() {
     let values = [400, 2000, 3400, 3905, 2900, 3900];
     let (i, _) = first_implausible_step(&values, &prev, TICK_BUDGET).expect("rejected");
     assert_eq!(i, 1);
+}
+
+/// Inside the limits the function is a pass-through, whatever it remembers.
+#[test]
+fn soft_limits_do_not_touch_a_joint_in_range() {
+    assert_eq!(apply_soft_limits(500.0, 2000.0, 100.0, 3995.0, Some(2000.0)), 500.0);
+    assert_eq!(apply_soft_limits(-500.0, 2000.0, 100.0, 3995.0, None), -500.0);
+}
+
+/// Past a limit with no seam in the way, the remembered position and the raw rule agree: outward
+/// is blocked, inward is allowed.
+#[test]
+fn past_a_limit_only_the_way_back_is_allowed() {
+    // Past pos_max, last seen at 3000 -- back is negative.
+    assert_eq!(apply_soft_limits(500.0, 4000.0, 100.0, 3995.0, Some(3000.0)), 0.0);
+    assert_eq!(apply_soft_limits(-500.0, 4000.0, 100.0, 3995.0, Some(3000.0)), -500.0);
+}
+
+/// The measured trap. A joint at 4051 whose target is 123 is *past `pos_max`* by the raw rule, so
+/// the positive command that is the short way home looks like driving further out. Having watched
+/// it leave from 121 is what turns that around.
+#[test]
+fn a_joint_that_left_through_the_seam_is_driven_back_through_it() {
+    let (pwm, pos) = (500.0, 4051.0);
+    // The raw rule -- what `None` falls back to -- blocks the only useful direction.
+    assert_eq!(apply_soft_limits(pwm, pos, 100.0, 3995.0, None), 0.0);
+    // Remembering 121 makes the short way round (+166) the escape, so the same command is allowed.
+    assert_eq!(apply_soft_limits(pwm, pos, 100.0, 3995.0, Some(121.0)), pwm);
+    // ...and the other direction, which would drive it deeper past pos_max, is not.
+    assert_eq!(apply_soft_limits(-pwm, pos, 100.0, 3995.0, Some(121.0)), 0.0);
+}
+
+/// A daemon started with the arm already outside its limits has no observation to appeal to. It
+/// must not invent one: the raw rule still keeps it off the seam, and the fault flag asks a human.
+#[test]
+fn without_history_the_raw_rule_still_applies() {
+    assert_eq!(apply_soft_limits(500.0, 4051.0, 100.0, 3995.0, None), 0.0);
+    assert_eq!(apply_soft_limits(-500.0, 4051.0, 100.0, 3995.0, None), -500.0);
+    assert_eq!(apply_soft_limits(-500.0, 50.0, 100.0, 3995.0, None), 0.0);
+    assert_eq!(apply_soft_limits(500.0, 50.0, 100.0, 3995.0, None), 500.0);
 }

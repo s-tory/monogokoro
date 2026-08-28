@@ -89,12 +89,6 @@ pub fn impedance_pwm(
     raw.clamp(-pwm_max, pwm_max)
 }
 
-/// Zeroes any command that would drive a servo further past a soft position limit.
-///
-/// `pwm` and the limits are both in the *position-increasing* convention: positive `pwm` is
-/// whatever moves `Present_Position` up, regardless of how the hardware's direction bit is wired
-/// (that is applied later, at encode time). Motion back toward the middle is always allowed, so a
-/// joint that is already past a limit can recover instead of being stuck there.
 /// PWM to render on a leader-side joint so the operator feels the follower's tracking error.
 ///
 /// `follower_error` is the follower joint's own `target - present` gap, in follower encoder
@@ -139,14 +133,54 @@ pub fn first_implausible_step(values: &[i32], prev: &[f32], budget: f32) -> Opti
         })
 }
 
-pub fn apply_soft_limits(pwm: f32, present_pos: f32, pos_min: f32, pos_max: f32) -> f32 {
-    if present_pos <= pos_min && pwm < 0.0 {
-        return 0.0;
+/// Zeroes any command that would drive a servo further past a soft position limit.
+///
+/// `pwm` and the limits are both in the *position-increasing* convention: positive `pwm` is
+/// whatever moves `Present_Position` up, regardless of how the hardware's direction bit is wired
+/// (that is applied later, at encode time). Motion back toward the middle is always allowed, so a
+/// joint that is already past a limit can recover instead of being stuck there.
+///
+/// That last promise is what `last_in_range` is for. The limits are an interval on a line while
+/// [`wrapped_delta`] treats position as a circle, and the two disagree about which way "back" is.
+/// Measured on the arm: a joint sitting at 4051 with its target at 123 has every positive command
+/// looking like "further past `pos_max`" to the raw rule, while the short way back to that target
+/// is positive and runs through the 4095/0 seam. Judging by the raw sign parks the joint there for
+/// as long as the target stands -- the exact opposite of recovery.
+///
+/// So once the joint is outside the limits the question becomes *does this move it toward where it
+/// was last seen legally*, which the loop observed rather than inferred. `None` means it has not
+/// been seen inside the limits at all since startup: there is no observation to appeal to, so this
+/// falls back to the raw rule, which is right whenever the travel does not cross the seam and
+/// declines to guess when it does.
+pub fn apply_soft_limits(
+    pwm: f32,
+    present_pos: f32,
+    pos_min: f32,
+    pos_max: f32,
+    last_in_range: Option<f32>,
+) -> f32 {
+    let past_min = present_pos <= pos_min;
+    let past_max = present_pos >= pos_max;
+    if !past_min && !past_max {
+        return pwm;
     }
-    if present_pos >= pos_max && pwm > 0.0 {
-        return 0.0;
+    match last_in_range {
+        Some(back) => {
+            let escape = wrapped_delta(back, present_pos);
+            if escape == 0.0 || pwm.signum() == escape.signum() {
+                pwm
+            } else {
+                0.0
+            }
+        }
+        None => {
+            if (past_min && pwm < 0.0) || (past_max && pwm > 0.0) {
+                0.0
+            } else {
+                pwm
+            }
+        }
     }
-    pwm
 }
 
 /// Finite-difference velocity estimate between two successive position samples `dt_s` apart.

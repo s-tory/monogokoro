@@ -57,6 +57,7 @@ from .shm_client import (
     FAULT_COMMS_ERROR,
     FAULT_LEADER_COMMS_ERROR,
     FAULT_OVERCURRENT,
+    FAULT_POS_LIMIT,
     FAULT_WATCHDOG_TIMEOUT,
     CommandKind,
     ImpedanceShmClient,
@@ -193,6 +194,11 @@ class SO101ImpedanceChecker:
             faults.append("overcurrent")
         if flags & FAULT_LEADER_COMMS_ERROR:
             faults.append("leader_comms_error (force feedback dropped; the follower is unaffected)")
+        if flags & FAULT_POS_LIMIT:
+            faults.append(
+                "pos_limit (a joint is outside --pos-min/--pos-max; it is driven back only toward "
+                "where it was last seen in range, and not driven at all if it was never seen there)"
+            )
         return faults
 
     def describe_cerebellum(self) -> str:
