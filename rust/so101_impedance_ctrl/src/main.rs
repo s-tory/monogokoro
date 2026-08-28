@@ -16,6 +16,7 @@ use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConf
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_startup_config, finite_difference_velocity, impedance_pwm,
     input_is_fresh, log_homing_offsets, log_supply_and_temperature, poll_and_apply_commands,
+    read_supply_and_temperature,
     wrapped_delta, MovingAverage,
     PositionGate,
 };
@@ -172,7 +173,10 @@ struct Cli {
     /// springing back. Since that is a hardware-damaging default to get wrong, it ships as the
     /// measured value rather than as something to discover. Pass `--invert-pwm false` if your
     /// servos are wired the other way; re-run the probe to check.
-    #[arg(long, default_value_t = true)]
+    // `action = Set` so this actually takes a value. As a bare `bool` clap makes it a flag that can
+    // only ever be turned *on*, and the default is already on -- so `--invert-pwm false`, which the
+    // line above tells you to reach for when the arm runs away, was rejected outright.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     invert_pwm: bool,
 
     /// Soft position limits in raw encoder ticks. PWM that would drive a joint further past these
@@ -242,7 +246,9 @@ struct Cli {
     /// zero and the arm stays limp while you move it by hand and watch the positions. Pass
     /// `--sync-read false` to fall back to per-motor reads (and drop `--loop-hz` to ~300, since
     /// that path costs eight transactions per tick instead of three).
-    #[arg(long, default_value_t = true)]
+    // See `--invert-pwm`: same fix, same reason. This one is the fallback the README sends you to
+    // when SYNC_READ misbehaves on unfamiliar hardware, so it has to work on the day it is needed.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     sync_read: bool,
 
     // ---- cerebellum -------------------------------------------------------------------------
@@ -563,6 +569,33 @@ fn monotonic_ns() -> u64 {
     ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
 }
 
+#[cfg(test)]
+mod cli_tests {
+    use super::Cli;
+    use clap::Parser;
+
+    fn parse(extra: &[&str]) -> Cli {
+        let mut argv = vec!["so101_impedance_ctrl", "--port", "/dev/null", "--shm-name", "t"];
+        argv.extend_from_slice(extra);
+        Cli::try_parse_from(argv).expect("should parse")
+    }
+
+    /// Both of these default to `true` and their own help text tells you to pass `false`. Declared
+    /// as bare `bool`s they became flags that could only be turned on, so the two escape hatches
+    /// this daemon documents -- for a runaway and for a bus that cannot sustain SYNC_READ -- were
+    /// rejected by the argument parser on the day you needed them.
+    #[test]
+    fn the_boolean_escape_hatches_can_actually_be_turned_off() {
+        assert!(parse(&[]).invert_pwm);
+        assert!(!parse(&["--invert-pwm", "false"]).invert_pwm);
+        assert!(!parse(&["--invert-pwm=false"]).invert_pwm);
+
+        assert!(parse(&[]).sync_read);
+        assert!(!parse(&["--sync-read", "false"]).sync_read);
+        assert!(!parse(&["--sync-read=false"]).sync_read);
+    }
+}
+
 fn main() {
     env_logger::init();
     let args = Cli::parse();
@@ -741,6 +774,7 @@ fn main() {
     let loop_period = Duration::from_secs_f64(1.0 / args.loop_hz);
     let max_pos_step = args.max_pos_slew * loop_period.as_secs_f32();
     let mut pos_gate = PositionGate::new(max_pos_step);
+    let mut health_motor = 0usize;
     let watchdog_timeout_ns = args.watchdog_timeout_ms * 1_000_000;
 
     // Seeded to all-zero (zero targets/gains -> zero PWM) so the very first tick, before Python
@@ -1103,6 +1137,20 @@ fn main() {
         );
         if let Some(summary) = timing.take_summary_if_due(loop_period) {
             log::info!("{summary}");
+            // Sampled here, inside the summary's own branch, so it costs two transactions a second
+            // and lands on a tick that was already doing extra work. Under load is the only place
+            // the number means anything: an idle rail says nothing about a supply that cannot hold
+            // up two joints carrying the arm's weight.
+            health_motor = (health_motor + 1) % NUM_MOTORS;
+            if let Some((volts, temp)) =
+                read_supply_and_temperature(&mut bus, MOTOR_IDS[health_motor])
+            {
+                log::info!(
+                    "motor {}: supply {:.1} V, temperature {temp} C",
+                    MOTOR_IDS[health_motor],
+                    volts as f32 / 10.0
+                );
+            }
             if let Some(c) = cerebellum.as_ref() {
                 log::info!("{}", c.summarise());
             }

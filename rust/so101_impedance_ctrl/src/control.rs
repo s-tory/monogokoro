@@ -418,8 +418,9 @@ pub fn apply_startup_config(bus: &mut FeetechBus, motor_ids: &[u8]) {
 /// symptom. When this arm's bus started dropping a position read every four seconds, the only way
 /// to reason about why was to read the corrupted bytes out of the log and infer from their shape.
 ///
-/// One transaction per motor per register, at startup only. Whether it is worth paying for these
-/// periodically is a question to answer with the numbers this prints, not before.
+/// One transaction per motor per register. The startup pass reads all six; the periodic one reads
+/// a single motor, because *when* the rail sags is the question a startup number cannot answer --
+/// the arm was idle then. See [`read_supply_and_temperature`].
 pub fn log_supply_and_temperature(bus: &mut FeetechBus, motor_ids: &[u8]) {
     for &id in motor_ids {
         let volts = match bus.read_register(id, feetech::REG_PRESENT_VOLTAGE) {
@@ -432,6 +433,24 @@ pub fn log_supply_and_temperature(bus: &mut FeetechBus, motor_ids: &[u8]) {
         };
         log::info!("motor {id}: supply {volts}, temperature {temp}");
     }
+}
+
+/// One motor's supply voltage (in 0.1 V units) and case temperature, for the per-second summary.
+///
+/// Read one motor at a time, round-robin, for the same reason the current reads are: six
+/// registers on one tick makes that tick twice as expensive as the rest, and those fat ticks were
+/// the entire overrun population when this loop was first measured. Two transactions once a second
+/// is 0.16% of the bus against the control loop's 1200 per second.
+///
+/// The rail is shared, so any one motor answers the question this exists for: a supply that reads
+/// fine with the arm limp and sags once two joints are holding their own weight is a supply that
+/// is too small, and only a reading taken *under load* can tell those apart.
+pub fn read_supply_and_temperature(bus: &mut FeetechBus, motor_id: u8) -> Option<(u32, u32)> {
+    let volts = bus.read_register(motor_id, feetech::REG_PRESENT_VOLTAGE).ok()?;
+    let temp = bus
+        .read_register(motor_id, feetech::REG_PRESENT_TEMPERATURE)
+        .ok()?;
+    Some((volts as u32, temp as u32))
 }
 
 pub fn log_homing_offsets(bus: &mut FeetechBus, motor_ids: &[u8]) {
