@@ -367,8 +367,9 @@ way", which look identical from across the room; and `cargo test --test cerebell
 - **Open-loop PWM** is noisier than true torque control -- the STS3215 has no host-streamable torque
   register, so this is a constraint of the hardware rather than a choice.
 - **The daemon is not part of the Python build.** It is a separate Cargo project, deployed by hand.
-- **Interactive calibration** for the impedance robot is not implemented; copy a calibration
-  produced with the stock `so101_follower` against the same servos.
+- **Interactive calibration and `setup-motors`** are not implemented for the impedance robot. Run
+  both with the stock `so101_follower` against the same servos, then copy the calibration across --
+  the two robot types write to different directories.
 
 ## Upstream
 
