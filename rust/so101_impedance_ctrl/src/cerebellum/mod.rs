@@ -718,21 +718,32 @@ fn monotonic_ns() -> u64 {
     ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
 }
 
-/// Magic + version for the weights file.
-const WEIGHTS_MAGIC: &[u8; 8] = b"SO101CB1";
+/// Magic + version for the weights file. Bumped to `2` when `MF_DIM` joined the header, because a
+/// v1 file records nothing about how many mossy fibres it was trained against.
+const WEIGHTS_MAGIC: &[u8; 8] = b"SO101CB2";
+
+/// Bytes before the weights themselves: magic, `gc_dim`, `NUM_OUTPUTS`, `MF_DIM`, `seed`.
+const WEIGHTS_HEADER_LEN: usize = 28;
 
 /// Persists Purkinje weights.
 ///
 /// Binary rather than text because there are `NUM_OUTPUTS * gc_dim` of them -- ~98k at the default
-/// -- and nobody is going to read them. The header carries `gc_dim` and the seed because a weight
-/// vector is only meaningful against the exact random projection that produced it: loading one
-/// against a different granule code would not be degraded, it would be arbitrary, and it would be
-/// arbitrary *on a real arm*. [`load_weights`] refuses rather than reinterpreting.
+/// -- and nobody is going to read them. The header carries `gc_dim`, `MF_DIM` and the seed because
+/// a weight vector is only meaningful against the exact random projection that produced it:
+/// loading one against a different granule code would not be degraded, it would be arbitrary, and
+/// it would be arbitrary *on a real arm*. [`load_weights`] refuses rather than reinterpreting.
+///
+/// `MF_DIM` earns its place separately from the other two. [`net::GranuleParams::generate`] draws
+/// its fibre indices with `rng.below(MF_DIM)`, so widening the mossy-fibre vector -- adding a
+/// context signal, say -- reshuffles every draw and with it the whole projection, while leaving
+/// `gc_dim`, the output count and the seed exactly as they were. Without this field that is the
+/// one change to the granule code that passes every check in the header.
 pub fn save_weights(path: &Path, weights: &[f32], gc_dim: usize, seed: u64) -> std::io::Result<()> {
-    let mut buf = Vec::with_capacity(32 + weights.len() * 4);
+    let mut buf = Vec::with_capacity(WEIGHTS_HEADER_LEN + weights.len() * 4);
     buf.extend_from_slice(WEIGHTS_MAGIC);
     buf.extend_from_slice(&(gc_dim as u32).to_le_bytes());
     buf.extend_from_slice(&(NUM_OUTPUTS as u32).to_le_bytes());
+    buf.extend_from_slice(&(MF_DIM as u32).to_le_bytes());
     buf.extend_from_slice(&seed.to_le_bytes());
     for w in weights {
         buf.extend_from_slice(&w.to_le_bytes());
@@ -747,20 +758,26 @@ pub fn load_weights(path: &Path, gc_dim: usize, seed: u64) -> Result<Option<Vec<
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e.to_string()),
     };
-    if bytes.len() < 24 || &bytes[..8] != WEIGHTS_MAGIC {
+    if bytes.len() < WEIGHTS_HEADER_LEN || &bytes[..8] != WEIGHTS_MAGIC {
         return Err("not a cerebellum weights file (bad magic)".to_string());
     }
     let stored_gc = u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as usize;
     let stored_outputs = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
-    let stored_seed = u64::from_le_bytes(bytes[16..24].try_into().unwrap());
-    if stored_gc != gc_dim || stored_outputs != NUM_OUTPUTS || stored_seed != seed {
+    let stored_mf = u32::from_le_bytes(bytes[16..20].try_into().unwrap()) as usize;
+    let stored_seed = u64::from_le_bytes(bytes[20..28].try_into().unwrap());
+    if stored_gc != gc_dim
+        || stored_outputs != NUM_OUTPUTS
+        || stored_mf != MF_DIM
+        || stored_seed != seed
+    {
         return Err(format!(
-            "file holds gc_dim={stored_gc} outputs={stored_outputs} seed={stored_seed:#x}, this \
-             run is gc_dim={gc_dim} outputs={NUM_OUTPUTS} seed={seed:#x} -- these weights only \
-             mean anything against the granule code that produced them"
+            "file holds gc_dim={stored_gc} outputs={stored_outputs} mf_dim={stored_mf} \
+             seed={stored_seed:#x}, this run is gc_dim={gc_dim} outputs={NUM_OUTPUTS} \
+             mf_dim={MF_DIM} seed={seed:#x} -- these weights only mean anything against the \
+             granule code that produced them"
         ));
     }
-    let payload = &bytes[24..];
+    let payload = &bytes[WEIGHTS_HEADER_LEN..];
     let expected = NUM_OUTPUTS * gc_dim;
     if payload.len() != expected * 4 {
         return Err(format!(

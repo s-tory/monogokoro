@@ -348,6 +348,21 @@ fn weights_round_trip_through_a_file() {
     assert!(load_weights(&path, TEST_GC_DIM, TEST_SEED ^ 1).is_err());
     assert!(load_weights(&path, TEST_GC_DIM * 2, TEST_SEED).is_err());
 
+    // The case MF_DIM is in the header for. Widening the mossy-fibre vector reshuffles every draw
+    // in `GranuleParams::generate`, but leaves gc_dim, the output count and the seed untouched --
+    // so without this field the load would succeed and put an arbitrary feedforward on the arm.
+    // MF_DIM is a compile-time constant, so the only way to produce that file here is to patch the
+    // header directly.
+    let mut wider = std::fs::read(&path).unwrap();
+    wider[16..20].copy_from_slice(&((MF_DIM + 2) as u32).to_le_bytes());
+    let wider_path = dir.join("wider_mf.bin");
+    std::fs::write(&wider_path, &wider).unwrap();
+    assert!(
+        load_weights(&wider_path, TEST_GC_DIM, TEST_SEED).is_err(),
+        "weights trained against {} mossy fibres were accepted for a run with {MF_DIM}",
+        MF_DIM + 2
+    );
+
     // A missing file is the normal first-run case, not an error.
     assert!(
         load_weights(&dir.join("absent.bin"), TEST_GC_DIM, TEST_SEED)
