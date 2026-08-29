@@ -52,6 +52,11 @@ The ~13x separation between the reflex and ACT is roughly the one biology runs a
 reason the control law does not live in Python. The cerebellum sits between them and, like its
 namesake, _outside_ the reflex arc -- it corrects the loop without ever being inside it.
 
+The pontine relay has no row in that table, because it is not a rung on this ladder -- it is a
+path. It carries context down from the top of the stack to the cerebellum's mossy fibres, closes no
+loop of its own, and therefore has no rate. What it carries, and what it deliberately does not, is
+[section 5](#5-a-pontine-relay-so-the-cerebellum-can-be-told-what-it-is-holding).
+
 The top row is the cheapest thing in this repository and possibly the most load-bearing. Contact
 transients are faster than any loop on the list: a fingertip meeting an object produces its force
 spike well inside the reflex's 2.5 ms tick, so whatever answers it _first_ cannot be a controller at
