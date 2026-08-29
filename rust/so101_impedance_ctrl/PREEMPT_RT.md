@@ -130,7 +130,7 @@ thread. Don't. It buys nothing here, and it costs a P-core.
   changes what that queue is doing.
 - **The GPU's service path is on housekeeping cores by construction.** Driver workqueues, the DRM
   scheduler and GPU completion interrupts all run wherever the kernel puts them -- and §1's whole
-  purpose is to steer interrupts *away* from the isolated core. So a `SCHED_FIFO` thread pinned to
+  purpose is to steer interrupts _away_ from the isolated core. So a `SCHED_FIFO` thread pinned to
   an isolated core would submit deterministically and then wait on a fence completed by threads
   that are not isolated at all.
 - **The thread has no deadline.** The load it predicts is quasi-static, so a feedforward a few

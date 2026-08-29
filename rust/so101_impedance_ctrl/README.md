@@ -90,20 +90,20 @@ is an FTDI feature these CH343 bridges do not have).
 
 So count transactions, not bytes:
 
-| configuration                                    | transactions/tick | measured mean | sustains |
-| ------------------------------------------------ | ----------------- | ------------- | -------- |
-| per-motor READ, current batched every 10th tick  | 7, but 13 on the batched tick | 2.30 ms | 300 Hz with 10% overruns |
-| per-motor READ, current round-robin              | 8                 | 2.39 ms       | 300 Hz cleanly |
-| **SYNC_READ, current round-robin (default)**     | **3**             | ~0.8 ms       | **400 Hz with headroom** |
+| configuration                                   | transactions/tick             | measured mean | sustains                 |
+| ----------------------------------------------- | ----------------------------- | ------------- | ------------------------ |
+| per-motor READ, current batched every 10th tick | 7, but 13 on the batched tick | 2.30 ms       | 300 Hz with 10% overruns |
+| per-motor READ, current round-robin             | 8                             | 2.39 ms       | 300 Hz cleanly           |
+| **SYNC_READ, current round-robin (default)**    | **3**                         | ~0.8 ms       | **400 Hz with headroom** |
 
 The middle row is the useful lesson: batching all six current reads onto one tick made that tick
-twice as expensive as the rest, and those fat ticks were *every single overrun*. Sampling one
+twice as expensive as the rest, and those fat ticks were _every single overrun_. Sampling one
 motor per tick round-robin costs the same one extra transaction every time, which removes the
 spike instead of making it rarer -- and refreshes each motor more often than the batched version
 did. Current only feeds a moving average that ACT reads at camera rate, so staggering the six
 samples in time costs nothing.
 
-Do not chase rate beyond this. What limits how the arm *feels* is open-loop PWM and gearbox
+Do not chase rate beyond this. What limits how the arm _feels_ is open-loop PWM and gearbox
 friction, not the loop period; 400 Hz is already far past the arm's mechanical bandwidth and more
 than 10x ACT's ~30 Hz. Size `--loop-hz` from the summary the daemon logs every second -- pick a
 period above the observed `max` -- rather than from arithmetic.
@@ -145,7 +145,7 @@ runs ahead of the achieved one, and that gap grows with how hard the operator is
 squeeze. Render the gap as leader duty and it becomes resistance in their hand. This is classic
 position-position bilateral -- no load cell, no current sensing.
 
-Deliberately *not* driven by the follower's `Present_Current`: that is averaged over ~0.5 s so it is
+Deliberately _not_ driven by the follower's `Present_Current`: that is averaged over ~0.5 s so it is
 usable as an ACT observation, which is an eternity for haptics.
 
 ### Bring-up, in this order
@@ -165,7 +165,7 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 ```
 
 **The gain is signed and the sign must be measured.** Which encoder direction means "closed" is a
-property of each gripper's calibration and the two arms need not agree. If the trigger *assists*
+property of each gripper's calibration and the two arms need not agree. If the trigger _assists_
 your squeeze instead of resisting it, stop and negate the gain: that polarity is positive feedback
 through your own hand. `--leader-pwm-max` (default 250, far below `--pwm-max`) is what bounds a
 wrong sign to something you can overpower.
@@ -175,7 +175,7 @@ wrong sign to something you can overpower.
 The two arms are on separate ports, so the half-duplex constraint does not couple them; the leader
 adds 2 transactions to the tick's 3. Sequentially that is ~1.3 ms against a 2.5 ms period at 400 Hz,
 which fits without doing anything clever. If it ever stops fitting, the lever is that ~256 us per
-transaction is USB *waiting*, not work: issuing both ports' requests before blocking on either reply
+transaction is USB _waiting_, not work: issuing both ports' requests before blocking on either reply
 overlaps the two round trips. Measure before reaching for it -- the summary reports the leader's
 share separately for exactly this decision.
 
@@ -186,7 +186,7 @@ trigger buzzes in the operator's hand.
 ### One loop, two arms
 
 The leader shares the follower's control loop rather than running its own thread. Two independent
-loops would let their phase free-run, injecting up to a full period of *variable* delay into the
+loops would let their phase free-run, injecting up to a full period of _variable_ delay into the
 coupling -- and variable delay is what destabilises a bilateral loop. A single tick keeps both
 arms' samples in lockstep by construction, which is simpler and also more correct.
 
@@ -209,13 +209,13 @@ A PD law droops under a constant load by `err = holding_duty / K`, so K follows 
 accept -- and more generally `K_new = K * err / err_wanted` from any hold test. Targeting ~5 counts
 (0.4 deg) gives the shipped `SO101ImpedanceFollowerConfig.default_k`. Note the flip side: K also
 sets where PWM saturates, at `pwm_max / K` counts -- K=20 is full duty at 4.4 deg, which is the
-compliance range you actually feel. Wanting both a small droop *and* a wide compliance range means
+compliance range you actually feel. Wanting both a small droop _and_ a wide compliance range means
 adding gravity feedforward, not raising K.
 
 D is bounded from above by velocity noise, not by stability. Position is quantised to whole counts,
 so the filtered finite difference has a noise floor near `1 / (vel_filter_window * dt)` -- ~50
 counts/s at the defaults -- and D turns that straight into PWM chatter. `K/40` keeps it under ~2%
-duty. Raising `--loop-hz` makes this *worse*, which is why `--vel-filter-window` exists: averaging
+duty. Raising `--loop-hz` makes this _worse_, which is why `--vel-filter-window` exists: averaging
 N per-tick differences telescopes exactly to the N-tick difference, dividing the noise by N for
 N/2 ticks of lag, with no attenuation of a real velocity.
 
@@ -240,14 +240,14 @@ position: the learned weights start at zero, so an untrained network contributes
 
 Marr-Albus-Ito, mapped onto the hardware more or less directly:
 
-| cerebellum | here |
-| --- | --- |
-| mossy fibres | 30 signals: per joint, encoder phase as `(sin, cos)`, velocity, tracking error, current |
-| granule cells | 16384 units, each reading 4 mossy fibres through a **fixed random** projection |
-| Golgi inhibition | one global subtractive threshold, driven by feedback on the measured active fraction |
-| parallel fibres | the granule code, L2-normalised, with a ~150 ms eligibility trace |
-| Purkinje cells | 6 outputs, a linear readout -- **the only learned layer** |
-| climbing fibres | the reflex's own standing duty, low-passed and gated |
+| cerebellum        | here                                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| mossy fibres      | 30 signals: per joint, encoder phase as `(sin, cos)`, velocity, tracking error, current |
+| granule cells     | 16384 units, each reading 4 mossy fibres through a **fixed random** projection          |
+| Golgi inhibition  | one global subtractive threshold, driven by feedback on the measured active fraction    |
+| parallel fibres   | the granule code, L2-normalised, with a ~150 ms eligibility trace                       |
+| Purkinje cells    | 6 outputs, a linear readout -- **the only learned layer**                               |
+| climbing fibres   | the reflex's own standing duty, low-passed and gated                                    |
 | PF->PC plasticity | `dW = rate * (cf * e - leak * W * e)` -- three-factor Hebbian with heterosynaptic decay |
 
 **There is no backpropagation, and none is needed.** The expansion layer is not learned, so there
@@ -262,7 +262,7 @@ raw count would make the network see a full-scale jump where the joint moved one
 a feedforward with a cliff in it.
 
 The granule code is normalised to unit length so that `--cerebellum-rate` means one thing
-regardless of layer size: *the fraction of the remaining error corrected per step*, i.e. a time
+regardless of layer size: _the fraction of the remaining error corrected per step_, i.e. a time
 constant of `1 / rate` steps. Without it the effective step size scales with `sum_j g_j^2`, and
 changing `--cerebellum-gc-dim` would silently retune how fast the arm learns.
 
@@ -271,14 +271,14 @@ changing `--cerebellum-gc-dim` would silently retune how fast the arm learns.
 Measured on the reference machine (Arc 140V / Mesa ANV 26.0.3), one full step -- submit plus fence
 wait, four dispatches:
 
-| `gc_dim` | mean | max |
-| -------- | ---- | --- |
+| `gc_dim` | mean   | max     |
+| -------- | ------ | ------- |
 | 1 024    | 174 us | 1036 us |
 | 4 096    | 190 us | 1078 us |
-| 16 384   | 307 us | 933 us |
+| 16 384   | 307 us | 933 us  |
 | 65 536   | 748 us | 1705 us |
 
-Two things fall out of that. Below ~4k cells the cost is *entirely* submission latency and the
+Two things fall out of that. Below ~4k cells the cost is _entirely_ submission latency and the
 compute is free, so a large granule layer is nearly as cheap as a small one. And the **max** is
 about a millisecond whatever the size -- on an otherwise idle desktop. A 400 Hz tick is 2.5 ms and
 already spends ~0.8 ms on the bus.
@@ -291,13 +291,13 @@ longer than the entire control period.
 That the control loop does not pay for any of it was checked rather than assumed, by alternating
 the two configurations 3 x 20 s each against a dead bus at 200 Hz, 10800 ticks per condition:
 
-| control loop | mean tick | overruns | worst tick |
-| --- | --- | --- | --- |
-| `--cerebellum-backend off` | 3219 us | 10 / 10800 | 7344 us |
-| `--cerebellum-backend gpu --cerebellum-cpu-core 1` | 3228 us | 9 / 10800 | 10971 us |
+| control loop                                       | mean tick | overruns   | worst tick |
+| -------------------------------------------------- | --------- | ---------- | ---------- |
+| `--cerebellum-backend off`                         | 3219 us   | 10 / 10800 | 7344 us    |
+| `--cerebellum-backend gpu --cerebellum-cpu-core 1` | 3228 us   | 9 / 10800  | 10971 us   |
 
 Mean cost and overrun rate are indistinguishable -- 0.3% and one fewer overrun, i.e. nothing. The
-worst-case tick swings by milliseconds in *both* columns, and one repetition had the cerebellum-off
+worst-case tick swings by milliseconds in _both_ columns, and one repetition had the cerebellum-off
 run produce the worse outlier, so that tail belongs to the laptop rather than to the GPU thread.
 Reproduce it by watching the daemon's own `loop timing` line with and without the flag; if enabling
 the cerebellum moves the mean or the overrun count, the core assignment is wrong.
@@ -307,7 +307,7 @@ That jitter is not something core isolation can remove:
 - The iGPU exposes **one queue family with one queue**, shared with graphics. Compute submissions
   queue behind whatever the compositor is doing; there is no async compute queue to escape to.
 - The GPU's kernel-side service path -- driver workqueues, the DRM scheduler, completion interrupts
-  -- runs on housekeeping cores *by construction*, because steering interrupts away from the RT
+  -- runs on housekeeping cores _by construction_, because steering interrupts away from the RT
   core is exactly what `irqaffinity=` does.
 
 So the cerebellum runs on its own thread, exchanging data with the control loop through two
@@ -319,7 +319,7 @@ quasi-static, so a feedforward a few milliseconds old is still correct. Biology 
 outside the stretch reflex's arc too.
 
 `--cerebellum-cpu-core` pins the thread; a **housekeeping** core, and the daemon refuses the RT
-core outright. A second *isolated* core is not worth taking, for the two reasons above -- there is
+core outright. A second _isolated_ core is not worth taking, for the two reasons above -- there is
 nothing about a fence wait that isolation can make deterministic, and the isolation that actually
 matters (this thread can never preempt the reflex) already follows from the reflex's core being
 isolated from everything else.
@@ -349,7 +349,7 @@ Two gates decide when it may learn at all:
 
 And the gripper is **not** in `--cerebellum-joints` by default, deliberately. A gripper holding an
 object shows exactly the signature this layer cancels -- a large, motionless, standing duty -- but
-that duty *is the grasp*. Learning it makes the gripper squeeze harder at the same commanded
+that duty _is the grasp_. Learning it makes the gripper squeeze harder at the same commanded
 position, and keep squeezing after the object is gone. On the arm joints contact is the exception
 and the error gate handles it; on the gripper contact is the normal case, so no gate can, and it is
 left out entirely.
@@ -382,7 +382,7 @@ integrator has saturated and nothing downstream can learn.
 
 ### Bring-up
 
-The checker's table gained an `ff` column, and watching it against `pwm` *is* the procedure:
+The checker's table gained an `ff` column, and watching it against `pwm` _is_ the procedure:
 
 ```bash
 python examples/check_so101_impedance.py --shm-name so101_impedance
@@ -400,7 +400,7 @@ the backend died, and those call for very different responses.
 ### Backends and build requirements
 
 `--cerebellum-backend cpu` runs the reference implementation in `src/cerebellum/net.rs` instead.
-That module is the *definition* of the math; the shaders are a second implementation of it, and
+That module is the _definition_ of the math; the shaders are a second implementation of it, and
 `tests/cerebellum_gpu_tests.rs` runs both step-by-step through learning and compares. A compute
 shader is not debuggable by reading it and its failure mode is wrong numbers rather than a crash,
 so the readable version is the authority and the fast one is held against it.
@@ -412,7 +412,6 @@ different speed" are things an operator has to be able to tell apart.
 Building needs `glslc` on `PATH` (`sudo apt install glslc`); running needs only a Vulkan ICD
 (`mesa-vulkan-drivers`). The `.spv` blobs are compiled by `build.rs` rather than committed, so a
 shader edit cannot ship without its binary being rebuilt.
-
 
 ## Protocol notes
 
@@ -452,10 +451,10 @@ can be re-derived on any host rather than taken on faith.
 
 Two coupled settings, both measured rather than assumed, both shipped as defaults:
 
-| setting            | value  | why                                                              |
-| ------------------ | ------ | ---------------------------------------------------------------- |
-| `--pwm-sign-bit`   | **10** | bit 11 (per `feetech.py`'s docstring) does not reverse the joint  |
-| `--invert-pwm`     | `true` | with the sign bit right, positive duty still lowers the encoder   |
+| setting          | value  | why                                                              |
+| ---------------- | ------ | ---------------------------------------------------------------- |
+| `--pwm-sign-bit` | **10** | bit 11 (per `feetech.py`'s docstring) does not reverse the joint |
+| `--invert-pwm`   | `true` | with the sign bit right, positive duty still lowers the encoder  |
 
 The probe output that settled it:
 
@@ -467,7 +466,7 @@ The probe output that settled it:
   2415 -> 2545 ticks (delta +130)      <- CORRECT
 ```
 
-The middle line is the trap: setting a *wrong* sign bit still changes the motion, because the bit
+The middle line is the trap: setting a _wrong_ sign bit still changes the motion, because the bit
 gets consumed as extra magnitude and clamps to full duty. So "the joint behaved differently" is not
 evidence the bit is right -- only the delta changing **sign** is. Bit 10 also fits the hardware: a
 0-1000 duty scale needs 10 bits, leaving bit 10 as the flag.

@@ -3,7 +3,7 @@
 **English** | [日本語](README_JP.md)
 
 A fork of [LeRobot](https://github.com/huggingface/lerobot) that gives the SO-101 two of the motor
-layers that sit *underneath* a policy: a **spinal reflex** whose joints and gripper yield to contact
+layers that sit _underneath_ a policy: a **spinal reflex** whose joints and gripper yield to contact
 instead of driving through it, and a **cerebellum** that learns, online, to cancel a load before the
 reflex has to feel it. ACT sees the resulting forces and commands how hard to resist them. A third
 layer sits below both and is not software at all -- a compliant fingertip, which answers contact
@@ -16,7 +16,7 @@ about. No policy architecture is modified.
 
 ## Why
 
-Almost everything called *Physical AI* is a story about the cortex. The layer that actually touches
+Almost everything called _Physical AI_ is a story about the cortex. The layer that actually touches
 physics -- the one that answers contact in real time -- has been left empty.
 
 The goal is to build the layers below the policy out of hardware anyone can buy and software anyone
@@ -26,35 +26,35 @@ integrated GPU that was already in it.
 Stock SO-101 control writes `Goal_Position` and lets the servo's internal PID drive there. That
 controller has no notion of contact: blocked by an object, it keeps increasing effort toward a
 position it will never reach. A potato chip snaps before the arm can be said to have felt it. And
-the policy has no vocabulary for the difference between *press firmly* and *hold gently* --
+the policy has no vocabulary for the difference between _press firmly_ and _hold gently_ --
 `Goal_Position` is the only thing it can say.
 
 Biology does not solve this in the brain. The stretch reflex is a spring-damper closed in the
 spinal cord, and descending commands do not specify force -- they set an equilibrium position and,
-via gamma motor neurons, the *gain* of that reflex.
+via gamma motor neurons, the _gain_ of that reflex.
 
 A reflex alone is not enough, and its shortfall is exactly measurable. It can only answer an error
 that has already happened, so a joint carrying a standing load sits `holding_duty / K` below its
 target forever, and the only way a feedback law can shrink that droop is to raise `K` -- to hand
-back the compliance it was there to provide. Cancelling the load *before* the error appears is a
+back the compliance it was there to provide. Cancelling the load _before_ the error appears is a
 different job, and biology gives it to a different structure.
 
 So there are four layers here, and each is where it is for a reason:
 
-| | biology | here | rate |
-| --- | --- | --- | --- |
-| answers contact with no loop at all | preflex: muscle and tissue | packing foam under a finger cot, on each jaw | -- |
-| fast local loop, brain not involved | stretch reflex | Rust daemon, `SCHED_FIFO`, isolated core | 400 Hz |
-| prediction, learned from its own errors | cerebellum | Vulkan compute on the iGPU, own thread | 200 Hz |
-| slow loop through perception | visual feedback | ACT | ~30 Hz |
+|                                         | biology                    | here                                         | rate   |
+| --------------------------------------- | -------------------------- | -------------------------------------------- | ------ |
+| answers contact with no loop at all     | preflex: muscle and tissue | packing foam under a finger cot, on each jaw | --     |
+| fast local loop, brain not involved     | stretch reflex             | Rust daemon, `SCHED_FIFO`, isolated core     | 400 Hz |
+| prediction, learned from its own errors | cerebellum                 | Vulkan compute on the iGPU, own thread       | 200 Hz |
+| slow loop through perception            | visual feedback            | ACT                                          | ~30 Hz |
 
 The ~13x separation between the reflex and ACT is roughly the one biology runs at, and it is the
 reason the control law does not live in Python. The cerebellum sits between them and, like its
-namesake, *outside* the reflex arc -- it corrects the loop without ever being inside it.
+namesake, _outside_ the reflex arc -- it corrects the loop without ever being inside it.
 
 The top row is the cheapest thing in this repository and possibly the most load-bearing. Contact
 transients are faster than any loop on the list: a fingertip meeting an object produces its force
-spike well inside the reflex's 2.5 ms tick, so whatever answers it *first* cannot be a controller at
+spike well inside the reflex's 2.5 ms tick, so whatever answers it _first_ cannot be a controller at
 all. Biology's answer is the **preflex** -- the intrinsic mechanical response of muscle and tissue,
 at zero latency, before any reflex arc has been traversed. Here it is packing foam under a finger
 cot, and it is why a soft-fingered animal can be careless with a fragile object in a way this arm
@@ -67,7 +67,7 @@ cannot.
 
 It also gives the gripper a finer sense of touch, which is less obvious. Grip force was always
 readable -- after contact the commanded position keeps advancing while the achieved one stops, and
-`pwm = K * err` follows the squeeze. What a compliant fingertip changes is the *scale*: the same
+`pwm = K * err` follows the squeeze. What a compliant fingertip changes is the _scale_: the same
 range of force now spreads across far more encoder counts, which is exactly why a load cell has a
 flexure, to turn force into a displacement large enough to measure. The signal was already there;
 the padding gives it a finer ruler. By how much, on this arm, is not measured yet -- and the
@@ -161,10 +161,10 @@ which is precisely what destabilises a bilateral loop.
 No changes to `modeling_act.py`. Both projections already derive their width from the feature
 shapes, so widening the robot's declared features is sufficient.
 
-| | stock SO-101 | this fork |
-| --- | --- | --- |
-| `observation.state` | `pos` ×6 → **6** | `pos` ×6 + `current_avg` ×6 → **12** |
-| `action` (per chunk step) | `pos` ×6 → **6** | `pos` ×6 + `K` ×6 + `D` ×6 → **18** |
+|                           | stock SO-101     | this fork                            |
+| ------------------------- | ---------------- | ------------------------------------ |
+| `observation.state`       | `pos` ×6 → **6** | `pos` ×6 + `current_avg` ×6 → **12** |
+| `action` (per chunk step) | `pos` ×6 → **6** | `pos` ×6 + `K` ×6 + `D` ×6 → **18**  |
 
 **Input.** Each motor's `Present_Current` is sampled one servo per tick round-robin and averaged in
 Rust over a fixed window (~0.5 s at the defaults). ACT reads the pre-averaged value at camera rate,
@@ -186,21 +186,21 @@ pwm = K·(x_t − x) + D·(v_t − v) + ff(sensory state)
 
 The structure is Marr-Albus-Ito, mapped onto the hardware directly:
 
-| cerebellum | here |
-| --- | --- |
-| mossy fibres | 30 signals -- per joint: encoder phase as `sin`/`cos`, velocity, tracking error, current |
-| granule cells | 16384 units, each reading 4 mossy fibres through a **fixed random**, never-learned projection |
-| Golgi inhibition | one global threshold, on a feedback loop against measured sparsity (~2% left active) |
-| parallel fibres | that sparse code, normalised, carrying a ~150 ms eligibility trace |
-| Purkinje cells | a linear readout, 6 outputs -- **the only learned layer** |
-| climbing fibres | the reflex's own standing duty |
+| cerebellum       | here                                                                                          |
+| ---------------- | --------------------------------------------------------------------------------------------- |
+| mossy fibres     | 30 signals -- per joint: encoder phase as `sin`/`cos`, velocity, tracking error, current      |
+| granule cells    | 16384 units, each reading 4 mossy fibres through a **fixed random**, never-learned projection |
+| Golgi inhibition | one global threshold, on a feedback loop against measured sparsity (~2% left active)          |
+| parallel fibres  | that sparse code, normalised, carrying a ~150 ms eligibility trace                            |
+| Purkinje cells   | a linear readout, 6 outputs -- **the only learned layer**                                     |
+| climbing fibres  | the reflex's own standing duty                                                                |
 
 ```
 ΔW = rate · (cf · e  −  leak · W · e)
 ```
 
 Three factors -- parallel-fibre eligibility, climbing fibre, and nothing else. The `leak` term is
-what makes it a *modified* Hebbian rule rather than a runaway: a bare Hebbian product only grows
+what makes it a _modified_ Hebbian rule rather than a runaway: a bare Hebbian product only grows
 once the error has a consistent sign, which is exactly what gravity produces.
 
 **No backpropagation, and none is needed.** Only one layer has adjustable synapses, and its error is
@@ -210,7 +210,7 @@ cells to get the separation a trained hidden layer would get with a few hundred,
 the trade an otherwise idle iGPU absorbs for nothing.
 
 The teaching signal is a quantity the daemon already computes every tick: whatever duty the spring
-is *still* having to hold is, by definition, what the prediction failed to cancel. So learning is
+is _still_ having to hold is, by definition, what the prediction failed to cancel. So learning is
 online and unconditional -- no dataset, no training phase, no episode boundary. The arm learns while
 it is teleoperated, while ACT drives it, and while it sits still; point `--cerebellum-weights` at a
 file and what it learns accumulates across runs.
@@ -262,27 +262,27 @@ Development is on a ThinkPad X1 Carbon Gen 13 -- Core Ultra 7 258V (Lunar Lake),
 Several numbers here were settled on that hardware after their documented or intuitive values turned
 out to be wrong. They are specific to it and worth re-measuring on another machine:
 
-| what | value | how it was settled |
-| --- | --- | --- |
-| PWM sign bit | **10** | bit 11 (per upstream's docstring) does not reverse the joint -- it is consumed as extra magnitude |
-| `--invert-pwm` | **true** | with the right sign bit, positive duty still lowers the encoder |
-| per-joint K | 10/20/15/10/8/5 | holding at K=1 makes the reported PWM read out as each joint's gravity+friction duty |
-| per-joint D | ≈ K/40 | bounded from above by the velocity quantisation noise floor, not by stability |
-| iGPU compute queues | **1** | one queue family, one queue, shared with graphics -- a compute submission cannot be scheduled around the compositor, and no CPU isolation changes that |
-| cerebellum step | 307 µs mean idle, **2969 µs max under load** | one step can outlast an entire 2.5 ms control period; the max barely moves with layer size, so it is submission jitter rather than compute |
+| what                | value                                        | how it was settled                                                                                                                                     |
+| ------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PWM sign bit        | **10**                                       | bit 11 (per upstream's docstring) does not reverse the joint -- it is consumed as extra magnitude                                                      |
+| `--invert-pwm`      | **true**                                     | with the right sign bit, positive duty still lowers the encoder                                                                                        |
+| per-joint K         | 10/20/15/10/8/5                              | holding at K=1 makes the reported PWM read out as each joint's gravity+friction duty                                                                   |
+| per-joint D         | ≈ K/40                                       | bounded from above by the velocity quantisation noise floor, not by stability                                                                          |
+| iGPU compute queues | **1**                                        | one queue family, one queue, shared with graphics -- a compute submission cannot be scheduled around the compositor, and no CPU isolation changes that |
+| cerebellum step     | 307 µs mean idle, **2969 µs max under load** | one step can outlast an entire 2.5 ms control period; the max barely moves with layer size, so it is submission jitter rather than compute             |
 
 Those last two are why the cerebellum has its own thread rather than a slot in the tick. That it
 stays out of the way was then checked rather than assumed -- 3 × 20 s each way, alternating,
 10800 control ticks per condition. (Against a stub serial port, so the absolute tick cost is
-timeout-dominated and means nothing on its own; the *comparison* is what is being made.)
+timeout-dominated and means nothing on its own; the _comparison_ is what is being made.)
 
-| control loop | mean tick | overruns | worst tick |
-| --- | --- | --- | --- |
-| cerebellum off | 3219 µs | 10 / 10800 | 7344 µs |
-| cerebellum on the iGPU | 3228 µs | 9 / 10800 | 10971 µs |
+| control loop           | mean tick | overruns   | worst tick |
+| ---------------------- | --------- | ---------- | ---------- |
+| cerebellum off         | 3219 µs   | 10 / 10800 | 7344 µs    |
+| cerebellum on the iGPU | 3228 µs   | 9 / 10800  | 10971 µs   |
 
 Mean cost and overrun rate are indistinguishable. The worst-case tick swings by milliseconds in
-*both* columns -- one repetition had the quiet run produce the worse outlier -- so that tail belongs
+_both_ columns -- one repetition had the quiet run produce the worse outlier -- so that tail belongs
 to the laptop, not to the cerebellum.
 
 The tooling for re-deriving all of it ships too: `--probe-direction` measures drive direction with a
@@ -296,7 +296,7 @@ way", which look identical from across the room; and `cargo test --test cerebell
   The narrow claim held on 2026-08-28, over four runs across two poses, at unchanged K:
   `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00, `shoulder_lift` 12.57 -> 3.00 counts of
   droop, against baselines that were `err = holding_duty / K` to the decimal. What is not
-  trustworthy is everything *absolute* from that session. `shoulder_pan`'s servo failed partway
+  trustworthy is everything _absolute_ from that session. `shoulder_pan`'s servo failed partway
   through it, and writing to a servo whose power stage has shorted pulls the shared supply from
   4.6 V to 2.4 V for ~820 ms at a time. The comparison survives -- both sides of it ran under the
   same fault -- but the holding duties, the `--cerebellum-ff-max` clamp being reached on two joints,
@@ -311,7 +311,7 @@ way", which look identical from across the room; and `cargo test --test cerebell
 - **Touch stops at how hard, not where or whether it is slipping.** A compliant fingertip turns grip
   force into encoder counts, and that is the whole of the tactile sense here: one scalar per jaw,
   available to the reflex at 400 Hz. Where on the finger contact happened, and the micro-vibration
-  that says an object has *begun* to slip, both need a purpose-built sensor rather than a commodity
+  that says an object has _begun_ to slip, both need a purpose-built sensor rather than a commodity
   part -- and what this repository is trying to show is how much of the stack can be built without
   one. The wrist camera can see that something has slipped, at ~30 Hz; it cannot see it starting.
 - **What it can learn is bounded by its mossy fibres.** They carry pose, velocity, tracking error
