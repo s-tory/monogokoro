@@ -4,11 +4,11 @@
 
 use so101_impedance_ctrl::cerebellum::net::{
     encode_mossy_fibres, golgi_inhibit, granule_preactivation, CpuNet, GranuleParams, SensoryState,
-    GC_FAN_IN, MF_DIM, MF_PER_JOINT, NUM_OUTPUTS,
+    GC_FAN_IN, MF_DIM, MF_PER_JOINT, MF_PROPRIOCEPTIVE, NUM_OUTPUTS,
 };
 use so101_impedance_ctrl::cerebellum::net::{implausible_input, MF_SATURATION_FACTOR};
 use so101_impedance_ctrl::cerebellum::{load_weights, parse_joints, save_weights};
-use so101_impedance_ctrl::shm::NUM_MOTORS;
+use so101_impedance_ctrl::shm::{NUM_CONTEXT, NUM_MOTORS};
 
 const TEST_GC_DIM: usize = 2048;
 const TEST_SEED: u64 = 0x1234_5678_9ABC_DEF0;
@@ -63,8 +63,55 @@ fn mossy_fibre_encoding_is_bounded() {
 }
 
 #[test]
-fn mossy_fibre_layout_covers_every_joint() {
-    assert_eq!(MF_DIM, NUM_MOTORS * MF_PER_JOINT);
+fn mossy_fibre_layout_covers_every_joint_and_then_the_context() {
+    // Proprioception occupies the front, the pontine channels the tail. The split is for readers:
+    // granule cells sample without regard to position, so nothing in the network cares where the
+    // context sits -- but a reader looking at a dumped mossy-fibre vector does.
+    assert_eq!(MF_PROPRIOCEPTIVE, NUM_MOTORS * MF_PER_JOINT);
+    assert_eq!(MF_DIM, MF_PROPRIOCEPTIVE + NUM_CONTEXT);
+}
+
+#[test]
+fn context_reaches_the_mossy_fibres_and_is_clamped() {
+    let mut s = state_at(900.0);
+    s.context = [0.5, 40.0];
+    let mf = encode_mossy_fibres(&s);
+    assert_eq!(
+        mf[MF_PROPRIOCEPTIVE], 0.5,
+        "context must pass through unsquashed"
+    );
+    assert_eq!(
+        mf[MF_PROPRIOCEPTIVE + 1],
+        1.0,
+        "a policy overshooting its own contract must be clamped, not squashed or refused"
+    );
+
+    // Zero context must leave the proprioceptive block untouched, which is what makes a writer
+    // that has never heard of these channels degrade to the old network rather than to a new one.
+    let mut z = state_at(900.0);
+    z.context = [0.0; NUM_CONTEXT];
+    let zero = encode_mossy_fibres(&z);
+    assert_eq!(zero[MF_PROPRIOCEPTIVE..], [0.0; NUM_CONTEXT]);
+    assert_eq!(mf[..MF_PROPRIOCEPTIVE], zero[..MF_PROPRIOCEPTIVE]);
+}
+
+#[test]
+fn a_non_finite_context_is_refused() {
+    // Out of range is clamped, but NaN says nothing at all -- and unlike a large number it would
+    // poison every granule cell that draws that fibre.
+    let mut s = state_at(900.0);
+    s.context[1] = f32::NAN;
+    let (channel, i, _) = implausible_input(&s).expect("NaN context must be refused");
+    assert_eq!(channel, "context");
+    assert_eq!(i, 1);
+
+    let mut big = state_at(900.0);
+    big.context[0] = 12.0;
+    assert!(
+        implausible_input(&big).is_none(),
+        "a context outside [-1, 1] is clamped, not refused -- stalling the whole feedforward over \
+         an overshooting policy trades a small error for a total one"
+    );
 }
 
 #[test]
@@ -581,4 +628,122 @@ fn the_bound_sits_where_the_encoding_has_already_saturated() {
 
     assert_eq!(implausible_input(&at_bound), None);
     assert!(implausible_input(&past_bound).is_some());
+}
+
+// --- the pontine layer's own claim ------------------------------------------------------------
+//
+// Everything above tests one context. These two test the thing the context channel exists for:
+// that one pose can carry two different standing loads, told apart by something the arm cannot
+// feel. They are the cheapest possible version of the bench experiment, and they were written
+// first -- both of the numbers in `--cerebellum-context`'s help text came from here rather than
+// from an arm.
+
+fn mf_with_context(context: [f32; NUM_CONTEXT]) -> [f32; MF_DIM] {
+    let mut s = state_at(900.0);
+    s.context = context;
+    encode_mossy_fibres(&s)
+}
+
+/// Trains `net` against one mossy-fibre vector until the reflex is carrying `load` no longer, and
+/// returns the feedforward. `theta` is the Golgi threshold, carried across calls because the layer
+/// has one of it, not one per context.
+fn learn(net: &mut CpuNet, mf: &[f32; MF_DIM], load: f32, steps: usize, theta: &mut f32) {
+    let mut ff = [0f32; NUM_OUTPUTS];
+    for _ in 0..steps {
+        let mut cf = [0f32; NUM_OUTPUTS];
+        cf[0] = load - ff[0];
+        let (out, active) = net.step(mf, *theta, 0.0, Some(&cf), 0.01, 0.0);
+        ff = out;
+        *theta += 0.05 * (active - 0.02);
+        *theta = theta.clamp(-1.0, 1.0);
+    }
+}
+
+/// Reads the feedforward without learning: no climbing fibre, no rate.
+fn recall(net: &mut CpuNet, mf: &[f32; MF_DIM], theta: f32) -> f32 {
+    net.step(mf, theta, 0.0, None, 0.0, 0.0).0[0]
+}
+
+#[test]
+fn interleaved_contexts_learn_separate_feedforwards_at_one_pose() {
+    // The whole point of the pontine channel. Identical proprioception, two loads, and the only
+    // thing telling them apart is two mossy fibres out of thirty-two.
+    let empty = mf_with_context([-1.0, -1.0]);
+    let loaded = mf_with_context([1.0, 1.0]);
+    assert_eq!(
+        empty[..MF_PROPRIOCEPTIVE],
+        loaded[..MF_PROPRIOCEPTIVE],
+        "the two cases must be indistinguishable to proprioception, or this proves nothing"
+    );
+
+    let mut net = CpuNet::new(GranuleParams::generate(TEST_GC_DIM, TEST_SEED));
+    let mut theta = 0.0f32;
+    for _ in 0..20 {
+        learn(&mut net, &empty, 40.0, 100, &mut theta);
+        learn(&mut net, &loaded, 120.0, 100, &mut theta);
+    }
+
+    let e = recall(&mut net, &empty, theta);
+    let l = recall(&mut net, &loaded, theta);
+    assert!(
+        (e - 40.0).abs() < 8.0 && (l - 120.0).abs() < 8.0,
+        "contexts did not separate: empty {e} (want 40), loaded {l} (want 120)"
+    );
+}
+
+#[test]
+fn a_context_that_moves_one_fibre_separates_worse_than_one_that_moves_two() {
+    // Why `--cerebellum-context`'s help says to swing every channel rather than raise a flag.
+    // Separation is bought by the granule cells that happen to draw a context fibre, so `0,0` vs
+    // `1,0` -- one fibre of thirty-two -- buys about half as many of them as `-1,-1` vs `1,1`.
+    // Both cost exactly the same to compute, which is what makes this worth a paragraph of help
+    // text rather than a footnote.
+    let gap = |a: [f32; NUM_CONTEXT], b: [f32; NUM_CONTEXT]| {
+        let (x, y) = (mf_with_context(a), mf_with_context(b));
+        let mut net = CpuNet::new(GranuleParams::generate(TEST_GC_DIM, TEST_SEED));
+        let mut theta = 0.0f32;
+        for _ in 0..20 {
+            learn(&mut net, &x, 40.0, 100, &mut theta);
+            learn(&mut net, &y, 120.0, 100, &mut theta);
+        }
+        recall(&mut net, &y, theta) - recall(&mut net, &x, theta)
+    };
+
+    let flag = gap([0.0, 0.0], [1.0, 0.0]);
+    let antipodal = gap([-1.0, -1.0], [1.0, 1.0]);
+    assert!(
+        antipodal > flag + 20.0,
+        "swinging both channels recovered {antipodal} of an 80-count separation and a flag \
+         recovered {flag} -- if these have converged, the help text is now wrong"
+    );
+}
+
+#[test]
+fn training_one_context_to_convergence_overwrites_the_other() {
+    // The constraint the help text spends a paragraph on, pinned so it cannot quietly stop being
+    // true. Most granule cells draw no context fibre, so their weights are shared between the two
+    // contexts; converging on one drags those weights with it, and the context-sensitive minority
+    // cannot pull them back. This is why the bench protocol has to interleave.
+    //
+    // If this test ever fails, that is good news -- but the help text and the README both promise
+    // the opposite, so they have to change with it.
+    let empty = mf_with_context([-1.0, -1.0]);
+    let loaded = mf_with_context([1.0, 1.0]);
+    let mut net = CpuNet::new(GranuleParams::generate(TEST_GC_DIM, TEST_SEED));
+    let mut theta = 0.0f32;
+
+    learn(&mut net, &empty, 40.0, 2000, &mut theta);
+    let before = recall(&mut net, &empty, theta);
+    assert!(
+        (before - 40.0).abs() < 5.0,
+        "the first context did not converge at all: {before}"
+    );
+
+    learn(&mut net, &loaded, 120.0, 2000, &mut theta);
+    let after = recall(&mut net, &empty, theta);
+    assert!(
+        after > 80.0,
+        "blocked training no longer overwrites the first context (it now reads {after}, was \
+         {before}) -- update the bench protocol in --cerebellum-context and the README"
+    );
 }

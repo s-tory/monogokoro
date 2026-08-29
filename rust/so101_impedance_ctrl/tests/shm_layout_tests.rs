@@ -108,7 +108,7 @@ fn shm_layout_size_matches_the_python_mirror() {
     //              ShmLayout; print(ctypes.sizeof(ShmLayout))"
     assert_eq!(
         std::mem::size_of::<ShmLayout>(),
-        320,
+        328,
         "ShmLayout changed size -- update shm_client.py's mirror and this number together, and \
          bump LAYOUT_VERSION"
     );

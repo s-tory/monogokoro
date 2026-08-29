@@ -39,7 +39,20 @@ SHM_DIR = "/dev/shm"  # nosec B108
 # the same compliant K/D law as the arm is what makes gentle grasping possible.
 NUM_MOTORS = 6
 
-LAYOUT_VERSION = 4
+# Pontine context channels: what the policy layer hands down to the cerebellum so it can tell two
+# standing loads apart before either has pulled the arm out of position. Mirrors shm::NUM_CONTEXT.
+#
+# These carry an identity, not a mass -- see the Rust side for why the policy is not asked how
+# heavy the object is. Two practical notes for whoever fills them in:
+#   * Swing every channel to +/-1. Contexts are separated by the granule cells that draw a context
+#     fibre, so what buys separation is how many fibres differ, and `[0, 0]` vs `[1, 0]` moves only
+#     one of the 32.
+#   * Interleave them while the cerebellum is learning. Most granule cells draw no context fibre,
+#     so their weights are shared; converging on one context drags those weights with it. A policy
+#     that picks things up and puts them down interleaves by itself.
+NUM_CONTEXT = 2
+
+LAYOUT_VERSION = 5
 SHM_MAGIC = 0x534F3130  # ASCII "SO10", matches shm::SHM_MAGIC in shm.rs
 
 FAULT_WATCHDOG_TIMEOUT = 1 << 0
@@ -81,6 +94,10 @@ class InputData(ctypes.Structure):
         ("target_vel", ctypes.c_float * NUM_MOTORS),
         ("k_gain", ctypes.c_float * NUM_MOTORS),
         ("d_gain", ctypes.c_float * NUM_MOTORS),
+        # All-zero means "no context", which is both the neutral value and what a caller that
+        # never touches this field leaves behind -- so a policy that does not know about the
+        # pontine channel degrades to the proprioception-only cerebellum rather than to garbage.
+        ("context", ctypes.c_float * NUM_CONTEXT),
     ]
 
 
@@ -244,12 +261,19 @@ class ImpedanceShmClient:
         k_gain: list[float],
         d_gain: list[float],
         target_vel: list[float] | None = None,
+        context: list[float] | None = None,
     ) -> None:
         """Seqlock write of the input region. `target_pos`/`k_gain`/`d_gain`/`target_vel` must
         have length `NUM_MOTORS`, ordered per the robot config's `impedance_joints` (the 5 arm
-        joints followed by the gripper)."""
+        joints followed by the gripper).
+
+        `context` is the pontine channel (length `NUM_CONTEXT`); see its comment above for the two
+        things that decide whether it does anything. Omitting it writes zeros, which is the
+        no-context case."""
         if target_vel is None:
             target_vel = [0.0] * NUM_MOTORS
+        if context is None:
+            context = [0.0] * NUM_CONTEXT
 
         region = self._layout.input
         seq = region.seq
@@ -259,6 +283,7 @@ class ImpedanceShmClient:
         region.data.target_vel[:] = target_vel
         region.data.k_gain[:] = k_gain
         region.data.d_gain[:] = d_gain
+        region.data.context[:] = context
         region.seq = seq + 2  # back to even: stable
 
     def read_output(self, max_retries: int = 8) -> dict:

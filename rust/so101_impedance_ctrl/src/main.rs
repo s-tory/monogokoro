@@ -20,6 +20,7 @@ use so101_impedance_ctrl::control::{
 };
 use so101_impedance_ctrl::feetech::{self, FeetechBus};
 use so101_impedance_ctrl::leader::LeaderGripper;
+use so101_impedance_ctrl::pontine;
 use so101_impedance_ctrl::rt;
 use so101_impedance_ctrl::shm::{self, ShmLayout, NUM_MOTORS};
 
@@ -343,6 +344,35 @@ struct Cli {
     /// position, and keep squeezing after the object is gone.
     #[arg(long, default_value_t = cerebellum::DEFAULT_JOINTS.to_string())]
     cerebellum_joints: String,
+
+    /// Hold the pontine context at a fixed value, e.g. `-1,-1`, ignoring shared memory.
+    ///
+    /// A bench instrument, and for now the only way to exercise the context channel at all: the
+    /// policy cannot supply one yet, because demonstrations carry no label for anything below the
+    /// policy.
+    ///
+    /// **Swing every channel to `+/-1`; do not use `0,0` as one of the contexts.** Contexts are
+    /// separated by the granule cells that happen to draw a context fibre, so what matters is how
+    /// many fibres differ between them, not what the numbers mean. `0,0` vs `1,0` differs in one
+    /// fibre out of 32 and recovers 64 of an 80-count separation; `-1,-1` vs `1,1` differs in two
+    /// and recovers all 80. Both cost the same.
+    ///
+    /// **Alternate the contexts while learning; do not train one to convergence and then the
+    /// other.** Most granule cells draw no context fibre at all, so their weights are shared, and
+    /// a run that converges on one context drags those shared weights with it -- after which the
+    /// first context reads 98 where it should read 40, even with the best encoding. Interleaved,
+    /// the same network separates cleanly. A policy driving the arm interleaves by itself; a
+    /// person at a bench has to do it deliberately.
+    #[arg(long)]
+    cerebellum_context: Option<String>,
+
+    /// Time constant of the low-pass on the pontine context channel.
+    ///
+    /// The policy publishes at inference rate and the cerebellum reads at 200 Hz, so an unfiltered
+    /// channel steps; see `cerebellum::pontine`. Zero disables the filter, which is what the
+    /// cross-check tests want and not what an arm wants.
+    #[arg(long, default_value_t = 100)]
+    cerebellum_context_tau_ms: u64,
 
     /// Discard the feedforward if the cerebellum thread has not published within this long.
     #[arg(long, default_value_t = 200)]
@@ -754,6 +784,27 @@ fn main() {
         );
     }
 
+    // The pontine relay runs whether or not a cerebellum does. It is bookkeeping, not compute, and
+    // keeping it unconditional means the context path is exercised on every run rather than only
+    // on runs that found a GPU.
+    //
+    // A bad `--cerebellum-context` is fatal rather than degraded, unlike the rest of the
+    // cerebellum's configuration. Everything else there fails towards the plain reflex, which is
+    // always a safe arm; this one fails towards an experiment that silently measures the wrong
+    // thing -- the operator pins a context, the daemon ignores it, and the run looks like evidence
+    // that context does not separate.
+    let context_override = args.cerebellum_context.as_deref().map(|spec| {
+        pontine::parse_context(spec).unwrap_or_else(|e| panic!("--cerebellum-context: {e}"))
+    });
+    if let Some(v) = context_override {
+        log::warn!(
+            "pontine context pinned to {v:?} by --cerebellum-context: shared memory is ignored and \
+             the low-pass is bypassed. This is a bench setting -- the network will learn one \
+             feedforward per value pinned here."
+        );
+    }
+    let mut pontine = pontine::PontineRelay::new(args.cerebellum_context_tau_ms, context_override);
+
     let mut current_avgs: Vec<MovingAverage> = (0..NUM_MOTORS)
         .map(|_| MovingAverage::new(args.current_avg_window))
         .collect();
@@ -789,12 +840,14 @@ fn main() {
         [f32; NUM_MOTORS],
         [f32; NUM_MOTORS],
         [f32; NUM_MOTORS],
+        [f32; shm::NUM_CONTEXT],
         u64,
     ) = (
         [0.0; NUM_MOTORS],
         [0.0; NUM_MOTORS],
         [0.0; NUM_MOTORS],
         [0.0; NUM_MOTORS],
+        [0.0; shm::NUM_CONTEXT],
         0,
     );
 
@@ -816,6 +869,7 @@ fn main() {
                     d.target_vel,
                     d.k_gain,
                     d.d_gain,
+                    d.context,
                     d.timestamp_mono_ns,
                 )
             },
@@ -823,7 +877,7 @@ fn main() {
         ) {
             last_good_input = snapshot;
         }
-        let (target_pos, target_vel, k_gain, d_gain, input_ts) = last_good_input;
+        let (target_pos, target_vel, k_gain, d_gain, raw_context, input_ts) = last_good_input;
 
         let now_ns = monotonic_ns();
         let fresh = input_is_fresh(now_ns, input_ts, watchdog_timeout_ns);
@@ -1089,6 +1143,7 @@ fn main() {
                     pos_error,
                     present_current,
                     fb_pwm,
+                    context: pontine.relay(raw_context, dt_s),
                 },
                 safe,
                 now_ns,

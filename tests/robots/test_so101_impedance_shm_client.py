@@ -37,6 +37,7 @@ from lerobot.robots.so101_impedance_follower.shm_client import (
     FAULT_LEADER_COMMS_ERROR,
     FAULT_WATCHDOG_TIMEOUT,
     LAYOUT_VERSION,
+    NUM_CONTEXT,
     SHM_MAGIC,
     CommandKind,
     ImpedanceShmClient,
@@ -126,6 +127,39 @@ def test_write_input_is_visible_through_a_second_raw_view(shm_segment):
     assert list(layout.input.data.k_gain) == pytest.approx(k_gain)
     assert list(layout.input.data.d_gain) == pytest.approx(d_gain)
     client.close()
+
+
+def test_write_input_relays_the_pontine_context(shm_segment):
+    client = ImpedanceShmClient(shm_segment.name)
+    args = {
+        "target_pos": [0.0] * 6,
+        "k_gain": [10.0] * 6,
+        "d_gain": [1.0] * 6,
+    }
+
+    # Omitted, the context is zeros -- the no-context case, and what a caller written before this
+    # field existed leaves behind. That default is what lets an older policy keep driving the arm
+    # against the proprioception-only cerebellum instead of against an undefined one.
+    client.write_input(**args)
+    layout = ShmLayout.from_buffer(shm_segment.buf)
+    assert list(layout.input.data.context) == [0.0] * NUM_CONTEXT
+
+    # Supplied, it arrives verbatim. Not squashed and not rescaled: the daemon clamps to [-1, 1]
+    # and the granule layer reads what is left, so a value that changed shape in transit would
+    # move which cells fire without anything in the loop saying so.
+    client.write_input(**args, context=[-1.0, 1.0])
+    layout = ShmLayout.from_buffer(shm_segment.buf)
+    assert layout.input.seq % 2 == 0
+    assert list(layout.input.data.context) == pytest.approx([-1.0, 1.0])
+    client.close()
+
+
+def test_shm_layout_size_matches_the_rust_struct():
+    # The mirror in shm_client.py is maintained by hand against shm.rs, and LAYOUT_VERSION only
+    # catches someone who remembered to bump it. The Rust side asserts this same number in
+    # tests/shm_layout_tests.rs; asserting it here too is what makes a one-sided edit fail on the
+    # side that made it rather than on the next person's arm.
+    assert ctypes.sizeof(ShmLayout) == 328
 
 
 def test_read_output_round_trips_values_from_a_simulated_daemon(shm_segment):

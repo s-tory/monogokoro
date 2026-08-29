@@ -5,5 +5,9 @@ pub mod cerebellum;
 pub mod control;
 pub mod feetech;
 pub mod leader;
+/// The pontine relay. A sibling of `cerebellum`, not a part of it: the pontine nuclei sit in the
+/// brainstem and relay cortex to the cerebellum, which is exactly this module's position in the
+/// data flow -- between shared memory and the mossy fibres.
+pub mod pontine;
 pub mod rt;
 pub mod shm;

@@ -10,7 +10,7 @@
 //! # Layers
 //!
 //! ```text
-//!   mossy fibres        30   proprioception + efference copy, built on the host each tick
+//!   mossy fibres        32   proprioception + efference copy, plus 2 pontine context channels
 //!        |  fixed sparse random projection, GC_FAN_IN inputs per cell, never learned
 //!   granule cells    16384   tanh, then Golgi (global subtractive) inhibition -> sparse
 //!        |  parallel fibres, with an eligibility trace
@@ -35,11 +35,20 @@
 //! biologically-shaped design the *practical* choice here rather than a homage.
 
 use crate::control::ENCODER_RESOLUTION;
-use crate::shm::NUM_MOTORS;
+use crate::shm::{NUM_CONTEXT, NUM_MOTORS};
 
 /// Mossy-fibre count: 5 signals per joint (see [`encode_mossy_fibres`]).
 pub const MF_PER_JOINT: usize = 5;
-pub const MF_DIM: usize = NUM_MOTORS * MF_PER_JOINT;
+
+/// The proprioceptive block, which occupies the front of the mossy-fibre vector.
+pub const MF_PROPRIOCEPTIVE: usize = NUM_MOTORS * MF_PER_JOINT;
+
+/// Proprioception plus the pontine context channels (see [`crate::shm::NUM_CONTEXT`]).
+///
+/// The context sits at the tail rather than interleaved per joint because it is not a property of
+/// any joint: it describes the situation the whole arm is in. Granule cells sample without regard
+/// to position in this vector, so the layout is for readers, not for the network.
+pub const MF_DIM: usize = MF_PROPRIOCEPTIVE + NUM_CONTEXT;
 
 /// One Purkinje output per motor. The gripper's is computed but masked off before it reaches a
 /// servo (see `mod.rs`) -- cheaper and simpler than a ragged layout, and it means the gripper's
@@ -113,6 +122,16 @@ pub fn implausible_input(state: &SensoryState) -> Option<(&'static str, usize, f
             return Some(("position", j, pos));
         }
     }
+    // Context is refused for being unrepresentable, not for being large. Out of range it is
+    // clamped in the encoding: a policy that overshoots its own [-1, 1] contract is still saying
+    // something meaningful about which situation the arm is in, and stalling the whole feedforward
+    // over it would trade a small error for a total one. NaN says nothing, and unlike a big number
+    // it poisons every granule cell that draws it.
+    for i in 0..NUM_CONTEXT {
+        if !state.context[i].is_finite() {
+            return Some(("context", i, state.context[i]));
+        }
+    }
     None
 }
 
@@ -126,6 +145,9 @@ pub struct SensoryState {
     pub present_current: [f32; NUM_MOTORS],
     /// Feedback duty the impedance law is producing. This is the climbing-fibre signal.
     pub fb_pwm: [f32; NUM_MOTORS],
+    /// Pontine context relayed from the policy layer, nominally in `[-1, 1]`. All-zero is the
+    /// no-context case and contributes nothing.
+    pub context: [f32; NUM_CONTEXT],
 }
 
 /// Builds the mossy-fibre vector from one sensory snapshot.
@@ -146,6 +168,13 @@ pub fn encode_mossy_fibres(state: &SensoryState) -> [f32; MF_DIM] {
         mf[base + 2] = (state.present_vel[j] / VEL_SCALE).tanh();
         mf[base + 3] = (state.pos_error[j] / ERR_SCALE).tanh();
         mf[base + 4] = (state.present_current[j] / CURRENT_SCALE).tanh();
+    }
+    // The pontine channels enter as they are, only clamped. Every other channel is squashed
+    // because it arrives in physical units whose useful range has to be mapped onto the
+    // nonlinearity; context arrives already normalised by contract, and squashing a declared
+    // 1.0 down to 0.76 would only make the two contexts harder for the expansion to separate.
+    for i in 0..NUM_CONTEXT {
+        mf[MF_PROPRIOCEPTIVE + i] = state.context[i].clamp(-1.0, 1.0);
     }
     mf
 }

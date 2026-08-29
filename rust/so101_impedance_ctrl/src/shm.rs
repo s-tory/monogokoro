@@ -10,13 +10,34 @@
 
 use std::sync::atomic::{fence, AtomicU32, Ordering};
 
-pub const LAYOUT_VERSION: u32 = 4;
+pub const LAYOUT_VERSION: u32 = 5;
 pub const SHM_MAGIC: u32 = 0x534F_3130; // ASCII "SO10"
 /// All 6 servos -- the 5 arm joints AND the gripper -- are impedance-controlled (K/D over PWM).
 /// A rigid position-mode gripper crushes anything it grips before it can sense resistance;
 /// running it under the same compliant impedance law as the arm is what makes gentle/adaptive
 /// grasping of fragile objects possible at all. Matches so_follower.py's motor IDs 1..6.
 pub const NUM_MOTORS: usize = 6;
+
+/// Context channels the policy layer can hand down to the cerebellum -- the pontine relay.
+///
+/// The cerebellum's mossy fibres otherwise carry proprioception only, so it cannot tell two
+/// payloads apart: a gripper holding 20 g and one holding 200 g produce the same joint angles on
+/// the way to the same place, and the load only becomes visible *after* it has already pulled the
+/// arm down. These channels are what a granule cell can read to know which of several standing
+/// loads it is looking at before the error appears.
+///
+/// **This is an identity, not a mass.** Biology hands the cerebellum the object, not the number:
+/// grip force is scaled before lift-off from a memory indexed by which object this is, and the
+/// weight-to-force map lives in the cerebellum rather than in cortex. Asking the policy for
+/// "how many grams" would move the cerebellum's job up a layer and require it to learn a
+/// calibration nothing in the loop can teach it. So anything separable will do -- a grasp flag, a
+/// few bits of object identity -- and the Purkinje layer learns a feedforward per context.
+///
+/// Two, because two is what the experiment needs (empty vs. loaded, with one spare) and because
+/// widening this reshuffles the entire granule code. Every cell draws `GC_FAN_IN` fibres from
+/// `0..MF_DIM`, so changing the count changes every draw and invalidates every learned weight --
+/// which the weights file's header now refuses rather than silently accepting.
+pub const NUM_CONTEXT: usize = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -28,6 +49,11 @@ pub struct InputData {
     pub target_vel: [f32; NUM_MOTORS],
     pub k_gain: [f32; NUM_MOTORS],
     pub d_gain: [f32; NUM_MOTORS],
+    /// Pontine context, nominally in `[-1, 1]`; see [`NUM_CONTEXT`]. All-zero means "no context",
+    /// which is also what an older writer that never touches this field leaves behind -- and zero
+    /// is the value at which these channels contribute nothing, so a policy that does not know
+    /// about them degrades to the proprioception-only cerebellum rather than to garbage.
+    pub context: [f32; NUM_CONTEXT],
 }
 
 #[repr(C)]
