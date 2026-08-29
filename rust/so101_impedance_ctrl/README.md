@@ -240,15 +240,15 @@ position: the learned weights start at zero, so an untrained network contributes
 
 Marr-Albus-Ito, mapped onto the hardware more or less directly:
 
-| cerebellum        | here                                                                                    |
-| ----------------- | --------------------------------------------------------------------------------------- |
-| mossy fibres      | 30 signals: per joint, encoder phase as `(sin, cos)`, velocity, tracking error, current |
-| granule cells     | 16384 units, each reading 4 mossy fibres through a **fixed random** projection          |
-| Golgi inhibition  | one global subtractive threshold, driven by feedback on the measured active fraction    |
-| parallel fibres   | the granule code, L2-normalised, with a ~150 ms eligibility trace                       |
-| Purkinje cells    | 6 outputs, a linear readout -- **the only learned layer**                               |
-| climbing fibres   | the reflex's own standing duty, low-passed and gated                                    |
-| PF->PC plasticity | `dW = rate * (cf * e - leak * W * e)` -- three-factor Hebbian with heterosynaptic decay |
+| cerebellum        | here                                                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| mossy fibres      | 32 signals: per joint, encoder phase as `(sin, cos)`, velocity, tracking error, current -- plus 2 pontine context channels |
+| granule cells     | 16384 units, each reading 4 mossy fibres through a **fixed random** projection                                             |
+| Golgi inhibition  | one global subtractive threshold, driven by feedback on the measured active fraction                                       |
+| parallel fibres   | the granule code, L2-normalised, with a ~150 ms eligibility trace                                                          |
+| Purkinje cells    | 6 outputs, a linear readout -- **the only learned layer**                                                                  |
+| climbing fibres   | the reflex's own standing duty, low-passed and gated                                                                       |
+| PF->PC plasticity | `dW = rate * (cf * e - leak * W * e)` -- three-factor Hebbian with heterosynaptic decay                                    |
 
 **There is no backpropagation, and none is needed.** The expansion layer is not learned, so there
 is exactly one layer of adjustable synapses, and its error is already expressed in the units the
@@ -260,6 +260,87 @@ Position enters as a phase pair rather than a count for the same reason `wrapped
 `Present_Position` rolls over mid-travel, and `wrist_roll` is calibrated over the full turn, so a
 raw count would make the network see a full-scale jump where the joint moved one tick -- and learn
 a feedforward with a cliff in it.
+
+### The pontine relay
+
+Proprioception cannot tell two payloads apart. A gripper holding 20 g and one holding 200 g pass
+through the same joint angles on the way to the same place, and the difference only becomes visible
+_after_ the load has already pulled the arm out of position -- which is the one thing a feedforward
+exists to prevent. So `src/pontine.rs` carries two channels down from the policy layer and lands
+them at the tail of the mossy-fibre vector.
+
+It is a **sibling of the cerebellum, not a part of it**. The pontine nuclei are brainstem, and
+their entire anatomical job is to sit between cortex and the cerebellar mossy fibres -- which is
+exactly where this module sits in the data flow. Filing it under `cerebellum/` would have put a
+structure inside the one it projects to.
+
+**It relays an identity, not a mass.** The policy is not asked how heavy the object is. Biology
+hands the cerebellum the object and keeps the weight-to-force map in the cerebellum: grip force is
+scaled correctly _before_ lift-off, from a memory indexed by which object this is, and cerebellar
+damage is what takes that anticipation away. Asking a policy for grams would move the cerebellum's
+job up a layer and require it to learn a calibration nothing in this loop can teach it. Anything
+separable will do.
+
+**And it does not compute.** There is no learned layer here, deliberately. The expansion into a
+separable code is already paid for by 16384 granule cells on a fixed random projection, so a layer
+here would duplicate the one part of the design that is pointedly not learned. Worse, a _trained_
+layer upstream of the granule code would need its error routed back through the expansion and the
+readout to reach it -- which is precisely the credit assignment this design does not have, and the
+reason it needs no backward pass.
+
+What is here instead is a first-order lag. The policy publishes at inference rate and the
+cerebellum reads at 200 Hz, so an unfiltered channel steps; the readout is linear in the granule
+code, so a step in the code is a step in the PWM. The feedforward is slew-limited downstream, but a
+slew limiter turns a step into a ramp at a fixed rate regardless of distance, whereas a lag makes
+the code itself move continuously -- so what the readout sees was always a state the network could
+have been in.
+
+#### Two numbers that came out of the CPU reference, not an arm
+
+Both are pinned in `tests/cerebellum_net_tests.rs`, and both were measured before any of this ran
+on hardware -- which was the point of measuring them there.
+
+**Swing every channel to `+/-1`. Do not use a `0/1` flag.** Contexts are separated by the granule
+cells that happen to draw a context fibre, so what buys separation is _how many fibres differ_, not
+what the numbers mean. Interleaved training, 16384 cells, two loads 80 counts apart:
+
+| context encoding            | fibres differing | separation recovered |
+| --------------------------- | ---------------- | -------------------- |
+| flag, `0,0` vs `1,0`        | 1 of 32          | 64 of 80             |
+| one-hot, `1,0` vs `0,1`     | 2 of 32          | 78 of 80             |
+| antipodal, `-1,-1` vs `1,1` | 2 of 32          | 80 of 80             |
+
+They cost exactly the same to compute.
+
+**Interleave the contexts while learning. Do not train one to convergence and then the other.**
+Most granule cells draw no context fibre at all, so their weights are shared between contexts, and
+a run that converges on one drags those shared weights with it. Blocked training, best encoding:
+after learning the loaded case, the empty case reads 98 where it should read 40. The
+context-sensitive minority cannot pull the shared majority back. A policy that picks things up and
+puts them down interleaves by itself; a person at a bench has to do it deliberately. (Biology has
+the same property, and calls it the contextual interference effect.)
+
+#### Running it
+
+Nothing fills the channel yet: demonstrations carry no label for anything below the policy, so
+`InputData::context` is written as zeros by everything that exists today -- and zero is the neutral
+value, so the network degrades to the proprioception-only cerebellum rather than to something
+undefined. `--cerebellum-context -1,-1` pins it by hand, which is enough to run the whole
+experiment with an arm and a weight:
+
+```bash
+# alternating, not blocked -- see above
+--cerebellum-context -1,-1   # empty
+--cerebellum-context 1,1     # loaded
+```
+
+The falsifiable claim is narrow: at one pose, with `K` unchanged, the two contexts should settle to
+two different `ff` values in the checker's table, and switching between them should not require
+relearning. If the feedforward is the same in both, the context is not reaching the granule code.
+
+Widening the mossy-fibre vector reshuffles every granule draw, so **every weight learned before
+this change is invalid**. The weights file's header records `MF_DIM` and refuses such a file rather
+than loading it.
 
 The granule code is normalised to unit length so that `--cerebellum-rate` means one thing
 regardless of layer size: _the fraction of the remaining error corrected per step_, i.e. a time

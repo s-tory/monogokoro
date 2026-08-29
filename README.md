@@ -226,6 +226,37 @@ zeroed by every fail-safe the reflex has. The gripper is excluded from it entire
 learns its own grasp keeps squeezing after the object is gone. Full safety envelope and tuning:
 [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md#cerebellum-an-adaptive-feedforward-on-the-igpu).
 
+### 5. A pontine relay, so the cerebellum can be told what it is holding
+
+The mossy fibres above carry proprioception only, which means the cerebellum cannot tell two
+payloads apart: 20 g and 200 g pass through the same joint angles on the way to the same place, and
+the difference only shows up _after_ the load has pulled the arm down -- the one thing a
+feedforward exists to prevent. [`rust/so101_impedance_ctrl/src/pontine.rs`](rust/so101_impedance_ctrl/src/pontine.rs)
+adds two channels from the policy layer to the tail of that vector, taking it from 30 signals to 32.
+
+It relays an **identity, not a mass**. The policy is never asked how heavy the object is. Biology
+hands the cerebellum the object and keeps the weight-to-force map in the cerebellum -- grip force
+is scaled correctly before lift-off, from a memory indexed by which object this is -- so asking a
+policy for grams would move the cerebellum's job up a layer and demand a calibration nothing in
+this loop can teach it.
+
+And it **does not compute**. It is a first-order lag and nothing else, because the expansion into a
+separable code is already paid for by 16384 granule cells on a fixed random projection. A trained
+layer here would duplicate that, and would need its error routed back through the granule layer and
+the readout to learn -- which is exactly the credit assignment this design does not have and does
+not want. It is a sibling of the cerebellum in the source tree for the same reason it is one in the
+brainstem.
+
+**Nothing fills the channel yet.** Demonstrations carry no label for anything below the policy, so
+everything that exists today writes zeros -- the neutral value, which leaves the
+proprioception-only cerebellum exactly as it was. `--cerebellum-context` pins it by hand, which is
+enough to run the whole experiment with an arm and a weight. Two constants that came out of the CPU
+reference rather than an arm, and are regression tests now: swing every channel to `+/-1` rather
+than raising a `0/1` flag (one differing fibre recovers 64 of an 80-count separation, two recover
+all 80, for the same cost), and interleave the contexts while learning rather than training one to
+convergence and then the other (most granule cells draw no context fibre, so their weights are
+shared, and blocked training leaves the first context reading 98 where it should read 40).
+
 ## Quick start
 
 ```bash
@@ -292,6 +323,11 @@ way", which look identical from across the room; and `cargo test --test cerebell
 
 ## Known limitations
 
+- **The pontine context has no source, and none of it is verified on hardware.** The channel is
+  wired end to end and its two constants were measured against the CPU reference, but every number
+  above comes from there rather than from an arm -- and the only thing writing to the channel today
+  is `--cerebellum-context`, by hand. Giving ACT something to write means labelling demonstrations
+  with something below the policy, which is the same missing piece as the entry below.
 - **The cerebellum cancels droop on a real arm; the numbers around that are not yet trustworthy.**
   The narrow claim held on 2026-08-28, over four runs across two poses, at unchanged K:
   `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00, `shoulder_lift` 12.57 -> 3.00 counts of
