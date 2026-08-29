@@ -63,6 +63,10 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):  # type: igno
     # `use_amp` determines whether to use Automatic Mixed Precision (AMP) for training and evaluation. With AMP,
     # automatic gradient scaling is used.
     use_amp: bool = False
+    # `dtype` selects the mixed-precision mode the training loop hands to Accelerate. `None` leaves the launcher
+    # default untouched, so policies that don't set it behave exactly as before. Policies needing another default
+    # (the VLAs, which ship weights in a specific precision) override this field.
+    dtype: str | None = None
 
     # Whether the policy employed PEFT for training.
     use_peft: bool = False
@@ -87,6 +91,11 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):  # type: igno
             auto_device = auto_select_torch_device()
             logger.warning(f"Device '{self.device}' is not available. Switching to '{auto_device}'.")
             self.device = auto_device.type
+
+        if self.dtype is not None and self.dtype not in ["auto", "float32", "bfloat16", "float16"]:
+            raise ValueError(
+                f"Invalid dtype: {self.dtype}. Expected one of 'auto', 'float32', 'bfloat16', 'float16'."
+            )
 
         # Automatically deactivate AMP if necessary
         if self.use_amp and not is_amp_available(self.device):

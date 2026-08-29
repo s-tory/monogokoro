@@ -25,6 +25,7 @@ import torch
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.policies.utils import make_robot_action, prepare_observation_for_inference
 from lerobot.processor import PolicyProcessorPipeline
+from lerobot.utils.device_utils import is_amp_available
 
 from .base import InferenceEngine
 
@@ -104,7 +105,7 @@ class SyncInferenceEngine(InferenceEngine):
         observation = copy(obs_frame)
         autocast_ctx = (
             torch.autocast(device_type=self._device.type)
-            if self._device.type == "cuda" and self._policy.config.use_amp
+            if self._policy.config.use_amp and is_amp_available(self._device.type)
             else nullcontext()
         )
         with torch.inference_mode(), autocast_ctx:
