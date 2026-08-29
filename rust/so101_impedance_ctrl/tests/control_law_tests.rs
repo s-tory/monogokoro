@@ -171,7 +171,7 @@ fn force_feedback_damping_opposes_motion_whichever_way_the_gain_points() {
 #[test]
 fn force_feedback_clamps_to_the_leaders_own_lower_limit() {
     use so101_impedance_ctrl::control::force_feedback_pwm;
-    // This bound is what a human hand is holding, not a gearbox: a mis-signed or over-large gain
+    // This bound is what a human hand is holding, not a gearbox: a sign-flipped or over-large gain
     // must saturate somewhere the operator can still overpower.
     let pwm = force_feedback_pwm(50.0, 0.0, 500.0, 0.0, 250.0);
     assert!((pwm - 250.0).abs() < 1e-3, "got {pwm}");

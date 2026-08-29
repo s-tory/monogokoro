@@ -32,7 +32,7 @@ import time
 
 # Linux/glibc maps POSIX shared-memory objects to files here, which is what the Rust daemon's
 # `shm_open` creates and what this client opens directly.
-SHM_DIR = "/dev/shm"
+SHM_DIR = "/dev/shm"  # nosec B108
 
 # All 6 servos -- the 5 arm joints AND the gripper -- are impedance-controlled. A rigid
 # position-mode gripper crushes fragile objects before it can sense resistance; running it under
