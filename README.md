@@ -2,10 +2,12 @@
 
 **English** | [日本語](README_JP.md)
 
-A fork of [LeRobot](https://github.com/huggingface/lerobot) that gives the SO-101 the two motor
+A fork of [LeRobot](https://github.com/huggingface/lerobot) that gives the SO-101 two of the motor
 layers that sit *underneath* a policy: a **spinal reflex** whose joints and gripper yield to contact
 instead of driving through it, and a **cerebellum** that learns, online, to cancel a load before the
-reflex has to feel it. ACT sees the resulting forces and commands how hard to resist them.
+reflex has to feel it. ACT sees the resulting forces and commands how hard to resist them. A third
+layer sits below both and is not software at all -- a compliant fingertip, which answers contact
+sooner than any loop here could be scheduled to.
 
 Forked at upstream [`0d383d09`](https://github.com/huggingface/lerobot/commit/0d383d09) (2026-07-24,
 on the 0.6.1 line). Everything upstream still works unchanged -- this adds a robot, a real-time
