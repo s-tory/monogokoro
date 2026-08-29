@@ -220,7 +220,8 @@ fn a_fall_during_a_blind_run_is_admitted_once_a_second_read_agrees() {
     let prev = [400.0, 961.0, 3400.0, 170.0, 2900.0, 3900.0];
     let fallen = [400, 1505, 3400, 170, 2900, 3900];
     let mut gate = PositionGate::new(TICK_BUDGET);
-    gate.accept(&fallen, None).expect("the first batch seeds the gate");
+    gate.accept(&fallen, None)
+        .expect("the first batch seeds the gate");
 
     // Now with a history: one tick cannot cover 544 counts, so the batch is held, not used.
     assert!(gate.accept(&fallen, Some(&prev)).is_err());
@@ -242,7 +243,9 @@ fn a_misparse_after_a_blackout_is_still_refused() {
     let mut gate = PositionGate::new(TICK_BUDGET);
     gate.accept(&truth, None).expect("seed");
 
-    let first = gate.accept(&garbage, Some(&prev)).expect_err("held, not used");
+    let first = gate
+        .accept(&garbage, Some(&prev))
+        .expect_err("held, not used");
     assert_eq!(first.motor, 3);
     assert!(!first.corroborating, "nothing was being held yet");
 
@@ -256,14 +259,20 @@ fn a_misparse_after_a_blackout_is_still_refused() {
 fn corroboration_needs_the_same_answer_twice() {
     let prev = [400.0, 961.0, 3400.0, 1187.0, 2900.0, 3900.0];
     let mut gate = PositionGate::new(TICK_BUDGET);
-    gate.accept(&[400, 961, 3400, 1187, 2900, 3900], None).expect("seed");
+    gate.accept(&[400, 961, 3400, 1187, 2900, 3900], None)
+        .expect("seed");
 
-    let a = gate.accept(&[400, 961, 3400, 0, 2900, 3900], Some(&prev)).expect_err("held");
+    let a = gate
+        .accept(&[400, 961, 3400, 0, 2900, 3900], Some(&prev))
+        .expect_err("held");
     assert!(!a.corroborating);
     let b = gate
         .accept(&[400, 961, 3400, 2500, 2900, 3900], Some(&prev))
         .expect_err("a different wrong answer is not agreement");
-    assert!(b.corroborating, "the gate was holding one when this arrived");
+    assert!(
+        b.corroborating,
+        "the gate was holding one when this arrived"
+    );
 }
 
 /// A batch is condemned by its first bad slot, whichever motor that is -- a reply whose framing
@@ -279,8 +288,14 @@ fn the_first_implausible_motor_is_the_one_reported() {
 /// Inside the limits the function is a pass-through, whatever it remembers.
 #[test]
 fn soft_limits_do_not_touch_a_joint_in_range() {
-    assert_eq!(apply_soft_limits(500.0, 2000.0, 100.0, 3995.0, Some(2000.0)), 500.0);
-    assert_eq!(apply_soft_limits(-500.0, 2000.0, 100.0, 3995.0, None), -500.0);
+    assert_eq!(
+        apply_soft_limits(500.0, 2000.0, 100.0, 3995.0, Some(2000.0)),
+        500.0
+    );
+    assert_eq!(
+        apply_soft_limits(-500.0, 2000.0, 100.0, 3995.0, None),
+        -500.0
+    );
 }
 
 /// Past a limit with no seam in the way, the remembered position and the raw rule agree: outward
@@ -288,8 +303,14 @@ fn soft_limits_do_not_touch_a_joint_in_range() {
 #[test]
 fn past_a_limit_only_the_way_back_is_allowed() {
     // Past pos_max, last seen at 3000 -- back is negative.
-    assert_eq!(apply_soft_limits(500.0, 4000.0, 100.0, 3995.0, Some(3000.0)), 0.0);
-    assert_eq!(apply_soft_limits(-500.0, 4000.0, 100.0, 3995.0, Some(3000.0)), -500.0);
+    assert_eq!(
+        apply_soft_limits(500.0, 4000.0, 100.0, 3995.0, Some(3000.0)),
+        0.0
+    );
+    assert_eq!(
+        apply_soft_limits(-500.0, 4000.0, 100.0, 3995.0, Some(3000.0)),
+        -500.0
+    );
 }
 
 /// The measured trap. A joint at 4051 whose target is 123 is *past `pos_max`* by the raw rule, so
@@ -303,7 +324,10 @@ fn a_joint_that_left_through_the_seam_is_driven_back_through_it() {
     // Remembering 121 makes the short way round (+166) the escape, so the same command is allowed.
     assert_eq!(apply_soft_limits(pwm, pos, 100.0, 3995.0, Some(121.0)), pwm);
     // ...and the other direction, which would drive it deeper past pos_max, is not.
-    assert_eq!(apply_soft_limits(-pwm, pos, 100.0, 3995.0, Some(121.0)), 0.0);
+    assert_eq!(
+        apply_soft_limits(-pwm, pos, 100.0, 3995.0, Some(121.0)),
+        0.0
+    );
 }
 
 /// A daemon started with the arm already outside its limits has no observation to appeal to. It
@@ -311,7 +335,10 @@ fn a_joint_that_left_through_the_seam_is_driven_back_through_it() {
 #[test]
 fn without_history_the_raw_rule_still_applies() {
     assert_eq!(apply_soft_limits(500.0, 4051.0, 100.0, 3995.0, None), 0.0);
-    assert_eq!(apply_soft_limits(-500.0, 4051.0, 100.0, 3995.0, None), -500.0);
+    assert_eq!(
+        apply_soft_limits(-500.0, 4051.0, 100.0, 3995.0, None),
+        -500.0
+    );
     assert_eq!(apply_soft_limits(-500.0, 50.0, 100.0, 3995.0, None), 0.0);
     assert_eq!(apply_soft_limits(500.0, 50.0, 100.0, 3995.0, None), 500.0);
 }

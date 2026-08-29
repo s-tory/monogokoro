@@ -2,11 +2,11 @@
 //! persistence, and -- when a Vulkan device is present -- agreement between the shaders and the
 //! CPU reference they were written against.
 
-use so101_impedance_ctrl::cerebellum::net::{implausible_input, MF_SATURATION_FACTOR};
 use so101_impedance_ctrl::cerebellum::net::{
     encode_mossy_fibres, golgi_inhibit, granule_preactivation, CpuNet, GranuleParams, SensoryState,
     GC_FAN_IN, MF_DIM, MF_PER_JOINT, NUM_OUTPUTS,
 };
+use so101_impedance_ctrl::cerebellum::net::{implausible_input, MF_SATURATION_FACTOR};
 use so101_impedance_ctrl::cerebellum::{load_weights, parse_joints, save_weights};
 use so101_impedance_ctrl::shm::NUM_MOTORS;
 
@@ -555,7 +555,10 @@ fn a_position_outside_the_encoder_is_refused() {
 
     let mut nan = state_at(1200.0);
     nan.present_pos[0] = f32::NAN;
-    assert!(implausible_input(&nan).is_some(), "NaN is not a pose either");
+    assert!(
+        implausible_input(&nan).is_some(),
+        "NaN is not a pose either"
+    );
 }
 
 /// The bound sits past where the encoding stops carrying information, so refusing a value cannot

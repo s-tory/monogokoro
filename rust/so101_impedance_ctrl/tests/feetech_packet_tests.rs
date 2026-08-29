@@ -147,7 +147,11 @@ fn present_current_decodes_sign_magnitude_at_bit_15() {
         (0x0016, 22),
     ] {
         assert_eq!(decode_sign_magnitude(raw, CURRENT_SIGN_BIT), expected);
-        assert_eq!(decode_sign_magnitude(raw, 10), expected.abs(), "bit 10 loses the sign");
+        assert_eq!(
+            decode_sign_magnitude(raw, 10),
+            expected.abs(),
+            "bit 10 loses the sign"
+        );
     }
 }
 

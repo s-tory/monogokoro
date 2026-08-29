@@ -446,7 +446,9 @@ pub fn log_supply_and_temperature(bus: &mut FeetechBus, motor_ids: &[u8]) {
 /// fine with the arm limp and sags once two joints are holding their own weight is a supply that
 /// is too small, and only a reading taken *under load* can tell those apart.
 pub fn read_supply_and_temperature(bus: &mut FeetechBus, motor_id: u8) -> Option<(u32, u32)> {
-    let volts = bus.read_register(motor_id, feetech::REG_PRESENT_VOLTAGE).ok()?;
+    let volts = bus
+        .read_register(motor_id, feetech::REG_PRESENT_VOLTAGE)
+        .ok()?;
     let temp = bus
         .read_register(motor_id, feetech::REG_PRESENT_TEMPERATURE)
         .ok()?;

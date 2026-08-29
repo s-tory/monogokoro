@@ -16,9 +16,7 @@ use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConf
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_startup_config, finite_difference_velocity, impedance_pwm,
     input_is_fresh, log_homing_offsets, log_supply_and_temperature, poll_and_apply_commands,
-    read_supply_and_temperature,
-    wrapped_delta, MovingAverage,
-    PositionGate,
+    read_supply_and_temperature, wrapped_delta, MovingAverage, PositionGate,
 };
 use so101_impedance_ctrl::feetech::{self, FeetechBus};
 use so101_impedance_ctrl::leader::LeaderGripper;
@@ -575,7 +573,13 @@ mod cli_tests {
     use clap::Parser;
 
     fn parse(extra: &[&str]) -> Cli {
-        let mut argv = vec!["so101_impedance_ctrl", "--port", "/dev/null", "--shm-name", "t"];
+        let mut argv = vec![
+            "so101_impedance_ctrl",
+            "--port",
+            "/dev/null",
+            "--shm-name",
+            "t",
+        ];
         argv.extend_from_slice(extra);
         Cli::try_parse_from(argv).expect("should parse")
     }
@@ -898,8 +902,10 @@ fn main() {
                     // makes a negative current read as ~32768 + its magnitude, a 1500x jump in a
                     // value ACT consumes as an observation and the cerebellum consumes as six of
                     // its thirty mossy fibres.
-                    current_avgs[i]
-                        .push(feetech::decode_sign_magnitude(value as u16, feetech::CURRENT_SIGN_BIT) as f32);
+                    current_avgs[i].push(feetech::decode_sign_magnitude(
+                        value as u16,
+                        feetech::CURRENT_SIGN_BIT,
+                    ) as f32);
                 }
                 Err(e) => {
                     if current_latches[i].fail() {
@@ -941,7 +947,10 @@ fn main() {
             if present_pos[i] > args.pos_min && present_pos[i] < args.pos_max {
                 last_in_range[i] = Some(present_pos[i]);
                 if let Some(n) = pos_limit_latch[i].recover() {
-                    log::info!("motor {} is back inside its limits after {n} tick(s)", MOTOR_IDS[i]);
+                    log::info!(
+                        "motor {} is back inside its limits after {n} tick(s)",
+                        MOTOR_IDS[i]
+                    );
                 }
             } else {
                 past_limits = true;

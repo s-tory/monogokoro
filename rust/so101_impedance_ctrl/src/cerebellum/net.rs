@@ -109,7 +109,7 @@ pub fn implausible_input(state: &SensoryState) -> Option<(&'static str, usize, f
         // Position is not squashed -- it enters as a phase, which is defined for any number. The
         // bound is the encoder instead: outside its range the reading is not a pose at all.
         let pos = state.present_pos[j];
-        if !pos.is_finite() || pos < 0.0 || pos >= ENCODER_RESOLUTION {
+        if !pos.is_finite() || !(0.0..ENCODER_RESOLUTION).contains(&pos) {
             return Some(("position", j, pos));
         }
     }
