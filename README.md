@@ -71,6 +71,23 @@ flexure, to turn force into a displacement large enough to measure. The signal w
 the padding gives it a finer ruler. By how much, on this arm, is not measured yet -- and the
 candidate that could eat the whole effect is the static friction described under Known limitations.
 
+None of these four layers is a new idea. Impedance control is Hogan, 1985. A granule expansion read
+out linearly and taught by a climbing fibre is Marr, Albus and Ito -- and Albus built a controller
+out of it in 1975. Compliance in series with a sensor, so that force becomes a displacement big
+enough to measure, is what a series elastic actuator has been since 1995. Bilateral teleoperation
+driven by position error is older than any of them.
+
+What is new is where they run. Each arrived attached to hardware a person could not simply buy: a
+torque-controlled arm, a dSPACE box or a DSP card to close the fast loop, something substantial to
+do the learning on. All four now fit on a laptop -- the adaptive layer on the integrated GPU that
+came with it, the real-time loop on a mainline kernel, since PREEMPT_RT was merged upstream in 2024
+and has only been ordinary for about two years.
+
+So the contribution here is not a mechanism. It is the port, and the numbers that come with it: what
+a Marr-Albus layer actually costs on an Arc 140V, why it cannot go inside the control tick, what a
+hobby servo bus will do at 400 Hz. None of those could be looked up. They are why the section below
+on what was measured is as long as it is.
+
 ## What this fork adds
 
 ```
