@@ -1,0 +1,16 @@
+# Pins the toolchain for this crate, which is really about pinning rustfmt and clippy.
+#
+# CI runs `cargo fmt --check` and `cargo clippy -- -D warnings` as gates. Those gates only mean
+# something if the developer's machine and the runner agree on the version: without this file the
+# workflow installs whatever `stable` is on the day it runs, so a release can turn main red without
+# anyone touching the code. That is not hypothetical -- 2026-08-28 through 2026-08-29 were red on
+# fmt, and local was a release behind the runner at the time.
+#
+# Pinned to the version the daemon is actually built and measured with on the development machine,
+# rather than to the newest release, so the arm and CI are running the same compiler. Bumping this
+# is a deliberate commit: raise it, run `cargo fmt` and `cargo clippy --all-targets`, and land the
+# churn on its own.
+[toolchain]
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

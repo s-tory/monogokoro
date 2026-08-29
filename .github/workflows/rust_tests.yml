@@ -53,6 +53,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # Installs rustup and a stable toolchain, but not the one the gates below actually run:
+      # `rust/so101_impedance_ctrl/rust-toolchain.toml` pins that, and cargo honours it because the
+      # steps below run inside the crate. The pin is the point -- `cargo fmt --check` and
+      # `clippy -D warnings` only mean something if the runner and the developer's machine agree on
+      # the version, and `stable` here moves on its own schedule.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
