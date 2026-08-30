@@ -248,7 +248,7 @@ Marr-Albus-Ito, mapped onto the hardware more or less directly:
 | parallel fibres   | the granule code, L2-normalised, with a ~150 ms eligibility trace                                                          |
 | Purkinje cells    | 6 outputs, a linear readout -- **the only learned layer**                                                                  |
 | climbing fibres   | the reflex's own standing duty, low-passed and gated                                                                       |
-| PF->PC plasticity | `dW = rate * (cf * e - leak * W * e)` -- three-factor Hebbian with heterosynaptic decay                                    |
+| PF->PC plasticity | `dW = rate * (cf * e - leak * W * e)` -- three-factor Hebbian, heterosynaptic decay, both terms gated on a non-zero `cf`   |
 
 **There is no backpropagation, and none is needed.** The expansion layer is not learned, so there
 is exactly one layer of adjustable synapses, and its error is already expressed in the units the

@@ -206,7 +206,9 @@ The structure is Marr-Albus-Ito, mapped onto the hardware directly:
 
 Three factors -- parallel-fibre eligibility, climbing fibre, and nothing else. The `leak` term is
 what makes it a _modified_ Hebbian rule rather than a runaway: a bare Hebbian product only grows
-once the error has a consistent sign, which is exactly what gravity produces.
+once the error has a consistent sign, which is exactly what gravity produces. Both terms are gated
+on a live climbing fibre: a `cf` of zero is the absence of an error signal, not an error of zero,
+and a decay left running without one dismantles the very feedforward that made the error go away.
 
 **No backpropagation, and none is needed.** Only one layer has adjustable synapses, and its error is
 already expressed in the units its output is in (PWM), so the credit-assignment problem backprop
@@ -342,13 +344,18 @@ way", which look identical from across the room; and `cargo test --test cerebell
   4.6 V to 2.4 V for ~820 ms at a time. The comparison survives -- both sides of it ran under the
   same fault -- but the holding duties, the `--cerebellum-ff-max` clamp being reached on two joints,
   and the friction band below all have to be re-taken on a healthy arm.
-- **The feedforward does not obviously settle.** In both learning runs it decayed under the
-  heterosynaptic leak with a time constant of minutes while the joint sat perfectly still, then
-  snapped back to the clamp once the arm finally slipped. The mechanism would be that static
-  friction makes the climbing fibre lie: inside the friction band the joint reports no error, so the
-  reflex's standing duty -- which is the teaching signal -- falls to zero while the load is still
-  entirely there. Whether that band is a property of the gearboxes or an artefact of the supply
-  collapsing is exactly what the re-measurement has to separate.
+- **The feedforward decayed instead of settling. Fixed; the fix is unmeasured.** In both learning
+  runs it bled away with a time constant of minutes while the joint sat perfectly still, then
+  snapped back to the clamp once the arm finally slipped. The cause was the rule, not the arm: the
+  decay was gated on the eligibility trace but not on the climbing fibre, so the fixed point was
+  `w = cf / leak` -- weights that need a standing error to hold them up. The residual that leaves is
+  under a PWM count, narrower than the stick band, and inside that band the joint cannot move to
+  report the error at all. Both halves are now gated on a live climbing fibre, and
+  `--cerebellum-cf-deadband` (default 5.0) sets where the reflex counts as silent. That default is
+  derived rather than measured -- above the leak's residual, below one encoder count times the joint
+  stiffness -- so it wants confirming on a healthy arm; `0` restores the old behaviour for an A/B
+  inside one session. Whether the stick band is a property of the gearboxes or an artefact of the
+  supply collapsing is still what the re-measurement has to separate.
 - **Touch stops at how hard, not where or whether it is slipping.** A compliant fingertip turns grip
   force into encoder counts, and that is the whole of the tactile sense here: one scalar per jaw,
   available to the reflex at 400 Hz. Where on the finger contact happened, and the micro-vibration
