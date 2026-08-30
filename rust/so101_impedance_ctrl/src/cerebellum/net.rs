@@ -379,6 +379,15 @@ pub fn decay_trace(trace: &mut [f32], gc: &[f32], decay: f32) {
 ///                                        what they learned.
 /// ```
 ///
+/// Both halves are gated on a live climbing fibre, not just the Hebbian one. A zero `cf[i]` means
+/// there is no error signal -- the joint is gated out, or the reflex has nothing left to contribute
+/// -- and neither is a reason to forget. Letting the decay run on its own puts the rule's fixed
+/// point at `w = cf / leak`, which needs a standing error to hold the weights up: the better the
+/// feedforward gets, the faster it is dismantled. Stiction turns that into a slow limit cycle,
+/// because inside the stick band the joint does not move, so the reflex reports no error however
+/// far the feedforward has drifted. In the cerebellum the LTD is driven by the climbing fibre's own
+/// spike, so no spike means no plasticity in either direction, which is what this implements.
+///
 /// The sign is positive on purpose. In the cerebellum the climbing fibre depresses co-active
 /// parallel-fibre synapses, and the Purkinje cell is inhibitory onto the deep nuclei, so two sign
 /// inversions sit between that LTD and the motor command. This layer stands in for the whole
@@ -394,8 +403,11 @@ pub fn hebbian_update(
     leak: f32,
 ) {
     for i in 0..NUM_OUTPUTS {
-        let row = &mut weights[i * gc_dim..(i + 1) * gc_dim];
         let cf_i = cf[i];
+        if cf_i == 0.0 {
+            continue; // silent climbing fibre: no error signal, no plasticity
+        }
+        let row = &mut weights[i * gc_dim..(i + 1) * gc_dim];
         for (w, &e) in row.iter_mut().zip(trace.iter()) {
             if e == 0.0 {
                 continue; // silent parallel fibre: no eligibility, no plasticity

@@ -348,6 +348,45 @@ fn plasticity_is_confined_to_joints_with_a_live_climbing_fibre() {
 }
 
 #[test]
+fn a_silent_climbing_fibre_does_not_undo_what_was_learned() {
+    // On the arm this failed as a two-to-four-minute limit cycle: the feedforward cancels the load,
+    // the reflex goes quiet because there is nothing left for it to do, and a decay that runs on
+    // its own bleeds the weights away until the joint slips and the error comes back. Stiction
+    // makes it worse -- inside the stick band the joint cannot move, so the reflex reports nothing
+    // however far the feedforward has already drifted. A climbing fibre at zero has to mean "no
+    // signal", not "an error of zero", or success is what destroys the weights.
+    let mut net = CpuNet::new(test_params());
+    let mf = encode_mossy_fibres(&state_at(900.0));
+    let leak = 0.05;
+    let mut theta = 0.0f32;
+
+    let cf = [120.0f32; NUM_OUTPUTS];
+    for _ in 0..500 {
+        let (_, active) = net.step(&mf, theta, 0.0, Some(&cf), 0.01, leak);
+        theta += 0.05 * (active - 0.02);
+        theta = theta.clamp(-1.0, 1.0);
+    }
+    let learned = net.weights.clone();
+    assert!(
+        learned.iter().any(|&w| w != 0.0),
+        "nothing was learned, so this proves nothing about holding on to it"
+    );
+
+    // Ten times the observed decay time constant at this rate, with the arm parked at the same
+    // pose, so every synapse that learned is fully eligible the whole way through.
+    let silent = [0.0f32; NUM_OUTPUTS];
+    for _ in 0..20_000 {
+        let (_, active) = net.step(&mf, theta, 0.0, Some(&silent), 0.01, leak);
+        theta += 0.05 * (active - 0.02);
+        theta = theta.clamp(-1.0, 1.0);
+    }
+    assert_eq!(
+        net.weights, learned,
+        "the feedforward decayed while the climbing fibre was silent"
+    );
+}
+
+#[test]
 fn eligibility_trace_outlives_the_activity_that_set_it() {
     // The point of the trace: a climbing-fibre signal arriving after the pose has changed still
     // finds the synapses that were recently active.

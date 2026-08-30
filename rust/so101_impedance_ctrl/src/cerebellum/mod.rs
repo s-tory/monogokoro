@@ -116,6 +116,19 @@ pub struct CerebellumConfig {
     /// visiting intact, and it means the plasticity dispatch still touches only the ~2% of the
     /// layer that is active.
     pub leak: f32,
+    /// Feedback duty below which the climbing fibre counts as silent, so the joint's Purkinje row
+    /// is left alone entirely -- no Hebbian growth and, more to the point, no decay.
+    ///
+    /// Without it the rule settles at `w = cf / leak`, which needs a standing error to hold the
+    /// weights up. That residual is `load * leak / (leak + sum_j g_j)`, well under one PWM count at
+    /// the defaults -- narrower than the arm's stick band, so the reflex goes quiet while the
+    /// feedforward is still short, the weights decay, and the arm slips a couple of minutes later.
+    /// The deadband has to sit above that residual to break the cycle, and below one encoder count
+    /// times the joint stiffness to stay invisible: the default is half a count at `K=10`.
+    ///
+    /// The stick band it has to clear was measured with a failing servo on the bus, so re-check
+    /// this once the arm is healthy.
+    pub cf_deadband: f32,
     /// Fraction of granule cells the Golgi threshold aims to leave active.
     pub sparsity: f32,
     /// Integrator gain for that threshold.
@@ -171,6 +184,7 @@ impl Default for CerebellumConfig {
             hz: 200.0,
             rate: 0.01,
             leak: 0.05,
+            cf_deadband: 5.0,
             sparsity: 0.02,
             golgi_gain: 0.05,
             trace_tau_s: 0.15,
@@ -619,7 +633,11 @@ fn run(
                 || !last_sensory.safe
                 || !sensory_fresh
                 || state.present_vel[i].abs() > cfg.vel_gate
-                || state.pos_error[i].abs() > cfg.error_gate;
+                || state.pos_error[i].abs() > cfg.error_gate
+                // A feedback duty this small is the reflex saying nothing, not the reflex saying
+                // "zero error". Learning from it is harmless; decaying from it is what dismantles
+                // a feedforward that is already doing its job.
+                || cf_lp[i].abs() < cfg.cf_deadband;
             if !gated {
                 cf[i] = cf_lp[i];
                 any_learning = true;

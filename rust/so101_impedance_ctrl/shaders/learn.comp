@@ -12,6 +12,10 @@
 // decay proportional to e[j] confines forgetting to synapses that are currently active, so poses
 // the arm is not visiting keep what they learned.
 //
+// Both halves are gated on a non-zero cf[i]: a silent climbing fibre is not an error of zero, it is
+// the absence of an error signal, and the decay running on its own would dismantle exactly the
+// feedforward that made the error go away. `net.rs` carries the full reasoning.
+//
 // One invocation per granule cell, updating that cell's whole column. Consecutive threads touch
 // consecutive addresses for each output row, so the writes coalesce.
 
@@ -34,6 +38,9 @@ void main() {
     }
 
     for (uint i = 0u; i < NUM_OUTPUTS; ++i) {
+        if (cf[i] == 0.0) {
+            continue; // silent climbing fibre: no error signal, no plasticity
+        }
         uint idx = i * gc_dim + j;
         float w = weights[idx];
         weights[idx] = w + rate * (cf[i] * e - leak * w * e);

@@ -64,6 +64,13 @@ fn shaders_agree_with_the_cpu_reference_through_learning() {
         for (i, c) in cf.iter_mut().enumerate() {
             *c = 50.0 * (t * 0.05 + i as f32).sin();
         }
+        // Output 0's climbing fibre falls silent halfway through -- what the deadband produces
+        // once a joint's feedforward has taken over its load, and what a gated-out joint looks
+        // like all run. Both sides have to freeze that row instead of decaying it, and an exact
+        // zero is the only value that reaches the branch which does so.
+        if step >= 150 {
+            cf[0] = 0.0;
+        }
 
         let (gpu_ff, gpu_active) = gpu
             .step(&mf, theta, trace_decay, Some(&cf), rate, leak)

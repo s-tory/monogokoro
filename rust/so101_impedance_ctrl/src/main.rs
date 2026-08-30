@@ -292,6 +292,12 @@ struct Cli {
     #[arg(long, default_value_t = 0.05)]
     cerebellum_leak: f32,
 
+    /// Feedback duty below which the climbing fibre counts as silent and the joint stops learning
+    /// altogether -- including the decay, so a feedforward that has already cancelled its load is
+    /// not dismantled by its own success. Set to 0 to restore the old always-decaying behaviour.
+    #[arg(long, default_value_t = 5.0)]
+    cerebellum_cf_deadband: f32,
+
     /// Fraction of granule cells the Golgi inhibition aims to leave active.
     #[arg(long, default_value_t = 0.02)]
     cerebellum_sparsity: f32,
@@ -680,7 +686,7 @@ fn main() {
         args.leader_pwm_max,
     );
     log::info!(
-        "cerebellum config: backend={:?} gc_dim={} seed={:#x} hz={} rate={} leak={} sparsity={} \
+        "cerebellum config: backend={:?} gc_dim={} seed={:#x} hz={} rate={} leak={} cf_deadband={} sparsity={} \
          trace_tau_s={} cf_tau_s={} ff_max={} ff_slew={} vel_gate={} error_gate={} joints={} \
          staleness_ms={} cpu_core={:?} priority={} weights={:?}",
         args.cerebellum_backend,
@@ -689,6 +695,7 @@ fn main() {
         args.cerebellum_hz,
         args.cerebellum_rate,
         args.cerebellum_leak,
+        args.cerebellum_cf_deadband,
         args.cerebellum_sparsity,
         args.cerebellum_trace_tau_s,
         args.cerebellum_cf_tau_s,
@@ -1262,6 +1269,7 @@ fn build_cerebellum_config(args: &Cli) -> Result<CerebellumConfig, String> {
         hz: args.cerebellum_hz,
         rate: args.cerebellum_rate,
         leak: args.cerebellum_leak,
+        cf_deadband: args.cerebellum_cf_deadband,
         sparsity: args.cerebellum_sparsity,
         golgi_gain: args.cerebellum_golgi_gain,
         trace_tau_s: args.cerebellum_trace_tau_s,
