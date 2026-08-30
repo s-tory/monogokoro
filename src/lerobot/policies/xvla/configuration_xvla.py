@@ -130,7 +130,11 @@ class XVLAConfig(PreTrainedConfig):
     empty_cameras: int = 0
 
     # Freezing options for VLM components
-    # By default, VLM encoders are frozen and only policy transformer + soft prompts train
+    # By default nothing is frozen: a plain run full-finetunes the VLM encoders together with the
+    # policy transformer and soft prompts, which is the recipe the X-VLA guide recommends for Phase II
+    # adaptation but which needs a large GPU (for the 0.9B checkpoint the AdamW state alone is ~7.2GB).
+    # For the paper's prompt-only Phase II recipe (~1% of the parameters), set both freeze flags to
+    # True and `train_policy_transformer` to False.
     freeze_vision_encoder: bool = False  # Freeze VLM vision encoder weights
     freeze_language_encoder: bool = False  # Freeze VLM language encoder weights
     train_policy_transformer: bool = True  # Allow policy transformer to train
