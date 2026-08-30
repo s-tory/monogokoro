@@ -118,6 +118,13 @@ class SO101ImpedanceFollowerConfig:
     # restarting the daemon and without bypassing the filter.
     pontine_context: tuple[float, ...] = (0.0, 0.0)
 
+    # Contexts to rotate through, one per kept episode, so a single `lerobot-record` run
+    # interleaves them. Empty keeps `pontine_context` fixed for the whole run. Interleaving is not
+    # a convenience: most granule cells draw no context fibre, so their weights are shared, and
+    # teaching one context to convergence before the other leaves the first reading 98 where it
+    # should read 40. When set, the first entry replaces `pontine_context` as the starting value.
+    pontine_context_cycle: tuple[tuple[float, ...], ...] = ()
+
     # How long to wait for the shared-memory segment to appear (i.e. for the Rust daemon to have
     # started) before giving up in `connect()`.
     shm_attach_timeout_s: float = 5.0

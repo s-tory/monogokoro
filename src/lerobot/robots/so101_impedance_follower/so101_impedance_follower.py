@@ -163,7 +163,10 @@ class SO101ImpedanceFollower(Robot):
             # Same reasoning as the gains, for the same reason: a leader arm cannot supply a
             # context, and one filled in by `send_action` would reach the arm but never the
             # dataset -- leaving the `context.<i>` action columns declared but never populated.
-            PontineContextProcessorStep(context=tuple(self.config.pontine_context)),
+            PontineContextProcessorStep(
+                context=tuple(self.config.pontine_context),
+                cycle=tuple(tuple(entry) for entry in self.config.pontine_context_cycle),
+            ),
         ]
 
     @property

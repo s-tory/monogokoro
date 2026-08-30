@@ -301,3 +301,18 @@ def test_teleop_action_processor_steps_seed_context_from_the_robots_own_config()
 
     assert isinstance(context_step, PontineContextProcessorStep)
     assert context_step.context == (1.0, 0.0)
+
+
+def test_teleop_action_processor_steps_seed_the_context_cycle():
+    # Interleaving is a requirement of how the cerebellum learns the contexts, so a configured
+    # cycle has to reach the step that records them, not just the arm.
+    config = SO101ImpedanceFollowerRobotConfig(
+        shm_name="unused", pontine_context_cycle=((1.0, 0.0), (-1.0, 0.0))
+    )
+    robot = SO101ImpedanceFollower(config)
+
+    _, context_step = robot.teleop_action_processor_steps()
+
+    assert context_step.cycle == ((1.0, 0.0), (-1.0, 0.0))
+    # The cycle wins over `pontine_context`, which was left at its neutral default here.
+    assert context_step.context == (1.0, 0.0)

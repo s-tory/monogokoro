@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from lerobot.configs import FeatureType, PipelineFeatureType, PolicyFeature
 from lerobot.types import RobotAction
@@ -49,21 +49,55 @@ class PontineContextProcessorStep(RobotActionProcessorStep):
     limitation already documented for K/D.
 
     Attributes:
-        context: The context vector for this recording session, nominally in `[-1, 1]` per
-            channel. Its length is the number of channels and must match the daemon's
-            `NUM_CONTEXT`. All-zero is the neutral "no context" value, which degrades the
-            cerebellum to proprioception-only rather than to garbage.
+        context: The context currently being demonstrated, nominally in `[-1, 1]` per channel.
+            Its length is the number of channels and must match the daemon's `NUM_CONTEXT`.
+            All-zero is the neutral "no context" value, which degrades the cerebellum to
+            proprioception-only rather than to garbage.
+        cycle: Contexts to rotate through, one per kept episode. Empty means a fixed `context`.
+            This exists because the cerebellum has to be taught the contexts *interleaved* --
+            most granule cells draw no context fibre, so their weights are shared, and training
+            one context to convergence before the other leaves the first reading 98 where it
+            should read 40. Rotating per episode makes a single `lerobot-record` run interleave
+            on its own, which is otherwise the operator's job to remember.
     """
 
     # Zero-length would silently record nothing, so the default is the daemon's two channels at
     # the neutral value: wiring the step up without configuring it is a no-op, not a surprise.
     context: tuple[float, ...] = (0.0, 0.0)
+    cycle: tuple[tuple[float, ...], ...] = ()
+    cycle_index: int = field(default=0, init=False)
 
     def __post_init__(self):
-        if len(self.context) == 0:
+        if self.cycle:
+            for entry in self.cycle:
+                self._validate(tuple(entry))
+            if len({len(entry) for entry in self.cycle}) != 1:
+                raise ValueError(f"every cycle entry must have the same length, got {self.cycle}")
+            # The cycle is the source of truth once configured, so the first episode records its
+            # first entry rather than a `context` the caller may not have bothered to match.
+            self.cycle = tuple(tuple(float(c) for c in entry) for entry in self.cycle)
+            self.context = self.cycle[0]
+        self._validate(self.context)
+
+    @staticmethod
+    def _validate(context: tuple[float, ...]) -> None:
+        if len(context) == 0:
             raise ValueError("context must have at least one channel")
-        if any(not -1.0 <= float(c) <= 1.0 for c in self.context):
-            raise ValueError(f"context values must lie in [-1, 1], got {self.context}")
+        if any(not -1.0 <= float(c) <= 1.0 for c in context):
+            raise ValueError(f"context values must lie in [-1, 1], got {context}")
+
+    def cycle_context(self) -> tuple[float, ...]:
+        """Advance to the next context in `cycle` and return it (a no-op without a cycle).
+
+        Called by `lerobot-record` after an episode is *kept*, never after a re-record: the
+        operator has already staged the object for the context that was just aborted, so
+        advancing there would label the retake with the wrong one.
+        """
+        if not self.cycle:
+            return self.context
+        self.cycle_index = (self.cycle_index + 1) % len(self.cycle)
+        self.context = self.cycle[self.cycle_index]
+        return self.context
 
     def action(self, action: RobotAction) -> RobotAction:
         new_action = dict(action)

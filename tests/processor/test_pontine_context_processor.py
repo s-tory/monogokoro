@@ -111,3 +111,42 @@ def test_works_inside_a_robot_action_pipeline():
 
     assert out["context.0"] == 1.0
     assert out["context.1"] == 0.0
+
+
+def test_a_cycle_sets_the_starting_context():
+    # The cycle is the source of truth once configured, so the first episode records its first
+    # entry rather than a `context` the caller may not have bothered to keep in sync.
+    step = PontineContextProcessorStep(context=(0.0, 0.0), cycle=((1.0, 0.0), (-1.0, 0.0)))
+
+    assert step.context == (1.0, 0.0)
+    assert step.cycle_index == 0
+    assert step.action(_base_action())["context.0"] == 1.0
+
+
+def test_cycle_context_advances_and_wraps():
+    step = PontineContextProcessorStep(cycle=((1.0, 0.0), (-1.0, 0.0)))
+
+    assert step.cycle_context() == (-1.0, 0.0)
+    assert step.action(_base_action())["context.0"] == -1.0
+    # Wrapping is what makes an odd number of episodes still alternate rather than stall.
+    assert step.cycle_context() == (1.0, 0.0)
+    assert step.cycle_index == 0
+
+
+def test_cycle_context_is_a_no_op_without_a_cycle():
+    # `record` calls this unconditionally on collected steps; a fixed context must stay fixed.
+    step = PontineContextProcessorStep(context=(0.5, -0.5))
+
+    assert step.cycle_context() == (0.5, -0.5)
+    assert step.context == (0.5, -0.5)
+
+
+def test_cycle_entries_are_validated():
+    with pytest.raises(ValueError, match=r"\[-1, 1\]"):
+        PontineContextProcessorStep(cycle=((1.0, 0.0), (2.0, 0.0)))
+
+
+def test_cycle_entries_must_agree_on_length():
+    # A shorter entry would silently write fewer channels than the daemon reads.
+    with pytest.raises(ValueError, match="same length"):
+        PontineContextProcessorStep(cycle=((1.0, 0.0), (-1.0,)))

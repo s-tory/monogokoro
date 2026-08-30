@@ -378,6 +378,20 @@ def _robot_teleop_action_steps(robot: Robot) -> list:
     return steps
 
 
+def _context_cycling_steps(pipeline) -> list:
+    """Steps in a pipeline that want to be advanced to their next context between episodes.
+
+    Duck-typed for the same reason as `_robot_teleop_action_steps`: `record` should not have to
+    know which robots declare a context to a layer below the policy, only that a step may ask to
+    be advanced once an episode is kept.
+    """
+    return [
+        step
+        for step in getattr(pipeline, "steps", ())
+        if callable(getattr(step, "cycle_context", None)) and getattr(step, "cycle", ())
+    ]
+
+
 @parser.wrap()
 def record(
     cfg: RecordConfig,
@@ -492,10 +506,21 @@ def record(
                 "Streaming encoding is disabled. If you have capable hardware, consider enabling it for way faster episode saving. --dataset.streaming_encoding=true --dataset.encoder_threads=2 # --dataset.rgb_encoder.vcodec=auto. More info in the documentation: https://huggingface.co/docs/lerobot/streaming_video_encoding"
             )
 
+        # Interleaving the contexts is a requirement of how the cerebellum learns them, not a
+        # preference, so a run that configures a cycle rotates on its own rather than relying on
+        # the operator to alternate `lerobot-record` invocations.
+        context_steps = _context_cycling_steps(teleop_action_processor)
+
         with VideoEncodingManager(dataset):
             recorded_episodes = 0
             while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
                 log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
+                for step in context_steps:
+                    # The operator has to stage a different object per context, so this has to be
+                    # said out loud before the episode starts, not written to a log they are not
+                    # looking at while their hands are on the leader arm.
+                    log_say(f"Context {step.cycle_index + 1} of {len(step.cycle)}", cfg.play_sounds)
+                    logging.info("Pontine context for this episode: %s", list(step.context))
                 record_loop(
                     robot=robot,
                     events=events,
@@ -542,6 +567,10 @@ def record(
 
                 dataset.save_episode()
                 recorded_episodes += 1
+                # Only after the episode is kept: a re-record takes the `continue` above and must
+                # stay on the context whose object is already staged.
+                for step in context_steps:
+                    step.cycle_context()
     finally:
         log_say("Stop recording", cfg.play_sounds, blocking=True)
 

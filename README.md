@@ -267,7 +267,9 @@ reference rather than an arm, and are regression tests now: swing every channel 
 than raising a `0/1` flag (one differing fibre recovers 64 of an 80-count separation, two recover
 all 80, for the same cost), and interleave the contexts while learning rather than training one to
 convergence and then the other (most granule cells draw no context fibre, so their weights are
-shared, and blocked training leaves the first context reading 98 where it should read 40).
+shared, and blocked training leaves the first context reading 98 where it should read 40) --
+`--robot.pontine_context_cycle` rotates them per kept episode so one recording run interleaves
+on its own.
 
 ## Quick start
 
@@ -339,8 +341,7 @@ way", which look identical from across the room; and `cargo test --test cerebell
   wired end to end -- config to shared memory to mossy fibres, with the demonstration's context
   recorded as an action column -- but its two constants were measured against the CPU reference
   rather than an arm, and a policy reproduces whatever the operator labelled until it learns to
-  predict it from the images. Interleaving the two contexts -- which the constant above requires --
-  means alternating `lerobot-record` runs, since the label is fixed for the length of one.
+  predict it from the images.
 - **The cerebellum cancels droop on a real arm; the numbers around that are not yet trustworthy.**
   The narrow claim held on 2026-08-28, over four runs across two poses, at unchanged K:
   `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00, `shoulder_lift` 12.57 -> 3.00 counts of
