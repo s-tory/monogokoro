@@ -91,6 +91,7 @@ from .policy_robot_bridge import (
     PolicyActionToRobotActionProcessorStep,
     RobotActionToPolicyActionProcessorStep,
 )
+from .pontine_context_processor import PontineContextProcessorStep
 from .relative_action_processor import (
     AbsoluteActionsProcessorStep,
     RelativeActionsProcessorStep,
@@ -155,6 +156,7 @@ __all__ = [
     "PolicyAction",
     "PolicyActionProcessorStep",
     "PolicyProcessorPipeline",
+    "PontineContextProcessorStep",
     "ProcessorKwargs",
     "ProcessorStep",
     "ProcessorStepRegistry",

@@ -254,10 +254,15 @@ the readout to learn -- which is exactly the credit assignment this design does 
 not want. It is a sibling of the cerebellum in the source tree for the same reason it is one in the
 brainstem.
 
-**Nothing fills the channel yet.** Demonstrations carry no label for anything below the policy, so
-everything that exists today writes zeros -- the neutral value, which leaves the
-proprioception-only cerebellum exactly as it was. `--cerebellum-context` pins it by hand, which is
-enough to run the whole experiment with an arm and a weight. Two constants that came out of the CPU
+**The channel has a source now, and it is still a constant.** `--robot.pontine_context` is the
+operator's declaration of which of two indistinguishable situations is being demonstrated:
+`send_action` clamps it to `[-1, 1]` and writes it to shared memory, and
+`PontineContextProcessorStep` records it into the dataset as `context.<i>` action columns.
+Recording it as an _action_ is the point: ACT has no context of its own -- its CVAE latent is
+zeroed at inference by construction -- but a context inside the action it is trained to reproduce
+is one it can learn to emit from the images, reproducing the recorded constant first exactly as the
+`.k`/`.d` columns do. `--cerebellum-context` still pins the channel by hand, bypassing shared
+memory and the lag both, which is what the bench wants. Two constants that came out of the CPU
 reference rather than an arm, and are regression tests now: swing every channel to `+/-1` rather
 than raising a `0/1` flag (one differing fibre recovers 64 of an 80-count separation, two recover
 all 80, for the same cost), and interleave the contexts while learning rather than training one to
@@ -330,11 +335,12 @@ way", which look identical from across the room; and `cargo test --test cerebell
 
 ## Known limitations
 
-- **The pontine context has no source, and none of it is verified on hardware.** The channel is
-  wired end to end and its two constants were measured against the CPU reference, but every number
-  above comes from there rather than from an arm -- and the only thing writing to the channel today
-  is `--cerebellum-context`, by hand. Giving ACT something to write means labelling demonstrations
-  with something below the policy, which is the same missing piece as the entry below.
+- **The pontine context is not verified on hardware, and nothing yet _infers_ it.** The channel is
+  wired end to end -- config to shared memory to mossy fibres, with the demonstration's context
+  recorded as an action column -- but its two constants were measured against the CPU reference
+  rather than an arm, and a policy reproduces whatever the operator labelled until it learns to
+  predict it from the images. Interleaving the two contexts -- which the constant above requires --
+  means alternating `lerobot-record` runs, since the label is fixed for the length of one.
 - **The cerebellum cancels droop on a real arm; the numbers around that are not yet trustworthy.**
   The narrow claim held on 2026-08-28, over four runs across two poses, at unchanged K:
   `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00, `shoulder_lift` 12.57 -> 3.00 counts of

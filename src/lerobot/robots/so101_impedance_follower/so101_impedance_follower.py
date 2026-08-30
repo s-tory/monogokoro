@@ -30,7 +30,7 @@ from lerobot.utils.decorators import check_if_already_connected, check_if_not_co
 from ..robot import Robot
 from ..utils import ensure_safe_goal_position
 from .config_so101_impedance_follower import SO101ImpedanceFollowerRobotConfig
-from .shm_client import CommandKind, ImpedanceShmClient, ImpedanceShmClientError
+from .shm_client import NUM_CONTEXT, CommandKind, ImpedanceShmClient, ImpedanceShmClientError
 
 if TYPE_CHECKING:
     from lerobot.processor import ProcessorStep
@@ -85,6 +85,13 @@ class SO101ImpedanceFollower(Robot):
         self.config = config
         self.cameras = make_cameras_from_configs(config.cameras)
         self._shm_client: ImpedanceShmClient | None = None
+        # Checked here rather than at the shared-memory write: a mismatched length would otherwise
+        # surface as a ctypes assignment error mid-episode, long after the run was configured.
+        if len(config.pontine_context) != NUM_CONTEXT:
+            raise ValueError(
+                f"pontine_context must have {NUM_CONTEXT} channels (the daemon's NUM_CONTEXT), "
+                f"got {len(config.pontine_context)}: {config.pontine_context}"
+            )
 
     @property
     def impedance_joints(self) -> tuple[str, ...]:
@@ -108,6 +115,13 @@ class SO101ImpedanceFollower(Robot):
         return gains_ft
 
     @property
+    def _context_ft(self) -> dict[str, type]:
+        # Action columns, not observation: the context is declared downward by the policy layer,
+        # never sensed. Recording it as an action is what lets an imitation policy learn to emit
+        # it -- see `PontineContextProcessorStep`.
+        return {f"context.{i}": float for i in range(NUM_CONTEXT)}
+
+    @property
     def _cameras_ft(self) -> dict[str, tuple]:
         features: dict[str, tuple] = {}
         for cam in self.cameras:
@@ -123,7 +137,7 @@ class SO101ImpedanceFollower(Robot):
 
     @cached_property
     def action_features(self) -> dict[str, type]:
-        return {**self._motors_ft, **self._gains_ft}
+        return {**self._motors_ft, **self._gains_ft, **self._context_ft}
 
     def teleop_action_processor_steps(self) -> list["ProcessorStep"]:
         """Extra teleop-pipeline steps this robot needs when driven by a plain position teleoperator.
@@ -138,14 +152,18 @@ class SO101ImpedanceFollower(Robot):
         The gains come from this robot's own config, so a dataset is always labeled with the gains
         that were actually applied while it was demonstrated.
         """
-        from lerobot.processor import ImpedanceGainDefaultsProcessorStep
+        from lerobot.processor import ImpedanceGainDefaultsProcessorStep, PontineContextProcessorStep
 
         return [
             ImpedanceGainDefaultsProcessorStep(
                 impedance_joints=self.impedance_joints,
                 default_k=tuple(self.config.default_k),
                 default_d=tuple(self.config.default_d),
-            )
+            ),
+            # Same reasoning as the gains, for the same reason: a leader arm cannot supply a
+            # context, and one filled in by `send_action` would reach the arm but never the
+            # dataset -- leaving the `context.<i>` action columns declared but never populated.
+            PontineContextProcessorStep(context=tuple(self.config.pontine_context)),
         ]
 
     @property
@@ -339,6 +357,10 @@ class SO101ImpedanceFollower(Robot):
         of truth for recorded K/D during teleop is `ImpedanceGainDefaultsProcessorStep`, injected
         upstream in the teleop action pipeline, not here).
 
+        The pontine context channels (`context.<i>`) follow the same rule: clamped to `[-1, 1]`,
+        defaulted from `config.pontine_context`, with `PontineContextProcessorStep` as the
+        recording-time source of truth.
+
         Returns the action actually sent (post-clipping/defaulting), matching `SOFollower`'s
         contract.
         """
@@ -378,7 +400,24 @@ class SO101ImpedanceFollower(Robot):
             sent[f"{motor}.k"] = k
             sent[f"{motor}.d"] = d
 
-        shm.write_input(target_pos=target_pos, k_gain=k_gain, d_gain=d_gain, target_vel=target_vel)
+        # The pontine context, defaulted from config exactly as K/D are. A plain position
+        # teleoperator never supplies it; a policy that has learned to emit it does, and then its
+        # value wins. Clamped for the same defense-in-depth reason as K/D: the daemon documents
+        # `[-1, 1]` as the range the granule code was sized for, and a policy is free to overshoot.
+        context: list[float] = []
+        for i in range(NUM_CONTEXT):
+            c = float(action.get(f"context.{i}", self.config.pontine_context[i]))
+            c = min(max(c, -1.0), 1.0)
+            context.append(c)
+            sent[f"context.{i}"] = c
+
+        shm.write_input(
+            target_pos=target_pos,
+            k_gain=k_gain,
+            d_gain=d_gain,
+            target_vel=target_vel,
+            context=context,
+        )
         return sent
 
     @check_if_not_connected

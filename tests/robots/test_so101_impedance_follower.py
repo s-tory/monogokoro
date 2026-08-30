@@ -20,12 +20,12 @@ import pytest
 
 from lerobot.motors import MotorCalibration
 from lerobot.motors.feetech import OperatingMode
-from lerobot.processor import ImpedanceGainDefaultsProcessorStep
+from lerobot.processor import ImpedanceGainDefaultsProcessorStep, PontineContextProcessorStep
 from lerobot.robots.so101_impedance_follower import (
     SO101ImpedanceFollower,
     SO101ImpedanceFollowerRobotConfig,
 )
-from lerobot.robots.so101_impedance_follower.shm_client import CommandKind
+from lerobot.robots.so101_impedance_follower.shm_client import NUM_CONTEXT, CommandKind
 from lerobot.robots.utils import make_robot_from_config
 
 _PATCH_TARGET = "lerobot.robots.so101_impedance_follower.so101_impedance_follower.ImpedanceShmClient"
@@ -67,13 +67,17 @@ def test_feature_shapes(follower):
     robot, _ = follower
     # 6 motors x (.pos + .current_avg) = 12
     assert len(robot.observation_features) == 12
-    # 6 motors x (.pos + .k + .d) = 18 -- the gripper is impedance-controlled too.
-    assert len(robot.action_features) == 18
+    # 6 motors x (.pos + .k + .d) = 18 -- the gripper is impedance-controlled too -- plus the
+    # pontine context channels, which are action columns because the policy layer declares them
+    # downward rather than sensing them.
+    assert len(robot.action_features) == 18 + NUM_CONTEXT
     for motor in robot.impedance_joints:
         assert f"{motor}.k" in robot.action_features
         assert f"{motor}.d" in robot.action_features
     assert "gripper.k" in robot.action_features
     assert "gripper.d" in robot.action_features
+    for i in range(NUM_CONTEXT):
+        assert f"context.{i}" in robot.action_features
 
 
 def test_get_observation_converts_raw_ticks_to_normalized_units(follower):
@@ -186,7 +190,7 @@ def test_teleop_action_processor_steps_seeds_gains_from_the_robots_own_config():
     )
     robot = SO101ImpedanceFollower(config)
 
-    (step,) = robot.teleop_action_processor_steps()
+    step, _ = robot.teleop_action_processor_steps()
 
     assert isinstance(step, ImpedanceGainDefaultsProcessorStep)
     assert step.impedance_joints == robot.impedance_joints
@@ -195,23 +199,24 @@ def test_teleop_action_processor_steps_seeds_gains_from_the_robots_own_config():
 
 
 def test_teleop_action_processor_steps_fill_every_recorded_action_dimension():
-    # A position-only leader arm supplies 6 keys; the dataset's action feature is 18 wide. The gap
-    # is exactly what this step closes, and it has to close it here rather than in `send_action`,
-    # which runs after the frame is written.
+    # A position-only leader arm supplies 6 keys; the dataset's action feature is 18 + NUM_CONTEXT
+    # wide. The gap is exactly what these steps close, and they have to close it here rather than
+    # in `send_action`, which runs after the frame is written.
     robot = SO101ImpedanceFollower(SO101ImpedanceFollowerRobotConfig(shm_name="unused"))
-    (step,) = robot.teleop_action_processor_steps()
+    steps = robot.teleop_action_processor_steps()
 
-    teleop_action = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
-    filled = step.action(teleop_action)
+    filled = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
+    for step in steps:
+        filled = step.action(filled)
 
     assert set(filled) == set(robot.action_features)
-    assert len(filled) == 18
+    assert len(filled) == 18 + NUM_CONTEXT
 
 
 def test_teleop_action_processor_steps_do_not_override_supplied_gains():
     # During policy rollout the action already carries predicted K/D; the step must leave those be.
     robot = SO101ImpedanceFollower(SO101ImpedanceFollowerRobotConfig(shm_name="unused"))
-    (step,) = robot.teleop_action_processor_steps()
+    step, _ = robot.teleop_action_processor_steps()
 
     action = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
     action["gripper.k"] = 99.0
@@ -219,3 +224,80 @@ def test_teleop_action_processor_steps_do_not_override_supplied_gains():
 
     assert filled["gripper.k"] == 99.0
     assert filled["shoulder_lift.k"] == robot.config.default_k[1]
+
+
+def _telemetry_for(robot) -> dict:
+    return {
+        "timestamp_mono_ns": 0,
+        "present_pos": [2047.5] * len(robot.impedance_joints),
+        "present_vel": [0.0] * len(robot.impedance_joints),
+        "present_current_avg": [0.0] * len(robot.impedance_joints),
+        "fault_flags": 0,
+    }
+
+
+def test_send_action_defaults_context_from_config(follower):
+    # Nothing in a teleop action carries a context, so the arm falls back to the one the operator
+    # configured for this run -- the same defaulting path K/D take.
+    robot, shm_mock = follower
+    robot.config.pontine_context = (1.0, -1.0)
+    shm_mock.read_output.return_value = _telemetry_for(robot)
+
+    sent = robot.send_action({f"{motor}.pos": 0.0 for motor in robot.impedance_joints})
+
+    _, kwargs = shm_mock.write_input.call_args
+    assert kwargs["context"] == [1.0, -1.0]
+    assert [sent[f"context.{i}"] for i in range(NUM_CONTEXT)] == [1.0, -1.0]
+
+
+def test_send_action_context_from_the_action_wins_over_config(follower):
+    # A policy that has learned to emit the context is the cortex the config default stands in for,
+    # so its declaration must override the operator's.
+    robot, shm_mock = follower
+    robot.config.pontine_context = (0.0, 0.0)
+    shm_mock.read_output.return_value = _telemetry_for(robot)
+
+    action = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
+    action["context.0"] = 0.7
+
+    robot.send_action(action)
+
+    _, kwargs = shm_mock.write_input.call_args
+    # Channel 0 comes from the action; channel 1 was not predicted and still defaults.
+    assert kwargs["context"] == [pytest.approx(0.7), 0.0]
+
+
+def test_send_action_clamps_context_to_the_documented_range(follower):
+    # The granule code was sized for [-1, 1]; a policy is free to overshoot it, and an overshoot
+    # would be a step in the feedforward the reflex has to absorb.
+    robot, shm_mock = follower
+    shm_mock.read_output.return_value = _telemetry_for(robot)
+
+    action = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
+    action["context.0"] = 42.0
+    action["context.1"] = -42.0
+
+    robot.send_action(action)
+
+    _, kwargs = shm_mock.write_input.call_args
+    assert kwargs["context"] == [1.0, -1.0]
+
+
+def test_context_length_mismatch_fails_at_construction():
+    # A wrong length would otherwise surface as a ctypes error mid-episode, after the run was set up.
+    with pytest.raises(ValueError, match="pontine_context"):
+        SO101ImpedanceFollower(
+            SO101ImpedanceFollowerRobotConfig(shm_name="unused", pontine_context=(1.0,) * (NUM_CONTEXT + 1))
+        )
+
+
+def test_teleop_action_processor_steps_seed_context_from_the_robots_own_config():
+    # Same contract as the gains: the dataset must be labeled with the context that was actually
+    # declared to the cerebellum while the demonstration happened.
+    config = SO101ImpedanceFollowerRobotConfig(shm_name="unused", pontine_context=(1.0, 0.0))
+    robot = SO101ImpedanceFollower(config)
+
+    _, context_step = robot.teleop_action_processor_steps()
+
+    assert isinstance(context_step, PontineContextProcessorStep)
+    assert context_step.context == (1.0, 0.0)

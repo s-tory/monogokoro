@@ -100,6 +100,24 @@ class SO101ImpedanceFollowerConfig:
     d_min: float = 0.0
     d_max: float = 5.0
 
+    # The pontine context this arm declares to the cerebellum, nominally in `[-1, 1]` per channel.
+    # Length must equal the daemon's `shm::NUM_CONTEXT` (mirrored as `shm_client.NUM_CONTEXT`).
+    #
+    # This is what the policy layer hands *down*: object identity, not mass -- see `NUM_CONTEXT`'s
+    # comment for why the cerebellum is not told how heavy the thing is. All-zero is the neutral
+    # "no context" value, and it is deliberately the default: an unconfigured arm degrades to the
+    # proprioception-only cerebellum rather than pinning one arbitrary context.
+    #
+    # `send_action` uses this as the *fallback*, the same way `default_k`/`default_d` are used --
+    # an action that carries its own `context.<i>` keys (a policy that emits them, or the recording
+    # pipeline's `PontineContextProcessorStep`) wins. During teleop nothing emits them, so this is
+    # the operator's declaration of which situation is being demonstrated.
+    #
+    # Unlike the Rust daemon's `--cerebellum-context`, this travels the real path: shared memory,
+    # the pontine low-pass, and the mossy fibres, so it can differ per `lerobot-record` run without
+    # restarting the daemon and without bypassing the filter.
+    pontine_context: tuple[float, ...] = (0.0, 0.0)
+
     # How long to wait for the shared-memory segment to appear (i.e. for the Rust daemon to have
     # started) before giving up in `connect()`.
     shm_attach_timeout_s: float = 5.0
