@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytest.importorskip("datasets", reason="datasets is required (install lerobot[dataset])")
+
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.motors import MotorCalibration
 from lerobot.motors.feetech import OperatingMode
