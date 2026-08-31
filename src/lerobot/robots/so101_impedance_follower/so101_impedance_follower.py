@@ -74,7 +74,9 @@ class SO101ImpedanceFollower(Robot):
     error computed inside the Rust control loop -- Rust never applies this class's degree/range
     calibration math, only Python does, at the `.pos` <-> raw-tick boundary in `get_observation`/
     `send_action`. `.current_avg` values are raw `Present_Current` register units (unconverted),
-    matching this repo's existing `MotorCurrentProcessorStep` convention.
+    matching this repo's existing `MotorCurrentProcessorStep` convention. The telemetry columns are
+    likewise unconverted: `.pwm_cmd`/`.ff_pwm` are in the Rust loop's duty units, and
+    `supply_decivolts` is in 0.1 V steps, as the name says.
     """
 
     config_class = SO101ImpedanceFollowerRobotConfig
@@ -107,6 +109,35 @@ class SO101ImpedanceFollower(Robot):
         return {f"{motor}.current_avg": float for motor in self.impedance_joints}
 
     @property
+    def _telemetry_ft(self) -> dict[str, type]:
+        """The daemon's own view of the loop, recorded because none of it can be recovered later.
+
+        `pwm_cmd - ff_pwm` is the feedback share of the duty, which is the quantity the climbing
+        fibre is derived from. Keeping both columns lets a frame's salience be judged after the
+        fact -- which frames the cerebellum could not predict -- instead of that judgement having
+        to be right before the first episode is recorded.
+
+        The rail voltage travels with the current for the reason `shm.rs` gives for publishing it:
+        a current taken without a concurrent rail reading cannot be told apart from a stiff
+        mechanism. The rail is shared, so the reading means the same thing whichever servo the
+        round-robin health poll happened to take it from, and it needs no companion column.
+
+        `case_temp_c` is deliberately *not* here, for the opposite reason. It belongs to the one
+        servo named by `health_motor_id`, so recording it truthfully means recording that id too --
+        and that id is a bare round-robin counter, which is exactly the kind of periodic column a
+        policy can learn a spurious correlation from. Nothing asks a temperature question today.
+        When something does, the column to add is a per-joint latch that is interpretable on its
+        own, not a value plus an index explaining who it belongs to.
+        """
+        ft: dict[str, type] = {}
+        for motor in self.impedance_joints:
+            ft[f"{motor}.pwm_cmd"] = float
+            ft[f"{motor}.ff_pwm"] = float
+        ft["supply_decivolts"] = float
+        ft["cerebellum_flags"] = float
+        return ft
+
+    @property
     def _gains_ft(self) -> dict[str, type]:
         gains_ft: dict[str, type] = {}
         for motor in self.impedance_joints:
@@ -133,7 +164,7 @@ class SO101ImpedanceFollower(Robot):
 
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
-        return {**self._motors_ft, **self._current_ft, **self._cameras_ft}
+        return {**self._motors_ft, **self._current_ft, **self._telemetry_ft, **self._cameras_ft}
 
     @cached_property
     def action_features(self) -> dict[str, type]:
@@ -333,6 +364,11 @@ class SO101ImpedanceFollower(Robot):
         for i, motor in enumerate(self.impedance_joints):
             obs_dict[f"{motor}.pos"] = self._raw_to_normalized(motor, telemetry["present_pos"][i])
             obs_dict[f"{motor}.current_avg"] = telemetry["present_current_avg"][i]
+            obs_dict[f"{motor}.pwm_cmd"] = telemetry["pwm_cmd"][i]
+            obs_dict[f"{motor}.ff_pwm"] = telemetry["ff_pwm"][i]
+
+        obs_dict["supply_decivolts"] = float(telemetry["supply_decivolts"])
+        obs_dict["cerebellum_flags"] = float(telemetry["cerebellum_flags"])
 
         for cam_key, cam in self.cameras.items():
             if getattr(cam, "use_rgb", True):

@@ -65,8 +65,19 @@ def test_connect_disconnect(follower):
 
 def test_feature_shapes(follower):
     robot, _ = follower
-    # 6 motors x (.pos + .current_avg) = 12
-    assert len(robot.observation_features) == 12
+    # 6 motors x (.pos + .current_avg + .pwm_cmd + .ff_pwm) = 24, plus the two scalars: the shared
+    # rail the currents are only interpretable against, and the cerebellum's flags.
+    assert len(robot.observation_features) == 26
+    for motor in robot.impedance_joints:
+        assert f"{motor}.pwm_cmd" in robot.observation_features
+        assert f"{motor}.ff_pwm" in robot.observation_features
+    for scalar in ("supply_decivolts", "cerebellum_flags"):
+        assert scalar in robot.observation_features
+    # The case temperature belongs to whichever servo the health poll last read, so it cannot be
+    # recorded without its `health_motor_id` -- and that id is a round-robin counter no policy
+    # should see. Neither column is declared; see `_telemetry_ft`.
+    assert "case_temp_c" not in robot.observation_features
+    assert "health_motor_id" not in robot.observation_features
     # 6 motors x (.pos + .k + .d) = 18 -- the gripper is impedance-controlled too -- plus the
     # pontine context channels, which are action columns because the policy layer declares them
     # downward rather than sensing them.
@@ -84,12 +95,20 @@ def test_get_observation_converts_raw_ticks_to_normalized_units(follower):
     robot, shm_mock = follower
     raw_positions = [0.0, 4095.0, 2047.5, 1000.0, 3000.0, 2048.0]
     currents = [11.0, 22.0, 33.0, 44.0, 55.0, 66.0]
+    pwm_cmd = [0.5, -0.25, 0.125, 0.0, -0.75, 0.3]
+    ff_pwm = [0.1, -0.05, 0.0, 0.0, -0.5, 0.2]
     shm_mock.read_output.return_value = {
         "timestamp_mono_ns": 0,
         "present_pos": raw_positions,
         "present_vel": [0.0] * 6,
         "present_current_avg": currents,
+        "pwm_cmd": pwm_cmd,
+        "ff_pwm": ff_pwm,
+        "cerebellum_flags": 4,
         "fault_flags": 0,
+        "supply_decivolts": 118,
+        "case_temp_c": 41,
+        "health_motor_id": 3,
     }
 
     obs = robot.get_observation()
@@ -106,6 +125,14 @@ def test_get_observation_converts_raw_ticks_to_normalized_units(follower):
     for i, motor in enumerate(robot.impedance_joints):
         assert obs[f"{motor}.current_avg"] == pytest.approx(currents[i])
 
+    # The telemetry columns pass through unconverted -- the duties in the Rust loop's units and the
+    # rail in 0.1 V steps -- so that `pwm_cmd - ff_pwm` stays the feedback share of the duty.
+    for i, motor in enumerate(robot.impedance_joints):
+        assert obs[f"{motor}.pwm_cmd"] == pytest.approx(pwm_cmd[i])
+        assert obs[f"{motor}.ff_pwm"] == pytest.approx(ff_pwm[i])
+    assert obs["supply_decivolts"] == pytest.approx(118.0)
+    assert obs["cerebellum_flags"] == pytest.approx(4.0)
+
 
 def test_send_action_requires_all_positions(follower):
     robot, _ = follower
@@ -121,7 +148,13 @@ def test_send_action_clamps_gains_and_converts_positions(follower):
         "present_pos": [2047.5] * 6,
         "present_vel": [0.0] * 6,
         "present_current_avg": [0.0] * 6,
+        "pwm_cmd": [0.0] * 6,
+        "ff_pwm": [0.0] * 6,
+        "cerebellum_flags": 0,
         "fault_flags": 0,
+        "supply_decivolts": 0,
+        "case_temp_c": 0,
+        "health_motor_id": 1,
     }
 
     action = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
@@ -232,7 +265,13 @@ def _telemetry_for(robot) -> dict:
         "present_pos": [2047.5] * len(robot.impedance_joints),
         "present_vel": [0.0] * len(robot.impedance_joints),
         "present_current_avg": [0.0] * len(robot.impedance_joints),
+        "pwm_cmd": [0.0] * len(robot.impedance_joints),
+        "ff_pwm": [0.0] * len(robot.impedance_joints),
+        "cerebellum_flags": 0,
         "fault_flags": 0,
+        "supply_decivolts": 0,
+        "case_temp_c": 0,
+        "health_motor_id": 1,
     }
 
 
