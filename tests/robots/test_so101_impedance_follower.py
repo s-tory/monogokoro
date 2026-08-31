@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.motors import MotorCalibration
 from lerobot.motors.feetech import OperatingMode
 from lerobot.processor import ImpedanceGainDefaultsProcessorStep, PontineContextProcessorStep
@@ -27,6 +28,13 @@ from lerobot.robots.so101_impedance_follower import (
 )
 from lerobot.robots.so101_impedance_follower.shm_client import NUM_CONTEXT, CommandKind
 from lerobot.robots.utils import make_robot_from_config
+from lerobot.utils.constants import ACTION, OBS_STR
+from lerobot.utils.feature_utils import (
+    build_dataset_frame,
+    combine_feature_dicts,
+    dataset_to_policy_features,
+    hw_to_dataset_features,
+)
 
 _PATCH_TARGET = "lerobot.robots.so101_impedance_follower.so101_impedance_follower.ImpedanceShmClient"
 
@@ -355,3 +363,74 @@ def test_teleop_action_processor_steps_seed_the_context_cycle():
     assert context_step.cycle == ((1.0, 0.0), (-1.0, 0.0))
     # The cycle wins over `pontine_context`, which was left at its neutral default here.
     assert context_step.context == (1.0, 0.0)
+
+
+def test_observation_survives_the_record_pipeline(follower, tmp_path):
+    """The 26 columns reach a dataset on disk and come back unchanged.
+
+    The per-robot tests above only check what `get_observation` returns. This one walks the same
+    path `lerobot-record` does -- hw features -> dataset features -> frame -> saved episode -> read
+    back -- because that is where a widened `observation.state` would actually break, and the day
+    the servos arrive is the wrong day to find out.
+    """
+    robot, shm_mock = follower
+    currents = [11.0, 22.0, 33.0, 44.0, 55.0, 66.0]
+    pwm_cmd = [0.5, -0.25, 0.125, 0.0, -0.75, 0.3]
+    ff_pwm = [0.1, -0.05, 0.0, 0.0, -0.5, 0.2]
+    shm_mock.read_output.return_value = {
+        "timestamp_mono_ns": 0,
+        "present_pos": [2047.5] * 6,
+        "present_vel": [0.0] * 6,
+        "present_current_avg": currents,
+        "pwm_cmd": pwm_cmd,
+        "ff_pwm": ff_pwm,
+        "cerebellum_flags": 4,
+        "fault_flags": 0,
+        "supply_decivolts": 118,
+        "case_temp_c": 41,
+        "health_motor_id": 3,
+    }
+
+    ds_features = combine_feature_dicts(
+        hw_to_dataset_features(robot.observation_features, OBS_STR, use_video=False),
+        hw_to_dataset_features(robot.action_features, ACTION),
+    )
+    assert ds_features[f"{OBS_STR}.state"]["shape"] == (26,)
+
+    dataset = LeRobotDataset.create(
+        "test/impedance_columns",
+        fps=30,
+        features=ds_features,
+        root=tmp_path / "ds",
+        robot_type=robot.name,
+        use_videos=False,
+    )
+
+    obs = robot.get_observation()
+    action = dict.fromkeys(robot.action_features, 0.0)
+    dataset.add_frame(
+        {
+            **build_dataset_frame(dataset.features, obs, prefix=OBS_STR),
+            **build_dataset_frame(dataset.features, action, prefix=ACTION),
+            "task": "column check",
+        }
+    )
+    dataset.save_episode()
+    dataset.finalize()
+
+    reloaded = LeRobotDataset("test/impedance_columns", root=tmp_path / "ds")
+    state = reloaded[0][f"{OBS_STR}.state"]
+    assert state.shape == (26,)
+
+    names = ds_features[f"{OBS_STR}.state"]["names"]
+    by_name = dict(zip(names, state.tolist(), strict=True))
+    for i, motor in enumerate(robot.impedance_joints):
+        assert by_name[f"{motor}.current_avg"] == pytest.approx(currents[i])
+        assert by_name[f"{motor}.pwm_cmd"] == pytest.approx(pwm_cmd[i])
+        assert by_name[f"{motor}.ff_pwm"] == pytest.approx(ff_pwm[i])
+    assert by_name["supply_decivolts"] == pytest.approx(118.0)
+    assert by_name["cerebellum_flags"] == pytest.approx(4.0)
+
+    # And ACT sizes its projections off this, so the width has to survive the last hop too.
+    policy_features = dataset_to_policy_features(reloaded.features)
+    assert policy_features[f"{OBS_STR}.state"].shape == (26,)
