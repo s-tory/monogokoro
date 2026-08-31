@@ -38,14 +38,14 @@ project's own mistakes, but none of them are specific to it.
 
 - **Ask biology before comparing engineering options.** When an architecture has more than one
   defensible shape, look at how the animal solves it before weighing the shapes against each
-  other. The load-bearing half is what the biological structure does *not* do — finding that the
+  other. The load-bearing half is what the biological structure does _not_ do — finding that the
   pontine nuclei compute nothing killed a whole branch of the design in one step. And when the
   animal has already answered, say so and move on; do not hand the user back a two-option
   question you already know the answer to.
 - **Convergence is evidence; divergence is a clue.** Fields that never cite each other land on
   the same mechanism under different names — the cerebellum's silent-climbing-fibre gate is
   control theory's conditional integration / anti-windup. If you are stuck, search under the
-  other field's name; the prior art is usually there. When two fields *disagree*, the useful
+  other field's name; the prior art is usually there. When two fields _disagree_, the useful
   question is not which is right but which constraint differs. (Joints are lubricated, so
   biology has almost no static friction and cannot be copied on friction — that is where a
   measured deadband has to come from instead.)
