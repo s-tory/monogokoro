@@ -63,6 +63,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # `build.rs` compiles the compute shaders with `glslc` on every build, deliberately -- a
+      # pre-built `.spv` blob can drift from its source and then fail as wrong numbers rather than
+      # as an error. That makes glslc a build-time requirement for the runner too, and it is not on
+      # the ubuntu-latest image: every Rust run since the shaders landed died in the build script
+      # before fmt, clippy or test got to say anything.
+      - name: Install glslc
+        run: sudo apt-get update && sudo apt-get install -y glslc
+
       - name: Cache cargo registry and build artifacts
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
