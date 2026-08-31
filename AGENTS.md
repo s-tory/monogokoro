@@ -31,6 +31,52 @@ write and — more often — what to refuse to write.
 
 Practical consequence, in one line: **measure first, and say only what the measurement says.**
 
+## Method
+
+The four above say what not to write. These say where to look first. They came out of this
+project's own mistakes, but none of them are specific to it.
+
+- **Ask biology before comparing engineering options.** When an architecture has more than one
+  defensible shape, look at how the animal solves it before weighing the shapes against each
+  other. The load-bearing half is what the biological structure does *not* do — finding that the
+  pontine nuclei compute nothing killed a whole branch of the design in one step. And when the
+  animal has already answered, say so and move on; do not hand the user back a two-option
+  question you already know the answer to.
+- **Convergence is evidence; divergence is a clue.** Fields that never cite each other land on
+  the same mechanism under different names — the cerebellum's silent-climbing-fibre gate is
+  control theory's conditional integration / anti-windup. If you are stuck, search under the
+  other field's name; the prior art is usually there. When two fields *disagree*, the useful
+  question is not which is right but which constraint differs. (Joints are lubricated, so
+  biology has almost no static friction and cannot be copied on friction — that is where a
+  measured deadband has to come from instead.)
+- **The measurement is never wrong; the question was.** A run that returns a surprising number
+  returned a correct answer to whatever you actually asked. Before doubting the instrument,
+  check what you asked. Corollary on who judges: the payment for being right is prediction, and
+  the judge is nature, not the audience. Rejection carries no information in either direction —
+  Semmelweis had the measurement, published it, and was not believed.
+- **Write the test that can kill the hypothesis before writing the implementation.** The cost of
+  a wrong hypothesis is not the wrongness, it is the code built before it was checked. Four
+  plausible hypotheses in a row were wrong here and cost nothing; one of them cost a shader, a
+  GPU buffer, a CPU reference path and a test suite, all deleted by a three-line check that
+  could have run first. Read-only measurement needs no permission and no plan — run it the
+  moment you think of it. Anything that moves hardware does need one.
+- **Do not replace a proven tool with an unverified script.** Before proposing the replacement,
+  check whether the real reason is that the existing tool is interactive and you cannot drive
+  it yourself. That is your convenience, not the user's safety, and the two must not be mixed.
+  Weigh it against how often the task runs — a once-ever setup step does not earn new code.
+  A safety check that has never been exercised is not a safety check.
+- **A metric is not trusted until it tracks a human's blind judgment.** The minimum-jerk model
+  is not why human reaching looks smooth; it is what was found by looking for a quantity that
+  matched what people already saw. The eye comes first and validates the number, not the other
+  way round — so show the comparison blind, then keep only the metrics that followed the choice.
+  And one number cannot answer two questions whose window lengths disagree; when that happens,
+  report two.
+- **Documentation is a correctness gate, not an append gate.** Before pushing, grep the docs for
+  the claims your change just touched and ask whether any of them became false. Adding a section
+  for every change is how docs stop being readable; deleting and correcting is the normal case.
+  When you withdraw a number, leave what it used to say and why it was wrong — readers remember
+  the old version.
+
 ## Tech Stack
 
 Python 3.12+ · PyTorch · Hugging Face (datasets, Hub, accelerate) · draccus (config/CLI) · Gymnasium (envs) · uv (package management)
