@@ -41,12 +41,12 @@ different job, and biology gives it to a different structure.
 
 So there are four layers here, and each is where it is for a reason:
 
-|                                         | biology                    | here                                         | rate   |
-| --------------------------------------- | -------------------------- | -------------------------------------------- | ------ |
-| answers contact with no loop at all     | preflex: muscle and tissue | packing foam under a finger cot, on each jaw | --     |
-| fast local loop, brain not involved     | stretch reflex             | Rust daemon, `SCHED_FIFO`, isolated core     | 400 Hz |
-| prediction, learned from its own errors | cerebellum                 | Vulkan compute on the iGPU, own thread       | 200 Hz |
-| slow loop through perception            | visual feedback            | ACT                                          | ~30 Hz |
+|                                         | biology                    | here                                        | rate   |
+| --------------------------------------- | -------------------------- | ------------------------------------------- | ------ |
+| answers contact with no loop at all     | preflex: muscle and tissue | bubble wrap under a finger cot, on each jaw | --     |
+| fast local loop, brain not involved     | stretch reflex             | Rust daemon, `SCHED_FIFO`, isolated core    | 400 Hz |
+| prediction, learned from its own errors | cerebellum                 | Vulkan compute on the iGPU, own thread      | 200 Hz |
+| slow loop through perception            | visual feedback            | ACT                                         | ~30 Hz |
 
 The ~13x separation between the reflex and ACT is roughly the one biology runs at, and it is the
 reason the control law does not live in Python. The cerebellum sits between them and, like its
@@ -61,13 +61,13 @@ The top row is the cheapest thing in this repository and possibly the most load-
 transients are faster than any loop on the list: a fingertip meeting an object produces its force
 spike well inside the reflex's 2.5 ms tick, so whatever answers it _first_ cannot be a controller at
 all. Biology's answer is the **preflex** -- the intrinsic mechanical response of muscle and tissue,
-at zero latency, before any reflex arc has been traversed. Here it is packing foam under a finger
+at zero latency, before any reflex arc has been traversed. Here it is bubble wrap under a finger
 cot, and it is why a soft-fingered animal can be careless with a fragile object in a way this arm
 cannot.
 
 <p align="center">
   <img src="media/readme/gripper_fingertips.jpg" width="360"
-       alt="The SO-101 gripper held in a hand, an orange finger cot over packing foam on each jaw" />
+       alt="The SO-101 gripper held in a hand, an orange finger cot over bubble wrap on each jaw" />
 </p>
 
 It also gives the gripper a finer sense of touch, which is less obvious. Grip force was always

@@ -66,7 +66,7 @@
 
 <p align="center">
   <img src="media/readme/gripper_fingertips.jpg" width="360"
-       alt="The SO-101 gripper held in a hand, an orange finger cot over packing foam on each jaw" />
+       alt="The SO-101 gripper held in a hand, an orange finger cot over bubble wrap on each jaw" />
 </p>
 
 それはグリッパの触覚を細かくもする。こちらは少し分かりにくい。握力はもともと読めていた — 接触後は

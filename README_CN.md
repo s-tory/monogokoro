@@ -58,7 +58,7 @@ fork 自上游的 [`0d383d09`](https://github.com/huggingface/lerobot/commit/0d3
 
 <p align="center">
   <img src="media/readme/gripper_fingertips.jpg" width="360"
-       alt="The SO-101 gripper held in a hand, an orange finger cot over packing foam on each jaw" />
+       alt="The SO-101 gripper held in a hand, an orange finger cot over bubble wrap on each jaw" />
 </p>
 
 它还让夹爪的触觉变细。这一点稍微不那么直观。握力本来就读得到 —— 接触之后只有指令位置继续前进而实际
