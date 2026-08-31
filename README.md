@@ -342,15 +342,21 @@ way", which look identical from across the room; and `cargo test --test cerebell
   recorded as an action column -- but its two constants were measured against the CPU reference
   rather than an arm, and a policy reproduces whatever the operator labelled until it learns to
   predict it from the images.
-- **The cerebellum cancels droop on a real arm; the numbers around that are not yet trustworthy.**
-  The narrow claim held on 2026-08-28, over four runs across two poses, at unchanged K:
-  `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00, `shoulder_lift` 12.57 -> 3.00 counts of
-  droop, against baselines that were `err = holding_duty / K` to the decimal. What is not
-  trustworthy is everything _absolute_ from that session. `shoulder_pan`'s servo failed partway
-  through it, and writing to a servo whose power stage has shorted pulls the shared supply from
-  4.6 V to 2.4 V for ~820 ms at a time. The comparison survives -- both sides of it ran under the
-  same fault -- but the holding duties, the `--cerebellum-ff-max` clamp being reached on two joints,
-  and the friction band below all have to be re-taken on a healthy arm.
+- **The cerebellum's droop numbers are withdrawn. The whole measurement has to be retaken.** The
+  2026-08-28 session reported `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00 and
+  `shoulder_lift` 12.57 -> 3.00 counts of droop at unchanged K, against baselines that were
+  `err = holding_duty / K` to the decimal. Do not rely on any of it. `shoulder_pan`'s power stage
+  had shorted, and writing to it pulls the shared supply from 4.6 V to 2.4 V for ~820 ms -- with
+  the daemon writing to all six every 2.5 ms, the rail was down for most of the session. An
+  under-volted servo makes less torque per PWM count, so the holding duties and the
+  `--cerebellum-ff-max` clamp being reached on two joints are inflated by an unknown amount.
+  This page previously claimed the _comparison_ survived because both sides ran under the same
+  fault. That was wrong: the fault began partway through the session, so which side of it each run
+  fell on decides whether the effect is understated or overstated -- and the CSVs are gone, with
+  only a run-relative monotonic clock in them, so it can no longer be established either way. The
+  daemon now publishes the rail voltage into the same telemetry snapshot as the duty, and the
+  measurement CSV records it per sample alongside a wall clock, so a future run carries the
+  evidence needed to judge it.
 - **The feedforward decayed instead of settling. Fixed; the fix is unmeasured.** In both learning
   runs it bled away with a time constant of minutes while the joint sat perfectly still, then
   snapped back to the clamp once the arm finally slipped. The cause was the rule, not the arm: the
