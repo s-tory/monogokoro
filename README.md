@@ -1,101 +1,98 @@
-# Monogokoro, ものごころ, Thinks of Things, 物心
+# ものごころ ≒ MONOGOKORO, Thinks of Things, 物心
 
-**English** | [日本語](README_JP.md)
+**日本語** | [English](README_EN.md) | [简体中文](README_CN.md)
 
-A fork of [LeRobot](https://github.com/huggingface/lerobot) that gives the SO-101 two of the motor
-layers that sit _underneath_ a policy: a **spinal reflex** whose joints and gripper yield to contact
-instead of driving through it, and a **cerebellum** that learns, online, to cancel a load before the
-reflex has to feel it. ACT sees the resulting forces and commands how hard to resist them. A third
-layer sits below both and is not software at all -- a compliant fingertip, which answers contact
-sooner than any loop here could be scheduled to.
+このリポジトリは、LeRobot-ACT-SO-101 スタックに「運動神経」を実装する。
 
-Forked at upstream [`0d383d09`](https://github.com/huggingface/lerobot/commit/0d383d09) (2026-07-24,
-on the 0.6.1 line). Everything upstream still works unchanged -- this adds a robot, a real-time
-controller, an online-learning feedforward layer, and two extra dimensions of what ACT reasons
-about. No policy architecture is modified.
+日常語のほうの運動神経 — つまり脊髄反射と小脳のことであって、解剖学のそれ（α運動ニューロン）では
+ない。そちらは STS3215 の中にあり、ホストから書けるトルクレジスタがない以上、このフォークが最後まで
+触れられなかった唯一の層である。
 
-## Why
+[LeRobot](https://github.com/huggingface/lerobot) のフォークで、SO-101 にポリシーの*下*に位置する
+運動層のうち 2 つを与える。ひとつは接触を押し切らずに関節とグリッパが受け流す**脊髄反射**、もうひとつは
+反射が負荷を感じる前にそれを打ち消すことをオンラインで学習する**小脳**。ACT はその結果生じる力を
+見て、どれだけ強く抗うかを指令する。3 つ目の層はその両方より下にあり、そもそもソフトウェアではない —
+柔らかい指先で、ここにあるどのループよりも速く接触に答える。
 
-Almost everything called _Physical AI_ is a story about the cortex. The layer that actually touches
-physics -- the one that answers contact in real time -- has been left empty.
+アップストリームの [`0d383d09`](https://github.com/huggingface/lerobot/commit/0d383d09)
+(2026-07-24, 0.6.1 系列) からフォークした。アップストリームの機能はすべてそのまま動く — 本フォークが
+足すのはロボット 1 種、リアルタイム制御器、オンライン学習するフィードフォワード層、そして ACT が
+推論する対象の 2 次元ぶんの拡張だけである。ポリシーのアーキテクチャには一切手を入れていない。
 
-The goal is to build the layers below the policy out of hardware anyone can buy and software anyone
-can read. Not a lab rig: 3D-printed arms, hobby servos, a laptop, a mainline kernel, and the
-integrated GPU that was already in it.
+## なぜ
 
-Stock SO-101 control writes `Goal_Position` and lets the servo's internal PID drive there. That
-controller has no notion of contact: blocked by an object, it keeps increasing effort toward a
-position it will never reach. A potato chip snaps before the arm can be said to have felt it. And
-the policy has no vocabulary for the difference between _press firmly_ and _hold gently_ --
-`Goal_Position` is the only thing it can say.
+「フィジカル AI」と呼ばれているものは、そのほとんどが大脳の話である。実際に物理へ触れる層 —
+接触にリアルタイムで応答する部分 — は空いたままだった。
 
-Biology does not solve this in the brain. The stretch reflex is a spring-damper closed in the
-spinal cord, and descending commands do not specify force -- they set an equilibrium position and,
-via gamma motor neurons, the _gain_ of that reflex.
+目的は、ポリシーより下の層を、誰でも買えるハードウェアと誰でも読めるソフトウェアだけで作ることに
+ある。ラボの実験装置ではない。3D プリントしたアーム、ホビー用サーボ、ノート PC、メインラインの
+カーネル、そしてもとから載っていた統合 GPU。
 
-A reflex alone is not enough, and its shortfall is exactly measurable. It can only answer an error
-that has already happened, so a joint carrying a standing load sits `holding_duty / K` below its
-target forever, and the only way a feedback law can shrink that droop is to raise `K` -- to hand
-back the compliance it was there to provide. Cancelling the load _before_ the error appears is a
-different job, and biology gives it to a different structure.
+素の SO-101 の制御は `Goal_Position` を書き込み、サーボ内蔵の PID にそこまで駆動させる。この制御器に
+接触という概念はない。物体に阻まれても、決して届かない位置へ向けて出力を上げ続ける。ポテトチップスは
+アームがそれを感じたと言えるより先に割れる。しかもポリシーの側には、*しっかり押す*と*そっと支える*を
+区別する語彙がない — 言えることは `Goal_Position` だけだ。
 
-So there are four layers here, and each is where it is for a reason:
+生物はこれを脳で解いてはいない。伸張反射は脊髄内で閉じたバネ・ダンパであり、下行性の指令が指定するのは
+力ではない。指定するのは平衡位置と、ガンマ運動ニューロンを介したその反射の*ゲイン*である。
 
-|                                         | biology                    | here                                         | rate   |
-| --------------------------------------- | -------------------------- | -------------------------------------------- | ------ |
-| answers contact with no loop at all     | preflex: muscle and tissue | packing foam under a finger cot, on each jaw | --     |
-| fast local loop, brain not involved     | stretch reflex             | Rust daemon, `SCHED_FIFO`, isolated core     | 400 Hz |
-| prediction, learned from its own errors | cerebellum                 | Vulkan compute on the iGPU, own thread       | 200 Hz |
-| slow loop through perception            | visual feedback            | ACT                                          | ~30 Hz |
+反射だけでは足りず、その不足分はきっちり計算できる。反射はすでに起きた誤差にしか答えられないので、
+定常負荷を担う関節は目標より `holding_duty / K` だけ下にずっと居座る。フィードバック則がこの垂れ下がりを
+縮める唯一の方法は `K` を上げること — つまり、そもそも与えるはずだったコンプライアンスを返上することだ。
+誤差が現れる*前*に負荷を打ち消すのは別の仕事であり、生物はそれを別の構造に割り当てている。
 
-The ~13x separation between the reflex and ACT is roughly the one biology runs at, and it is the
-reason the control law does not live in Python. The cerebellum sits between them and, like its
-namesake, _outside_ the reflex arc -- it corrects the loop without ever being inside it.
+というわけでここには 4 つの層があり、それぞれが今いる場所にいる理由がある。
 
-The pontine relay has no row in that table, because it is not a rung on this ladder -- it is a
-path. It carries context down from the top of the stack to the cerebellum's mossy fibres, closes no
-loop of its own, and therefore has no rate. What it carries, and what it deliberately does not, is
-[section 5](#5-a-pontine-relay-so-the-cerebellum-can-be-told-what-it-is-holding).
+|                                  | 生物               | ここでの実装                                | レート   |
+| -------------------------------- | ------------------ | ------------------------------------------- | -------- |
+| ループを介さずに接触へ答える     | 前反射: 筋と組織   | 各指のエアパッキンと指サック                | —        |
+| 脳を介さない高速なローカルループ | 伸張反射           | Rust デーモン、`SCHED_FIFO`、隔離コア       | 400 Hz   |
+| 自分の誤差から学ぶ予測           | 小脳               | iGPU 上の Vulkan コンピュート、専用スレッド | 200 Hz   |
+| 知覚を通る低速ループ             | 視覚フィードバック | ACT                                         | 約 30 Hz |
 
-The top row is the cheapest thing in this repository and possibly the most load-bearing. Contact
-transients are faster than any loop on the list: a fingertip meeting an object produces its force
-spike well inside the reflex's 2.5 ms tick, so whatever answers it _first_ cannot be a controller at
-all. Biology's answer is the **preflex** -- the intrinsic mechanical response of muscle and tissue,
-at zero latency, before any reflex arc has been traversed. Here it is packing foam under a finger
-cot, and it is why a soft-fingered animal can be careless with a fragile object in a way this arm
-cannot.
+反射と ACT のあいだの約 13 倍という隔たりは、おおむね生物が回している比率であり、制御則が Python に
+住んでいない理由でもある。小脳はその中間に位置し、名前のとおり反射弓の*外側*にいる — ループの中に
+一度も入らないままループを補正する。
+
+橋核はこの表に行を持たない。層ではなく**経路**だからだ — 一番上から小脳の苔状線維へ文脈を下ろす
+だけで、それ自体はループを閉じず、したがって自分のレートも持たない。何を下ろして何を下ろさないかは
+[5 節](#5-何を持っているかを小脳に伝える橋核)にある。
+
+一番上の行はこのリポジトリで最も安く、そしておそらく最も効いている。接触の過渡はこの表のどのループ
+よりも速い — 指先が物に触れた瞬間の力の立ち上がりは反射の 2.5 ms のティックの内側で終わるので、それに
+*最初に*答えるものは制御器ではありえない。生物の答えは**前反射 (preflex)** である: 筋と組織が持つ
+固有の機械的応答で、反射弓を一度も通らずに遅延ゼロで返る。ここではそれがエアパッキンと指サックであり、
+軟らかい指を持つ動物が壊れやすい物を雑に扱えて、このアームにそれができない理由でもある。
 
 <p align="center">
   <img src="media/readme/gripper_fingertips.jpg" width="360"
        alt="The SO-101 gripper held in a hand, an orange finger cot over packing foam on each jaw" />
 </p>
 
-It also gives the gripper a finer sense of touch, which is less obvious. Grip force was always
-readable -- after contact the commanded position keeps advancing while the achieved one stops, and
-`pwm = K * err` follows the squeeze. What a compliant fingertip changes is the _scale_: the same
-range of force now spreads across far more encoder counts, which is exactly why a load cell has a
-flexure, to turn force into a displacement large enough to measure. The signal was already there;
-the padding gives it a finer ruler. By how much, on this arm, is not measured yet -- and the
-candidate that could eat the whole effect is the static friction described under Known limitations.
+それはグリッパの触覚を細かくもする。こちらは少し分かりにくい。握力はもともと読めていた — 接触後は
+指令位置だけが進んで実位置は止まるので、`pwm = K * err` が握りの強さを追う。柔らかい指先が変えるのは
+その*目盛り*である。同じ力の範囲がはるかに多くのエンコーダカウントに広がる — ロードセルに起歪体が
+あるのは、まさに力を測れるだけの変位に変えるためだ。信号は初めからそこにあり、パッキンはそれに細かい
+物差しを与えた。このアームでそれがどれだけかはまだ測っていない — そして効果を丸ごと食い潰しうる候補が、
+既知の制限にある静摩擦である。
 
-None of these four layers is a new idea. Impedance control is Hogan, 1985. A granule expansion read
-out linearly and taught by a climbing fibre is Marr, Albus and Ito -- and Albus built a controller
-out of it in 1975. Compliance in series with a sensor, so that force becomes a displacement big
-enough to measure, is what a series elastic actuator has been since 1995. Bilateral teleoperation
-driven by position error is older than any of them.
+この 4 つの層に新しいアイデアは一つも無い。インピーダンス制御は Hogan, 1985。顆粒層で拡張して線形に
+読み出し登上線維で教える構成は Marr・Albus・Ito であり、Albus は 1975 年にそれで制御器を作っている。
+センサの手前にコンプライアンスを直列に入れて、力を測れるだけの変位に変えるのは、1995 年以来の直列
+弾性アクチュエータそのものである。位置誤差で駆動する双方向テレオペレーションは、そのどれよりも古い。
 
-What is new is where they run. Each arrived attached to hardware a person could not simply buy: a
-torque-controlled arm, a dSPACE box or a DSP card to close the fast loop, something substantial to
-do the learning on. All four now fit on a laptop -- the adaptive layer on the integrated GPU that
-came with it, the real-time loop on a mainline kernel, since PREEMPT_RT was merged upstream in 2024
-and has only been ordinary for about two years.
+新しいのは、それらが動く場所のほうだ。どれも当時は個人が買えないハードに付随していた — トルク制御
+可能なアーム、速いループを閉じるための dSPACE や DSP ボード、学習を回すためのそれなりの計算機。
+その 4 つが今はノート PC 1 台に収まる。適応層は最初から入っていた統合 GPU の上で回り、リアルタイム
+ループは素のカーネルの上で回る — PREEMPT_RT が upstream に入ったのは 2024 年で、これが当たり前に
+なってからまだ 2 年ほどしか経っていない。
 
-So the contribution here is not a mechanism. It is the port, and the numbers that come with it: what
-a Marr-Albus layer actually costs on an Arc 140V, why it cannot go inside the control tick, what a
-hobby servo bus will do at 400 Hz. None of those could be looked up. They are why the section below
-on what was measured is as long as it is.
+したがってここでの貢献は機構ではない。移植であり、それに付いてくる数値である: Marr-Albus 層が
+Arc 140V で実際にいくらかかるのか、なぜ制御ティックの内側に置けないのか、ホビーサーボのバスが
+400 Hz で何をするのか。どれも調べれば載っているものではなかった。下の実測の節があれだけ長いのは
+そのためである。
 
-## What this fork adds
+## このフォークが追加するもの
 
 ```
    operator's hand                                                        camera
@@ -122,287 +119,272 @@ on what was measured is as long as it is.
                           ╚═════════════════════════╝
 ```
 
-### 1. Impedance control on a PREEMPT_RT isolated core
+### 1. PREEMPT_RT 隔離コア上のインピーダンス制御
 
-[`rust/so101_impedance_ctrl/`](rust/so101_impedance_ctrl/) is a standalone Rust daemon that
-exclusively owns the follower's serial bus and runs
+[`rust/so101_impedance_ctrl/`](rust/so101_impedance_ctrl/) は単体で動く Rust デーモンで、フォロワの
+シリアルバスを排他的に所有し、次を実行する。
 
 ```
 pwm = clamp(K · (target_pos − present_pos) + D · (target_vel − present_vel))
 ```
 
-for **all six motors, the gripper included**, at **400 Hz** on a `SCHED_FIFO` thread pinned to an
-`isolcpus`-isolated core. Python never touches the bus; it exchanges targets and telemetry through
-a `#[repr(C)]` shared-memory segment guarded by a seqlock.
+**グリッパを含む 6 モータすべて**に対して、`isolcpus` で隔離したコアにピン留めした `SCHED_FIFO`
+スレッド上で **400 Hz** で回す。Python はバスに一切触れず、目標値とテレメトリのやりとりは seqlock で
+守られた `#[repr(C)]` の共有メモリセグメント経由で行う。
 
-The gripper is deliberately not left in position mode. A rigid gripper is exactly the thing that
-snaps the chip, so it runs the same K/D law as the arm with a much softer default K.
+グリッパを位置制御のまま残していないのは意図的だ。剛いグリッパこそがチップスを割る当のものなので、
+グリッパもアームと同じ K/D 則で、デフォルト K をずっと柔らかくして動かす。
 
-Open-loop PWM, because the STS3215 exposes no host-streamable torque register. Noisier than true
-torque control, and an accepted trade-off rather than a hidden one.
+オープンループ PWM である。STS3215 にはホストからストリームできるトルクレジスタが存在しないためだ。
+真のトルク制御よりノイジーであり、隠されたものではなく受け入れたトレードオフである。
 
-Loop rate is bounded by the servo link, not the CPU: three bus transactions per tick at ~256 µs of
-USB round trip each is ~0.8 ms against a 2.5 ms period. Beyond 400 Hz there is nothing to gain --
-what limits how the arm feels is open-loop PWM and gearbox friction, and 400 Hz is already far past
-the arm's mechanical bandwidth.
+ループレートを縛るのは CPU ではなくサーボのリンクだ。1 tick あたりバス 3 トランザクション、それぞれ
+USB 往復が約 256 µs で計約 0.8 ms、対する周期は 2.5 ms。400 Hz を超えても得るものはない — アームの
+感触を決めているのはオープンループ PWM とギアの摩擦であり、400 Hz はすでにアームの機械的帯域を
+大きく超えている。
 
-### 2. Force feedback on the leader gripper
+### 2. リーダー側グリッパの力覚フィードバック
 
-With `--leader-port`, the same loop also drives the **leader** arm's gripper as a haptic display, so
-the operator feels what the follower is holding. The other five leader servos stay torque-off and
-backdrivable.
+`--leader-port` を付けると、同じループが**リーダー**アームのグリッパも触覚ディスプレイとして駆動し、
+オペレータはフォロワが掴んでいるものを感じられる。リーダーの残り 5 サーボはトルクオフのままで、
+バックドライブ可能に保たれる。
 
-The force is derived from the follower's own tracking error, not from a force sensor: a free gripper
-reaches its target and the trigger stays slack; a blocked one lets the commanded position run ahead
-of the achieved one, and that gap grows with how hard the operator is asking it to squeeze.
+力は力センサではなくフォロワ自身の追従誤差から導く。自由なグリッパは目標に到達するのでトリガは
+緩いままだが、阻まれたグリッパでは指令位置が実現位置より先に走り、その差はオペレータがどれだけ強く
+握るよう要求しているかに応じて広がる。
 
-Both arms share **one loop on one core**. Their ports are separate, so the half-duplex constraint
-does not couple them, and a single tick keeps the two arms' samples in lockstep -- two independent
-loops would let their phase free-run, injecting a full period of variable delay into the coupling,
-which is precisely what destabilises a bilateral loop.
+両アームは**単一コア上の単一ループ**を共有する。ポートは別々なので半二重の制約が両者を結合させることは
+なく、1 tick で 2 本のアームのサンプルが歩調を揃う — 独立した 2 ループにすると位相が自由に流れ、
+結合に 1 周期ぶんの可変遅延が入る。それこそがバイラテラルループを不安定にする当のものである。
 
-### 3. ACT reasons about force and compliance
+### 3. ACT が力とコンプライアンスを扱う
 
-No changes to `modeling_act.py`. Both projections already derive their width from the feature
-shapes, so widening the robot's declared features is sufficient.
+`modeling_act.py` は無変更。どちらの射影も幅を特徴量の形状から導いているので、ロボットが宣言する
+特徴量を広げるだけで足りる。
 
-|                           | stock SO-101     | this fork                                                                            |
-| ------------------------- | ---------------- | ------------------------------------------------------------------------------------ |
-| `observation.state`       | `pos` ×6 → **6** | (`pos` + `current_avg` + `pwm_cmd` + `ff_pwm`) ×6 + rail + cerebellum flags → **26** |
-| `action` (per chunk step) | `pos` ×6 → **6** | `pos` ×6 + `K` ×6 + `D` ×6 → **18**                                                  |
+|                                      | 素の SO-101      | 本フォーク                                                                         |
+| ------------------------------------ | ---------------- | ---------------------------------------------------------------------------------- |
+| `observation.state`                  | `pos` ×6 → **6** | (`pos` + `current_avg` + `pwm_cmd` + `ff_pwm`) ×6 + 電源電圧 + 小脳フラグ → **26** |
+| `action` (チャンク 1 ステップあたり) | `pos` ×6 → **6** | `pos` ×6 + `K` ×6 + `D` ×6 → **18**                                                |
 
-**Input.** Each motor's `Present_Current` is sampled one servo per tick round-robin and averaged in
-Rust over a fixed window (~0.5 s at the defaults). ACT reads the pre-averaged value at camera rate,
-so it sees contact force without the per-tick noise. The supply rail travels alongside it, because a
-current read without a concurrent rail reading cannot be told apart from a stiff mechanism.
+**入力。** 各モータの `Present_Current` は 1 tick に 1 サーボずつラウンドロビンでサンプルし、Rust 側で
+固定窓 (デフォルトで約 0.5 s) にわたって平均する。ACT はカメラレートで平均済みの値を読むので、
+tick ごとのノイズなしに接触力を見ることになる。電源電圧が同時に並ぶのは、レールの読みなしに取った
+電流が、硬い機構と区別できないからである。
 
-The two duty columns are the loop's own account of itself: `ff_pwm` is the cerebellum's share and
-`pwm_cmd` the total, so their difference is the feedback share -- the quantity the climbing fibre is
-derived from. Recording both is what lets a frame's salience (which frames the cerebellum could not
-predict) be judged after the fact rather than having to be decided before the first episode. The
-case temperature is deliberately absent; it belongs to whichever servo the health poll last read, so
-recording it truthfully would mean recording that round-robin id as a column too.
+duty の 2 列はループ自身による自己申告である。`ff_pwm` が小脳の取り分、`pwm_cmd` が総量なので、
+その差がフィードバック成分 — 登上線維の由来となる量そのもの — になる。両方を記録しておくことが、
+どのフレームに価値があったか (小脳が予測できなかったのはどこか) を**後から**判定できる条件であり、
+最初のエピソードを録る前に決め切らなくてよい理由でもある。ケース温度は意図的に入れていない。あれは
+ヘルスポーリングが最後に読んだ 1 サーボのものなので、正直に記録するならラウンドロビンの ID も
+列として持つことになる。
 
-**Output.** ACT's action chunking is unchanged -- it still predicts `chunk_size` steps ahead -- but
-each step now carries a per-joint stiffness and damping alongside the position. The policy chooses
-its own compliance over the horizon; K/D are clamped in Python and again in Rust before reaching a
-servo.
+**出力。** ACT のアクションチャンキングは変わらない — 依然として `chunk_size` ステップ先まで予測する —
+が、各ステップが位置に加えて関節ごとの剛性と減衰を運ぶようになった。ポリシーは自分のコンプライアンスを
+その予測区間にわたって自ら選ぶ。K/D は Python 側でクランプされ、サーボに届く前に Rust 側で再度
+クランプされる。
 
-### 4. A cerebellum, learned online on the integrated GPU
+### 4. 統合 GPU 上でオンライン学習する小脳
 
-[`rust/so101_impedance_ctrl/src/cerebellum/`](rust/so101_impedance_ctrl/src/cerebellum/) predicts
-the load the reflex would otherwise carry as a standing error:
+[`rust/so101_impedance_ctrl/src/cerebellum/`](rust/so101_impedance_ctrl/src/cerebellum/) は、反射が
+放っておけば定常誤差として抱え込む負荷を予測する。
 
 ```
 pwm = K·(x_t − x) + D·(v_t − v) + ff(sensory state)
 ```
 
-The structure is Marr-Albus-Ito, mapped onto the hardware directly:
+構造は Marr-Albus-Ito であり、ハードウェアへそのまま写している。
 
-| cerebellum       | here                                                                                          |
-| ---------------- | --------------------------------------------------------------------------------------------- |
-| mossy fibres     | 30 signals -- per joint: encoder phase as `sin`/`cos`, velocity, tracking error, current      |
-| granule cells    | 16384 units, each reading 4 mossy fibres through a **fixed random**, never-learned projection |
-| Golgi inhibition | one global threshold, on a feedback loop against measured sparsity (~2% left active)          |
-| parallel fibres  | that sparse code, normalised, carrying a ~150 ms eligibility trace                            |
-| Purkinje cells   | a linear readout, 6 outputs -- **the only learned layer**                                     |
-| climbing fibres  | the reflex's own standing duty                                                                |
+| 小脳             | ここでの実装                                                                                        |
+| ---------------- | --------------------------------------------------------------------------------------------------- |
+| 苔状線維         | 30 信号 — 関節ごとに、エンコーダ位相の `sin`/`cos`、速度、追従誤差、電流                            |
+| 顆粒細胞         | 16384 ユニット。各ユニットは**固定ランダム**で一度も学習されない射影を通じて 4 本の苔状線維を読む   |
+| ゴルジ細胞の抑制 | グローバルな閾値 1 つ。実測スパース性 (活性が約 2% 残るように) に対するフィードバックループ上にある |
+| 平行線維         | そのスパース符号を正規化したもの。約 150 ms の適格度トレースを運ぶ                                  |
+| プルキンエ細胞   | 線形読み出し、出力 6 — **唯一の学習される層**                                                       |
+| 登上線維         | 反射自身の定常デューティ                                                                            |
 
 ```
 ΔW = rate · (cf · e  −  leak · W · e)
 ```
 
-Three factors -- parallel-fibre eligibility, climbing fibre, and nothing else. The `leak` term is
-what makes it a _modified_ Hebbian rule rather than a runaway: a bare Hebbian product only grows
-once the error has a consistent sign, which is exactly what gravity produces. Both terms are gated
-on a live climbing fibre: a `cf` of zero is the absence of an error signal, not an error of zero,
-and a decay left running without one dismantles the very feedforward that made the error go away.
+3 因子 — 平行線維の適格度、登上線維、それだけ。`leak` 項があるからこれは暴走ではなく*修正*ヘッブ則に
+なる。素のヘッブ積は誤差の符号が一貫して初めて成長するが、それはまさに重力が生み出すものだからだ。
+どちらの項も登上線維が生きていることでゲートされる。`cf` がゼロなのは「誤差がゼロ」ではなく
+「誤差信号が無い」であり、それで減衰だけを回せば、誤差を消したフィードフォワードそのものを解体する。
 
-**No backpropagation, and none is needed.** Only one layer has adjustable synapses, and its error is
-already expressed in the units its output is in (PWM), so the credit-assignment problem backprop
-exists to solve never arises. What it costs instead is parameters rather than depth -- 16k granule
-cells to get the separation a trained hidden layer would get with a few hundred, which is precisely
-the trade an otherwise idle iGPU absorbs for nothing.
+**誤差逆伝播はなく、必要でもない。** 可変シナプスを持つ層は 1 つだけで、その誤差はすでに出力と同じ単位
+(PWM) で表現されている。よって backprop が解くために存在する信用割当問題がそもそも発生しない。代わりに
+支払うのは深さではなくパラメータ数だ — 学習済みの隠れ層なら数百で得られる分離を得るために顆粒細胞
+16k 個を使う。これはまさに、遊んでいる iGPU がタダで吸収してくれるトレードである。
 
-The teaching signal is a quantity the daemon already computes every tick: whatever duty the spring
-is _still_ having to hold is, by definition, what the prediction failed to cancel. So learning is
-online and unconditional -- no dataset, no training phase, no episode boundary. The arm learns while
-it is teleoperated, while ACT drives it, and while it sits still; point `--cerebellum-weights` at a
-file and what it learns accumulates across runs.
+教師信号はデーモンが毎 tick すでに計算している量だ。バネが*まだ*保持し続けなければならないデューティは、
+定義上、予測が打ち消し損ねた分そのものである。したがって学習はオンラインかつ無条件 — データセットも、
+訓練フェーズも、エピソード境界もない。アームは遠隔操作されている間も、ACT に駆動されている間も、
+じっと静止している間も学習する。`--cerebellum-weights` にファイルを指定すれば、学習した内容は実行を
+またいで蓄積される。
 
-It never runs inside the control loop; see [Measured, not assumed](#measured-not-assumed) for the
-two numbers that make that non-negotiable. The handoff is a seqlock in both directions, so a slow or
-dead cerebellum cannot stall the reflex, and nothing is lost by the delay -- the load being
-predicted is quasi-static.
+小脳が制御ループの中で走ることは決してない。それが譲れない理由となる 2 つの数値は
+[実測値であって仮定ではない](#実測値であって仮定ではない)を参照。受け渡しは双方向とも seqlock なので、
+遅い小脳や死んだ小脳が反射を止めることはできず、遅延によって失われるものもない — 予測対象の負荷は
+準静的だからである。
 
-**Off by default**, and safe to switch on mid-hold: the weights start at zero, so an untrained
-network contributes exactly nothing. Its output is clamped, slew-limited in both directions, and
-zeroed by every fail-safe the reflex has. The gripper is excluded from it entirely -- a gripper that
-learns its own grasp keeps squeezing after the object is gone. Full safety envelope and tuning:
-[`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md#cerebellum-an-adaptive-feedforward-on-the-igpu).
+**デフォルトでは無効**であり、保持中に有効化しても安全だ。重みはゼロから始まるので、未学習の
+ネットワークの寄与はちょうどゼロになる。出力はクランプされ、両方向にスルーレート制限がかかり、反射が
+持つあらゆるフェイルセーフでゼロにされる。グリッパは対象から完全に除外している — 自分の把持を学習する
+グリッパは、対象が無くなった後も握り続けるからだ。安全エンベロープとチューニングの詳細:
+[`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md#cerebellum-an-adaptive-feedforward-on-the-igpu)。
 
-### 5. A pontine relay, so the cerebellum can be told what it is holding
+### 5. 何を持っているかを小脳に伝える橋核
 
-The mossy fibres above carry proprioception only, which means the cerebellum cannot tell two
-payloads apart: 20 g and 200 g pass through the same joint angles on the way to the same place, and
-the difference only shows up _after_ the load has pulled the arm down -- the one thing a
-feedforward exists to prevent. [`rust/so101_impedance_ctrl/src/pontine.rs`](rust/so101_impedance_ctrl/src/pontine.rs)
-adds two channels from the policy layer to the tail of that vector, taking it from 30 signals to 32.
+ここまでの苔状線維は自己受容感覚しか運んでいないので、小脳は 2 つの積載を区別できない。20 g と
+200 g は同じ目的地へ同じ関節角度を通っていき、違いが現れるのは荷重がアームを引き下げた*後*である
+— フィードフォワードが存在する理由そのものが、それを起こさないことなのに。
+[`rust/so101_impedance_ctrl/src/pontine.rs`](rust/so101_impedance_ctrl/src/pontine.rs) は、
+ポリシー層から 2 本のチャネルをその苔状線維ベクトルの末尾へ足す。30 信号から 32 信号になる。
 
-It relays an **identity, not a mass**. The policy is never asked how heavy the object is. Biology
-hands the cerebellum the object and keeps the weight-to-force map in the cerebellum -- grip force
-is scaled correctly before lift-off, from a memory indexed by which object this is -- so asking a
-policy for grams would move the cerebellum's job up a layer and demand a calibration nothing in
-this loop can teach it.
+橋核が中継するのは**質量ではなく同一性**である。ポリシーに「何グラムか」を尋ねることはしない。
+生物は小脳に物体そのものを渡し、重さ→力の変換は小脳側に置いている — 握力は持ち上がる*前*に正しく
+スケールされ、その記憶は物体の同一性に紐づいている。ポリシーにグラムを吐かせるのは小脳の仕事を
+一段上へ持ち上げることであり、このループの中に教える手立てのない較正を要求することになる。
 
-And it **does not compute**. It is a first-order lag and nothing else, because the expansion into a
-separable code is already paid for by 16384 granule cells on a fixed random projection. A trained
-layer here would duplicate that, and would need its error routed back through the granule layer and
-the readout to learn -- which is exactly the credit assignment this design does not have and does
-not want. It is a sibling of the cerebellum in the source tree for the same reason it is one in the
-brainstem.
+そして橋核は**計算しない**。1 次遅れフィルタひとつで、それ以外に何もない。分離可能な符号への展開は
+固定ランダム射影の上の顆粒細胞 16384 個がすでに引き受けているので、ここに層を置けばそれを二重に
+やることになる。しかも*学習する*層を置くと、その誤差を顆粒層とプルキンエ層を貫いて戻す必要が生じる
+— まさにこの設計が持っておらず、持ちたくもない信用割当である。ソースツリー上で小脳の兄弟に置いて
+あるのは、脳幹でもそうだからだ。
 
-**The channel has a source now, and it is still a constant.** `--robot.pontine_context` is the
-operator's declaration of which of two indistinguishable situations is being demonstrated:
-`send_action` clamps it to `[-1, 1]` and writes it to shared memory, and
-`PontineContextProcessorStep` records it into the dataset as `context.<i>` action columns.
-Recording it as an _action_ is the point: ACT has no context of its own -- its CVAE latent is
-zeroed at inference by construction -- but a context inside the action it is trained to reproduce
-is one it can learn to emit from the images, reproducing the recorded constant first exactly as the
-`.k`/`.d` columns do. `--cerebellum-context` still pins the channel by hand, bypassing shared
-memory and the lag both, which is what the bench wants. Two constants that came out of the CPU
-reference rather than an arm, and are regression tests now: swing every channel to `+/-1` rather
-than raising a `0/1` flag (one differing fibre recovers 64 of an 80-count separation, two recover
-all 80, for the same cost), and interleave the contexts while learning rather than training one to
-convergence and then the other (most granule cells draw no context fibre, so their weights are
-shared, and blocked training leaves the first context reading 98 where it should read 40) --
-`--robot.pontine_context_cycle` rotates them per kept episode so one recording run interleaves
-on its own.
+**このチャネルには供給元ができた。ただし中身はまだ定数である。** `--robot.pontine_context` は、
+区別のつかない 2 つの状況のどちらを実演しているかを操作者が宣言するものだ。`send_action` がそれを
+`[-1, 1]` にクランプして共有メモリへ書き、`PontineContextProcessorStep` が `context.<i>` という
+アクション列として記録する。**アクション**として記録するのが肝で、ACT 自身は文脈変数を持たない —
+CVAE の潜在変数は構造上、推論時にゼロ固定される — が、再現するよう学習するアクションの中に文脈が
+あれば、それを画像から出力することを学べる。最初は記録された定数を再現するだけで、`.k`/`.d` の列と
+同じ制限である。`--cerebellum-context` は依然として手動で固定でき、共有メモリと遅延フィルタの両方を
+迂回する。ベンチが欲しいのはそちらだ。
+実機ではなく CPU リファレンスから出て、いまは回帰テストになっている定数が 2 つある。**各チャネルを
+`±1` で振ること**（`0/1` のフラグにしない。違う線維が 1 本だと 80 カウントの分離のうち 64 しか
+得られず、2 本なら 80 すべてが得られる。コストは同じ）、そして**学習中は文脈を交互にすること**
+（片方を収束まで学習してからもう片方、をやらない。ほとんどの顆粒細胞は文脈線維を引かないので重みが
+共有されており、ブロック学習だと最初の文脈が 40 であるべきところ 98 を返す）。後者は
+`--robot.pontine_context_cycle` がエピソードごとに回すので、1 回の録画ランだけで交互になる。
 
-## Quick start
+## クイックスタート
 
 ```bash
-# 1. Build and grant the one privileged capability. setcap is lost on every rebuild.
+# 1. ビルドして、必要な特権 capability を 1 つだけ付与する。setcap は再ビルドのたびに失われる。
 cd rust/so101_impedance_ctrl && cargo build --release
 sudo setcap cap_sys_nice+ep ./target/release/so101_impedance_ctrl
 
-# 2. Start the daemon. It must be running before any Python attaches.
+# 2. デーモンを起動する。Python がアタッチする前に動いている必要がある。
 ./target/release/so101_impedance_ctrl \
   --port /dev/ttyACM0 --shm-name so101_impedance --cpu-core 3 --priority 99
 
-# 3. Confirm telemetry, with the arm torque-limp and safe to move by hand.
+# 3. テレメトリを確認する。アームはトルクオフで、手で動かして安全な状態になっている。
 python examples/check_so101_impedance.py --shm-name so101_impedance
 ```
 
-Then teleoperate or record with `--robot.type=so101_follower_impedance`; both fill in per-joint K/D
-from the robot's config automatically.
+あとは `--robot.type=so101_follower_impedance` で遠隔操作なり記録なりを行う。どちらもロボットの設定から
+関節ごとの K/D を自動で埋める。
 
-The cerebellum is opt-in. Add to step 2 (needs `glslc` to build, a Vulkan ICD to run, and a
-housekeeping core that is **not** `--cpu-core`):
+小脳はオプトイン。手順 2 に以下を足す (ビルドに `glslc`、実行に Vulkan ICD、そして **`--cpu-core` とは
+別の**ハウスキーピング用コアが必要)。
 
 ```bash
   --cerebellum-backend gpu --cerebellum-cpu-core 1 \
   --cerebellum-weights ~/.local/share/so101/cerebellum.bin
 ```
 
-- Setting up the isolated core: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
-- Tuning gains, cerebellum bring-up, protocol notes: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)
-- General LeRobot usage (recording, training, eval): [`AGENT_GUIDE.md`](AGENT_GUIDE.md)
+- 隔離コアのセットアップ: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
+- ゲイン調整、小脳の立ち上げ、プロトコルの注意点: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)
+- LeRobot 一般の使い方 (記録、学習、評価): [`AGENT_GUIDE.md`](AGENT_GUIDE.md)
 
-## Measured, not assumed
+## 実測値であって仮定ではない
 
-Development is on a ThinkPad X1 Carbon Gen 13 -- Core Ultra 7 258V (Lunar Lake), Arc 140V iGPU.
-Several numbers here were settled on that hardware after their documented or intuitive values turned
-out to be wrong. They are specific to it and worth re-measuring on another machine:
+開発機は ThinkPad X1 Carbon Gen 13 — Core Ultra 7 258V (Lunar Lake)、iGPU は Arc 140V。ここに挙げた
+数値のいくつかは、ドキュメント上の値や直感的な値が間違っていると判明した後、この実機で決着をつけた
+ものだ。この機材に固有の値であり、別の環境では測り直す価値がある。
 
-| what                | value                                        | how it was settled                                                                                                                                     |
-| ------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| PWM sign bit        | **10**                                       | bit 11 (per upstream's docstring) does not reverse the joint -- it is consumed as extra magnitude                                                      |
-| `--invert-pwm`      | **true**                                     | with the right sign bit, positive duty still lowers the encoder                                                                                        |
-| per-joint K         | 10/20/15/10/8/5                              | holding at K=1 makes the reported PWM read out as each joint's gravity+friction duty                                                                   |
-| per-joint D         | ≈ K/40                                       | bounded from above by the velocity quantisation noise floor, not by stability                                                                          |
-| iGPU compute queues | **1**                                        | one queue family, one queue, shared with graphics -- a compute submission cannot be scheduled around the compositor, and no CPU isolation changes that |
-| cerebellum step     | 307 µs mean idle, **2969 µs max under load** | one step can outlast an entire 2.5 ms control period; the max barely moves with layer size, so it is submission jitter rather than compute             |
+| 対象                      | 値                                              | どう決着したか                                                                                                                                                  |
+| ------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PWM の符号ビット          | **10**                                          | ビット 11 (アップストリームの docstring どおり) では関節は反転しない — 追加の大きさとして消費される                                                             |
+| `--invert-pwm`            | **true**                                        | 正しい符号ビットを使ってもなお、正のデューティでエンコーダ値が下がる                                                                                            |
+| 関節ごとの K              | 10/20/15/10/8/5                                 | K=1 で保持させると、報告される PWM が各関節の重力+摩擦ぶんのデューティとして読める                                                                              |
+| 関節ごとの D              | 約 K/40                                         | 上限を与えているのは安定性ではなく、速度の量子化ノイズフロア                                                                                                    |
+| iGPU のコンピュートキュー | **1**                                           | キューファミリ 1、キュー 1、しかもグラフィックスと共用 — コンピュートのサブミットをコンポジタを避けてスケジュールすることはできず、CPU の隔離では何も変わらない |
+| 小脳 1 ステップ           | アイドル時 平均 307 µs、**負荷時 最大 2969 µs** | 1 ステップが 2.5 ms の制御周期まるごとを超えうる。最大値は層のサイズを変えてもほとんど動かないので、計算ではなくサブミットのジッタである                        |
 
-Those last two are why the cerebellum has its own thread rather than a slot in the tick. That it
-stays out of the way was then checked rather than assumed -- 3 × 20 s each way, alternating,
-10800 control ticks per condition. (Against a stub serial port, so the absolute tick cost is
-timeout-dominated and means nothing on its own; the _comparison_ is what is being made.)
+この最後の 2 つが、小脳が tick の中の 1 スロットではなく専用スレッドを持つ理由だ。実際に邪魔をしないか
+どうかは仮定せず確認した — 各条件 20 s × 3 回を交互に、1 条件あたり制御 tick 10800 回。(スタブの
+シリアルポートに対して行っているので tick の絶対コストはタイムアウト支配であり、それ単体には意味がない。
+ここで行っているのは*比較*である。)
 
-| control loop           | mean tick | overruns   | worst tick |
-| ---------------------- | --------- | ---------- | ---------- |
-| cerebellum off         | 3219 µs   | 10 / 10800 | 7344 µs    |
-| cerebellum on the iGPU | 3228 µs   | 9 / 10800  | 10971 µs   |
+| 制御ループ        | 平均 tick | オーバーラン | 最悪 tick |
+| ----------------- | --------- | ------------ | --------- |
+| 小脳オフ          | 3219 µs   | 10 / 10800   | 7344 µs   |
+| iGPU 上で小脳オン | 3228 µs   | 9 / 10800    | 10971 µs  |
 
-Mean cost and overrun rate are indistinguishable. The worst-case tick swings by milliseconds in
-_both_ columns -- one repetition had the quiet run produce the worse outlier -- so that tail belongs
-to the laptop, not to the cerebellum.
+平均コストとオーバーラン率は区別がつかない。最悪 tick は*どちらの*列でもミリ秒単位で振れており —
+ある回では静かなはずの側がより悪い外れ値を出した — この裾は小脳ではなくノート PC 側のものである。
 
-The tooling for re-deriving all of it ships too: `--probe-direction` measures drive direction with a
-bounded, auto-aborting nudge; the checker's live table separates "too soft" from "driven the wrong
-way", which look identical from across the room; and `cargo test --test cerebellum_gpu_tests --
---nocapture` reprints the latency table on whatever host you are on.
+これらを再導出するためのツールも同梱している。`--probe-direction` は範囲を区切り自動中断する小さな
+突きで駆動方向を測る。チェッカのライブテーブルは「柔らかすぎる」と「逆方向に駆動している」を切り分ける
+(離れて見ていると両者は見分けがつかない)。`cargo test --test cerebellum_gpu_tests -- --nocapture` は
+今いるホスト上でレイテンシ表を出し直す。
 
-## Known limitations
+## 既知の制限
 
-- **The pontine context is not verified on hardware, and nothing yet _infers_ it.** The channel is
-  wired end to end -- config to shared memory to mossy fibres, with the demonstration's context
-  recorded as an action column -- but its two constants were measured against the CPU reference
-  rather than an arm, and a policy reproduces whatever the operator labelled until it learns to
-  predict it from the images.
-- **The cerebellum's droop numbers are withdrawn. The whole measurement has to be retaken.** The
-  2026-08-28 session reported `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00 and
-  `shoulder_lift` 12.57 -> 3.00 counts of droop at unchanged K, against baselines that were
-  `err = holding_duty / K` to the decimal. Do not rely on any of it. `shoulder_pan`'s power stage
-  had shorted, and writing to it pulls the shared supply from 4.6 V to 2.4 V for ~820 ms -- with
-  the daemon writing to all six every 2.5 ms, the rail was down for most of the session. An
-  under-volted servo makes less torque per PWM count, so the holding duties and the
-  `--cerebellum-ff-max` clamp being reached on two joints are inflated by an unknown amount.
-  This page previously claimed the _comparison_ survived because both sides ran under the same
-  fault. That was wrong: the fault began partway through the session, so which side of it each run
-  fell on decides whether the effect is understated or overstated -- and the CSVs are gone, with
-  only a run-relative monotonic clock in them, so it can no longer be established either way. The
-  daemon now publishes the rail voltage into the same telemetry snapshot as the duty, and the
-  measurement CSV records it per sample alongside a wall clock, so a future run carries the
-  evidence needed to judge it.
-- **The feedforward decayed instead of settling. Fixed; the fix is unmeasured.** In both learning
-  runs it bled away with a time constant of minutes while the joint sat perfectly still, then
-  snapped back to the clamp once the arm finally slipped. The cause was the rule, not the arm: the
-  decay was gated on the eligibility trace but not on the climbing fibre, so the fixed point was
-  `w = cf / leak` -- weights that need a standing error to hold them up. The residual that leaves is
-  under a PWM count, narrower than the stick band, and inside that band the joint cannot move to
-  report the error at all. Both halves are now gated on a live climbing fibre, and
-  `--cerebellum-cf-deadband` (default 5.0) sets where the reflex counts as silent. That default is
-  derived rather than measured -- above the leak's residual, below one encoder count times the joint
-  stiffness -- so it wants confirming on a healthy arm; `0` restores the old behaviour for an A/B
-  inside one session. Whether the stick band is a property of the gearboxes or an artefact of the
-  supply collapsing is still what the re-measurement has to separate.
-- **Touch stops at how hard, not where or whether it is slipping.** A compliant fingertip turns grip
-  force into encoder counts, and that is the whole of the tactile sense here: one scalar per jaw,
-  available to the reflex at 400 Hz. Where on the finger contact happened, and the micro-vibration
-  that says an object has _begun_ to slip, both need a purpose-built sensor rather than a commodity
-  part -- and what this repository is trying to show is how much of the stack can be built without
-  one. The wrist camera can see that something has slipped, at ~30 Hz; it cannot see it starting.
-- **What it can learn is bounded by its mossy fibres.** They carry pose, velocity, tracking error
-  and current, so it can learn gravity, joint friction and a fixed payload -- but nothing tells it
-  which of two payloads is in the gripper, so it cannot tell them apart. Camera features are the
-  obvious missing bundle.
-- **Demonstrations do not label the layers below the policy.** A torque-off leader is a position
-  sensor and nothing else, so episodes are labelled with the config's default K/D and ACT trained on
-  them learns to reproduce those gains, not to vary them. The cerebellum's weights likewise persist
-  to a file and not into any dataset. The leader gripper's force feedback is the first step toward
-  fixing the first half; deriving stiffness from cross-demonstration variance is the likely next.
-- **Open-loop PWM** is noisier than true torque control -- the STS3215 has no host-streamable torque
-  register, so this is a constraint of the hardware rather than a choice.
-- **The daemon is not part of the Python build.** It is a separate Cargo project, deployed by hand.
-- **Interactive calibration and `setup-motors`** are not implemented for the impedance robot. Run
-  both with the stock `so101_follower` against the same servos, then copy the calibration across --
-  the two robot types write to different directories.
+- **橋核の文脈チャネルは実機で未検証で、それを _推論_ するものはまだ無い。** 配線は端から端まで
+  通っている — config から共有メモリ、苔状線維まで。実演時の文脈もアクション列として記録される。
+  ただし 2 つの定数は実アームではなく CPU リファレンスに対して測ったものであり、ポリシーは画像から
+  予測することを学ぶまで、操作者がラベルした値をそのまま再現するだけである。
+- **小脳の垂れ下がりの数値は撤回する。測定そのものを取り直す必要がある。** 2026-08-28 のセッションは、
+  K を変えないまま `shoulder_pan` 3.00 → 0.00、`elbow_flex` 9.00 → 0.00、`shoulder_lift` 12.57 → 3.00
+  カウントの垂れ下がりを報告し、ベースラインはいずれも小数点まで `err = holding_duty / K` だった。
+  どれも当てにしないこと。`shoulder_pan` のパワーステージがショートしており、そこへ書き込むと共有電源が
+  4.6 V から 2.4 V へ約 820 ms 落ちる。デーモンは 2.5 ms ごとに 6 個すべてへ書くので、セッションの大半で
+  レールは落ちたままだった。電圧が下がったサーボは PWM 1 カウントあたりのトルクが下がるため、保持
+  デューティも、2 関節で `--cerebellum-ff-max` に達したことも、未知の量だけ水増しされている。
+  このページは以前「両側が同じ故障の下で走ったから*比較*は生き残る」と書いていた。これは誤りだった。
+  故障はセッション途中から始まっており、各ランが故障のどちら側で走ったかによって効果が過小評価にも
+  過大評価にもなる。そして CSV は失われ、残っていたとしても中の時計はラン相対の単調時計なので、
+  もはやどちらとも確定できない。現在はデーモンがレール電圧を保持デューティと同じテレメトリ
+  スナップショットに載せ、測定 CSV が壁時計とともに毎サンプル記録するので、次のランは自分を
+  検証するのに必要な証拠を持って残る。
+- **フィードフォワードは収束せず減衰した。修正済み。ただし修正値は未実測。** どちらの学習ランでも、
+  関節が完全に静止したまま数分の時定数で減衰し、やがてアームが滑るとクランプまで跳ね戻った。原因は
+  アームではなく学習則にあった。減衰項が適格性トレースだけでゲートされ登上線維でゲートされていなかった
+  ので、平衡が `w = cf / leak` — つまり**重みを保つのに定常誤差が要る**構造だった。それが残す残差は
+  1 PWM カウント未満で摩擦帯より狭く、帯の内側では関節が動けないので誤差を報告すること自体ができない。
+  現在はどちらの項も登上線維でゲートされ、`--cerebellum-cf-deadband`（既定 5.0）が「反射が黙っている」
+  境界を決める。この既定値は実測ではなく導出である — 漏れの残差より上、1 エンコーダカウント×関節剛性
+  より下 — ので健全なアームで確認したい。`0` を渡せば旧挙動に戻るので、1 セッション内で A/B が取れる。
+  摩擦帯そのものがギヤボックスの性質なのか電源が落ちたことの副産物なのかは、取り直しでなお切り分ける。
+- **触覚は「どれだけ強く」まで。「どこで」と「滑っているか」は無い。** 柔らかい指先は握力を
+  エンコーダのカウントに変え、それがここでの触覚のすべてである: 指ごとに 1 つのスカラーが、反射に
+  400 Hz で届く。指のどこに当たったか、そして物が滑り*始めた*ことを告げる微小振動は、どちらも
+  コモディティ部品ではなく専用のセンサを要求する — そしてこのリポジトリが示そうとしているのは、
+  それ無しでスタックのどこまでを組めるかである。手首のカメラは滑った*こと*なら約 30 Hz で見られるが、
+  滑り始めは見られない。
+- **学習できる内容は苔状線維で決まる。** 苔状線維が運ぶのは姿勢、速度、追従誤差、電流なので、重力、
+  関節摩擦、固定の積載は学習できる — が、2 つの積載物のどちらがグリッパにあるかを伝えるものが何もない
+  ので、それらを区別できない。カメラ由来の特徴量が明らかに欠けている束である。
+- **デモンストレーションはポリシー下層のラベルを与えない。** トルクオフのリーダーは位置センサに過ぎず、
+  エピソードには設定のデフォルト K/D がラベルとして付く。それで学習した ACT は、ゲインを変える術ではなく
+  そのデフォルトを再現する術を学ぶ。小脳の重みも同様にファイルへ残るだけで、データセットには入らない。
+  リーダーグリッパの力覚フィードバックは前半を直すための第一歩であり、デモンストレーション間の分散から
+  剛性を導くのが次に来る手だろう。
+- **オープンループ PWM** は真のトルク制御よりノイジーである — STS3215 にはホストからストリームできる
+  トルクレジスタがないので、これは選択ではなくハードウェアの制約だ。
+- **デーモンは Python のビルドに含まれない。** 独立した Cargo プロジェクトであり、手動でデプロイする。
+- インピーダンスロボット向けの**対話型キャリブレーションと `setup-motors`** は未実装。どちらも素の
+  `so101_follower` で同じサーボに対して実行し、較正ファイルはコピーすること — 2 つのロボット型は
+  別のディレクトリに書く。
 
-## Upstream
+## アップストリーム
 
-Everything not listed above is upstream LeRobot, unmodified, including all other robots, policies,
-datasets and scripts. Upstream documentation applies directly:
+上に挙げたもの以外はすべて、他のロボット・ポリシー・データセット・スクリプトを含めて無変更の
+アップストリーム LeRobot である。アップストリームのドキュメントがそのまま適用できる。
 
 - [Documentation](https://huggingface.co/docs/lerobot) · [Hub](https://huggingface.co/lerobot) · [Discord](https://discord.gg/q8Dzzpym3f)
 
@@ -415,4 +397,4 @@ datasets and scripts. Upstream documentation applies directly:
 }
 ```
 
-Apache 2.0, as upstream. See [LICENSE](LICENSE).
+アップストリームと同じく Apache 2.0。[LICENSE](LICENSE) を参照。
