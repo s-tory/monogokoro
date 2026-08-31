@@ -163,6 +163,32 @@ class SO101ImpedanceChecker:
             for i, motor in enumerate(MOTOR_NAMES)
         }
 
+    def read_supply(self) -> dict[str, float] | None:
+        """The shared rail's voltage and one servo's case temperature, or None before the daemon
+        has taken its first sample.
+
+        `volts` is in volts, `temp_c` in degrees C, and `motor_id` says which servo answered --
+        the daemon reads one per second, round-robin, so consecutive calls report different
+        joints. The rail is shared, so any one of them answers the question this exists for.
+
+        Sample it alongside the droop, never only at startup. A servo whose power stage has
+        shorted drops the rail for hundreds of ms every time it is written to, and an
+        under-volted arm needs more duty to hold the same pose -- so a holding-duty measurement
+        taken without a concurrent rail reading is indistinguishable from a stiff mechanism, and
+        cannot be rescued afterwards.
+        """
+        telemetry = self.client.read_output()
+        # Indexed, not `.get`: the key is always present on a client that attached (the
+        # layout version is checked there). Zero means "no sample yet", which is a value,
+        # not a missing field.
+        if not telemetry["health_motor_id"]:
+            return None
+        return {
+            "volts": telemetry["supply_decivolts"] / 10.0,
+            "temp_c": float(telemetry["case_temp_c"]),
+            "motor_id": float(telemetry["health_motor_id"]),
+        }
+
     def read_leader(self) -> dict[str, float] | None:
         """Leader gripper telemetry, or None when the daemon runs without `--leader-port`.
 

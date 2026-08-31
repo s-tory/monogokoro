@@ -159,7 +159,7 @@ def test_shm_layout_size_matches_the_rust_struct():
     # catches someone who remembered to bump it. The Rust side asserts this same number in
     # tests/shm_layout_tests.rs; asserting it here too is what makes a one-sided edit fail on the
     # side that made it rather than on the next person's arm.
-    assert ctypes.sizeof(ShmLayout) == 328
+    assert ctypes.sizeof(ShmLayout) == 336
 
 
 def test_read_output_round_trips_values_from_a_simulated_daemon(shm_segment):
@@ -286,6 +286,46 @@ def test_read_output_exposes_leader_gripper_telemetry(shm_segment):
     assert snapshot["leader_gripper_pos"] == pytest.approx(2048.0)
     assert snapshot["leader_gripper_vel"] == pytest.approx(-37.5)
     assert snapshot["leader_gripper_pwm"] == pytest.approx(120.0)
+    client.close()
+
+
+def test_read_output_exposes_the_shared_rail_reading(shm_segment):
+    # The rail voltage rides in the same snapshot as the duty it explains. A servo whose power
+    # stage shorts pulls the shared supply down for hundreds of ms whenever it is written to,
+    # which starves every other joint and inflates the duty they need to hold a pose -- so a
+    # holding-duty measurement taken without a concurrent rail reading cannot be distinguished
+    # from a stiff mechanism, and cannot be rescued after the fact. A startup-only reading is no
+    # substitute: the arm is idle then, and the sag only appears under load.
+    layout = ShmLayout.from_buffer(shm_segment.buf)
+    layout.output.data.supply_decivolts = 46
+    layout.output.data.case_temp_c = 41
+    layout.output.data.health_motor_id = 3
+    layout.output.data.timestamp_mono_ns = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+    layout.output.seq = 2  # stable/even
+
+    client = ImpedanceShmClient(shm_segment.name)
+    snapshot = client.read_output()
+
+    assert snapshot["supply_decivolts"] == 46
+    assert snapshot["case_temp_c"] == 41
+    # Which servo answered has to travel with the reading: the daemon rotates through them one a
+    # second, so consecutive samples are different joints on a shared rail.
+    assert snapshot["health_motor_id"] == 3
+    client.close()
+
+
+def test_a_daemon_that_never_sampled_the_rail_reports_zero_not_a_plausible_voltage(shm_segment):
+    # Zero is the untouched-field value, and it has to stay distinguishable from a real reading so
+    # `read_supply` can answer None rather than reporting a 0.0 V rail as though it were measured.
+    layout = ShmLayout.from_buffer(shm_segment.buf)
+    layout.output.data.timestamp_mono_ns = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+    layout.output.seq = 2
+
+    client = ImpedanceShmClient(shm_segment.name)
+    snapshot = client.read_output()
+
+    assert snapshot["health_motor_id"] == 0
+    assert snapshot["supply_decivolts"] == 0
     client.close()
 
 

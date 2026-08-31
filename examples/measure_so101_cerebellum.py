@@ -62,6 +62,7 @@ import signal
 import statistics
 import sys
 import time
+from datetime import UTC, datetime
 
 from lerobot.robots.so101_impedance_follower.checker import (
     MOTOR_NAMES,
@@ -149,7 +150,21 @@ def cmd_hold(args) -> None:
                 checker.move_to(target, k=k, d=d)
 
                 state = checker.read_state()
-                row = {"t": t, "phase": "ramp" if frac < 1.0 else "hold"}
+                # `t` is monotonic and run-relative, so two CSVs cannot be ordered against each
+                # other -- or against anything else that happened that day. The wall clock is what
+                # lets a run be placed either side of a hardware fault discovered later.
+                row = {
+                    "wall": datetime.now(UTC).astimezone().isoformat(timespec="milliseconds"),
+                    "t": t,
+                    "phase": "ramp" if frac < 1.0 else "hold",
+                }
+                # Logged every sample, next to the duty it explains. An under-volted arm needs more
+                # duty to hold the same pose, so a droop number without a concurrent rail reading
+                # cannot be told apart from a stiff mechanism.
+                supply = checker.read_supply()
+                row["supply_v"] = supply["volts"] if supply else float("nan")
+                row["case_temp_c"] = supply["temp_c"] if supply else float("nan")
+                row["health_motor_id"] = supply["motor_id"] if supply else float("nan")
                 for m in MOTOR_NAMES:
                     s = state[m]
                     row[f"{m}.target"] = target[m]
@@ -212,12 +227,21 @@ def _summarise(rows: list[dict], args) -> dict:
             "ff_mean": statistics.fmean(r[f"{m}.ff"] for r in window),
             "cur_mean": statistics.fmean(r[f"{m}.cur"] for r in window),
         }
+    # The minimum matters more than the mean: the rail failure this catches is a sag of a few
+    # hundred ms at a time, which barely moves an average but is exactly when the duty was being
+    # measured. A `supply_min` well under `supply_mean` means this run's absolute numbers are not
+    # comparable with anything else.
+    volts = [r["supply_v"] for r in window if r["supply_v"] == r["supply_v"]]
     return {
         "label": args.label,
         "pose_file": args.pose_file,
         "seconds": args.seconds,
         "window_s": args.window,
         "samples_in_window": len(window),
+        "started_at": rows[0]["wall"],
+        "ended_at": rows[-1]["wall"],
+        "supply_mean_v": statistics.fmean(volts) if volts else None,
+        "supply_min_v": min(volts) if volts else None,
         "motors": per_motor,
     }
 
@@ -227,6 +251,14 @@ def _print_summary(s: dict) -> None:
         f"\n=== {s['label']}: steady state over the last {s['window_s']:.0f}s "
         f"({s['samples_in_window']} samples) ==="
     )
+    if s.get("supply_mean_v") is None:
+        print(
+            "supply: not sampled -- this daemon predates the rail telemetry, absolute duties are unverifiable"
+        )
+    else:
+        sag = s["supply_mean_v"] - s["supply_min_v"]
+        note = "  <-- the rail sagged; absolute duties from this run are not comparable" if sag >= 0.3 else ""
+        print(f"supply: mean {s['supply_mean_v']:.2f} V, min {s['supply_min_v']:.2f} V{note}")
     print(f"{'motor':<14}{'K':>6}{'err':>10}{'|err|':>9}{'sd':>7}{'pwm':>9}{'ff':>9}{'cur':>8}")
     print("-" * 72)
     for m, v in s["motors"].items():

@@ -35,7 +35,16 @@ from lerobot.robots.so101_impedance_follower.shm_client import (
 _CLIENT_PATCH_TARGET = "lerobot.robots.so101_impedance_follower.checker.ImpedanceShmClient"
 
 
-def _telemetry(positions=None, currents=None, fault_flags=0, pwm_cmd=None, ff_pwm=None) -> dict:
+def _telemetry(
+    positions=None,
+    currents=None,
+    fault_flags=0,
+    pwm_cmd=None,
+    ff_pwm=None,
+    supply_decivolts=0,
+    case_temp_c=0,
+    health_motor_id=0,
+) -> dict:
     positions = positions or list(range(6))
     currents = currents or [0.0] * 6
     pwm_cmd = pwm_cmd if pwm_cmd is not None else [0.0] * 6
@@ -50,6 +59,12 @@ def _telemetry(positions=None, currents=None, fault_flags=0, pwm_cmd=None, ff_pw
         "pwm_cmd": pwm_cmd,
         "ff_pwm": ff_pwm,
         "fault_flags": fault_flags,
+        # Default to the untouched-field zeros, which is what a daemon that has not yet taken its
+        # once-a-second rail sample publishes -- `read_supply` has to report that as "no reading"
+        # rather than as a 0.0 V supply.
+        "supply_decivolts": supply_decivolts,
+        "case_temp_c": case_temp_c,
+        "health_motor_id": health_motor_id,
     }
 
 
@@ -67,6 +82,29 @@ def checker():
         c = SO101ImpedanceChecker(shm_name="test_shm")
         yield c, client_mock
         c.close()
+
+
+def test_read_supply_reports_the_rail_in_volts(checker):
+    c, client_mock = checker
+    client_mock.read_output.return_value = _telemetry(supply_decivolts=46, case_temp_c=41, health_motor_id=3)
+
+    supply = c.read_supply()
+
+    # The wire units are 0.1 V per the datasheet; callers compare against a nominal rail, so the
+    # conversion belongs here rather than in every measurement script.
+    assert supply["volts"] == pytest.approx(4.6)
+    assert supply["temp_c"] == pytest.approx(41.0)
+    assert supply["motor_id"] == pytest.approx(3.0)
+
+
+def test_read_supply_is_none_before_the_daemon_has_sampled(checker):
+    # Distinguishing "not measured yet" from "measured 0 V" is the whole point: a run whose CSV
+    # carries no rail reading cannot have its absolute duties compared with a run that does, and
+    # silently reporting 0.0 V would make that run look like a catastrophic brownout instead.
+    c, client_mock = checker
+    client_mock.read_output.return_value = _telemetry()
+
+    assert c.read_supply() is None
 
 
 def test_read_state_maps_telemetry_by_motor_name(checker):

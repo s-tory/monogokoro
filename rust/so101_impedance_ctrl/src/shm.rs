@@ -10,7 +10,7 @@
 
 use std::sync::atomic::{fence, AtomicU32, Ordering};
 
-pub const LAYOUT_VERSION: u32 = 5;
+pub const LAYOUT_VERSION: u32 = 6;
 pub const SHM_MAGIC: u32 = 0x534F_3130; // ASCII "SO10"
 /// All 6 servos -- the 5 arm joints AND the gripper -- are impedance-controlled (K/D over PWM).
 /// A rigid position-mode gripper crushes anything it grips before it can sense resistance;
@@ -89,6 +89,22 @@ pub struct OutputData {
     pub leader_gripper_pos: f32,
     pub leader_gripper_vel: f32,
     pub leader_gripper_pwm: f32,
+    /// Supply voltage in 0.1 V units, as reported by the servo named by `health_motor_id`, with
+    /// that servo's case temperature in C. Sampled round-robin once a second by the summary
+    /// branch, not per tick -- see `control::read_supply_and_temperature` for why. Both zero until
+    /// the first sample lands.
+    ///
+    /// Published rather than only logged because the failure this exists to catch is a *transient*
+    /// one: a servo whose power stage shorts drags the shared rail down for hundreds of ms at a
+    /// time, which starves every other joint of torque and inflates the duty they need to hold a
+    /// pose. A startup reading cannot see that (the arm is idle then), and a number that only
+    /// reaches the log cannot be lined up against the droop it caused. Landing it in the same
+    /// telemetry snapshot as `pwm_cmd_debug` is what makes a holding-duty measurement able to say
+    /// whether the rail was healthy while it was taken.
+    pub supply_decivolts: u32,
+    pub case_temp_c: u32,
+    /// Servo ID the two fields above were read from, or 0 before the first sample.
+    pub health_motor_id: u32,
 }
 
 #[repr(C)]

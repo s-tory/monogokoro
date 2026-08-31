@@ -837,6 +837,11 @@ fn main() {
     let max_pos_step = args.max_pos_slew * loop_period.as_secs_f32();
     let mut pos_gate = PositionGate::new(max_pos_step);
     let mut health_motor = 0usize;
+    // Last successful round-robin health sample, held across ticks so every telemetry
+    // snapshot carries the most recent rail reading rather than only the once-a-second one.
+    let mut health_volts = 0u32;
+    let mut health_temp = 0u32;
+    let mut health_id = 0u32;
     let watchdog_timeout_ns = args.watchdog_timeout_ms * 1_000_000;
 
     // Seeded to all-zero (zero targets/gains -> zero PWM) so the very first tick, before Python
@@ -1183,6 +1188,9 @@ fn main() {
             o.leader_gripper_pos = leader.as_ref().map_or(0.0, |l| l.present_pos);
             o.leader_gripper_vel = leader.as_ref().map_or(0.0, |l| l.present_vel);
             o.leader_gripper_pwm = leader.as_ref().map_or(0.0, |l| l.pwm_cmd);
+            o.supply_decivolts = health_volts;
+            o.case_temp_c = health_temp;
+            o.health_motor_id = health_id;
         });
 
         let shutdown_command =
@@ -1216,6 +1224,9 @@ fn main() {
             if let Some((volts, temp)) =
                 read_supply_and_temperature(&mut bus, MOTOR_IDS[health_motor])
             {
+                health_volts = volts;
+                health_temp = temp;
+                health_id = MOTOR_IDS[health_motor] as u32;
                 log::info!(
                     "motor {}: supply {:.1} V, temperature {temp} C",
                     MOTOR_IDS[health_motor],

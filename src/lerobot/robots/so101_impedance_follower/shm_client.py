@@ -52,7 +52,7 @@ NUM_MOTORS = 6
 #     that picks things up and puts them down interleaves by itself.
 NUM_CONTEXT = 2
 
-LAYOUT_VERSION = 5
+LAYOUT_VERSION = 6
 SHM_MAGIC = 0x534F3130  # ASCII "SO10", matches shm::SHM_MAGIC in shm.rs
 
 FAULT_WATCHDOG_TIMEOUT = 1 << 0
@@ -126,6 +126,15 @@ class OutputData(ctypes.Structure):
         ("leader_gripper_pos", ctypes.c_float),
         ("leader_gripper_vel", ctypes.c_float),
         ("leader_gripper_pwm", ctypes.c_float),
+        # Supply voltage (0.1 V units) and case temperature (C) of the servo named by
+        # health_motor_id, sampled round-robin once a second rather than per tick; all zero until
+        # the first sample lands. Carried in the same snapshot as pwm_cmd_debug on purpose: a
+        # servo whose power stage shorts pulls the shared rail down for hundreds of ms, which
+        # inflates the duty every other joint needs to hold a pose, and a holding-duty number
+        # taken without a concurrent rail reading cannot be told apart from a stiff mechanism.
+        ("supply_decivolts", ctypes.c_uint32),
+        ("case_temp_c", ctypes.c_uint32),
+        ("health_motor_id", ctypes.c_uint32),
     ]
 
 
@@ -314,6 +323,9 @@ class ImpedanceShmClient:
                 "leader_gripper_pos": region.data.leader_gripper_pos,
                 "leader_gripper_vel": region.data.leader_gripper_vel,
                 "leader_gripper_pwm": region.data.leader_gripper_pwm,
+                "supply_decivolts": region.data.supply_decivolts,
+                "case_temp_c": region.data.case_temp_c,
+                "health_motor_id": region.data.health_motor_id,
             }
             s2 = region.seq
             if s1 == s2:
