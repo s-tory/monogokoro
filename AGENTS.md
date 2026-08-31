@@ -6,6 +6,31 @@ This file provides guidance to AI agents when working with code in this reposito
 
 LeRobot is a PyTorch-based library for real-world robotics, providing datasets, pretrained policies, and tools for training, evaluation, data collection, and robot control. It integrates with Hugging Face Hub for model/dataset sharing.
 
+## Principles
+
+This fork exists to build a reflex layer, and it is being built on four observations that
+predate the field by 2500 years. They are not decoration. Each one is a rule about what to
+write and — more often — what to refuse to write.
+
+- **諸行無常 / anicca — nothing holds still.** Every measured constant decays. Gains, offsets,
+  calibration, latency, the droop of a servo under load: each is a snapshot of one machine on
+  one day. Date every number you record and name the rig it came from. If a constant's
+  provenance is unverifiable, retake it — never inherit it.
+- **一切皆苦 / dukkha — the error never reaches zero.** A controller with no standing error is
+  a controller that has stopped. Do not design for the fixed point; design for the size and
+  shape of the residual. Report the error that remains, always, next to the improvement.
+- **縁起 / pratītyasamutpāda — nothing means anything alone.** A policy's output is not a
+  property of the policy. It is a property of policy × body × load × context. A number measured
+  without its conditions is not a weak measurement, it is not a measurement. Publish the
+  conditions alongside it, or publish nothing.
+- **無記 / avyākata — refuse the question that changes nothing.** The hardest discipline here.
+  When something has not been measured, the correct output is silence, not a plausible number.
+  When a question cannot alter what we build next, decline it and say why. Withdrawing a claim
+  that turned out to be unmeasured is normal maintenance, not failure — do it without being
+  asked.
+
+Practical consequence, in one line: **measure first, and say only what the measurement says.**
+
 ## Tech Stack
 
 Python 3.12+ · PyTorch · Hugging Face (datasets, Hub, accelerate) · draccus (config/CLI) · Gymnasium (envs) · uv (package management)
