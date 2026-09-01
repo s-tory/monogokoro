@@ -9,8 +9,8 @@ reflex has to feel it. ACT sees the resulting forces and commands how hard to re
 layer sits below both and is not software at all -- a compliant fingertip, which answers contact
 sooner than any loop here could be scheduled to.
 
-Forked at upstream [`0d383d09`](https://github.com/huggingface/lerobot/commit/0d383d09) (2026-07-24,
-on the 0.6.1 line). Everything upstream still works unchanged -- this adds a robot, a real-time
+Synced with upstream through [`d36d404b`](https://github.com/huggingface/lerobot/commit/d36d404b)
+(2026-08-31, on the 0.6.2 line). Everything upstream still works unchanged -- this adds a robot, a real-time
 controller, an online-learning feedforward layer, and two extra dimensions of what ACT reasons
 about. No policy architecture is modified.
 
