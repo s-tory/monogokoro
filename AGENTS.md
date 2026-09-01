@@ -59,7 +59,10 @@ project's own mistakes, but none of them are specific to it.
   plausible hypotheses in a row were wrong here and cost nothing; one of them cost a shader, a
   GPU buffer, a CPU reference path and a test suite, all deleted by a three-line check that
   could have run first. Read-only measurement needs no permission and no plan — run it the
-  moment you think of it. Anything that moves hardware does need one.
+  moment you think of it. But read-only is not the same as free: a query to a device that never
+  answers blocks in the kernel, ignores SIGKILL, and costs a power cycle to clear. Read the logs
+  first; touch the hardware only once they say it is alive. Anything that moves hardware still
+  needs a plan.
 - **Do not replace a proven tool with an unverified script.** Before proposing the replacement,
   check whether the real reason is that the existing tool is interactive and you cannot drive
   it yourself. That is your convenience, not the user's safety, and the two must not be mixed.
