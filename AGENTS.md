@@ -107,7 +107,7 @@ pre-commit run --all-files                           # Lint + format (ruff, typo
 - **`datasets/`** — `LeRobotDataset` (episode-aware sampling + video decoding) and `LeRobotDatasetMetadata`.
 - **`envs/`** — `EnvConfig` base in `configs.py`, factory in `factory.py`. Each env subclass defines `gym_kwargs` and `create_envs()`.
 - **`robots/`, `motors/`, `cameras/`, `teleoperators/`** — Hardware abstraction layers.
-- **`types.py`** and **`configs/types.py`** — Core type aliases and feature type definitions.
+- **`lerobot_types.py`** and **`configs/types.py`** — Core type aliases and feature type definitions.
 
 ## Repository Structure (outside `src/`)
 

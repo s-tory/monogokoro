@@ -20,10 +20,10 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 from lerobot.cameras import make_cameras_from_configs
+from lerobot.lerobot_types import RobotAction, RobotObservation
 from lerobot.motors import MotorNormMode
 from lerobot.motors.feetech import OperatingMode
 from lerobot.motors.feetech.tables import MODEL_RESOLUTION
-from lerobot.types import RobotAction, RobotObservation
 from lerobot.utils.constants import HF_LEROBOT_CALIBRATION, ROBOTS
 from lerobot.utils.decorators import check_if_already_connected, check_if_not_connected
 
