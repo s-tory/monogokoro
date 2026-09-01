@@ -27,6 +27,7 @@ scope for this pure-Python test suite.
 """
 
 import ctypes
+import gc
 import time
 from multiprocessing import shared_memory
 
@@ -335,3 +336,62 @@ def test_leader_fault_is_distinct_from_the_followers_comms_fault(shm_segment):
     # that means the arm is no longer tracking.
     assert FAULT_LEADER_COMMS_ERROR != FAULT_COMMS_ERROR
     assert FAULT_LEADER_COMMS_ERROR & (FAULT_COMMS_ERROR | FAULT_WATCHDOG_TIMEOUT) == 0
+
+
+def test_close_does_not_raise_when_a_traceback_still_holds_a_view(shm_segment):
+    """Attach, read, close -- with a live traceback from that read still around.
+
+    Seen 2026-09-01: `examples/check_so101_impedance.py --seconds 60` ran the full 60 s and then
+    died in `SO101ImpedanceChecker.__exit__` -> `close()` with `BufferError: cannot close exported
+    pointers exist`. No telemetry was lost, but the nonzero exit code fails any measurement script
+    wrapped in a shell pipeline whose status is checked.
+
+    The holder is not the client's own `self._layout` -- that one is already cleared. It is a
+    frame: the read/write methods bind a `region` sub-view of the mapping while they run, and a
+    traceback keeps the frame it was raised from alive. `with ... as checker:` hands exactly such
+    a traceback to `__exit__`, which then calls `close()`.
+    """
+    layout = ShmLayout.from_buffer(shm_segment.buf)
+    layout.output.seq = 1  # perpetually mid-write, so read_output() gives up and raises
+    del layout
+
+    client = ImpedanceShmClient(shm_segment.name)
+    traceback = None
+    try:
+        client.read_output(max_retries=2)
+    except ImpedanceShmClientError as e:
+        traceback = e.__traceback__  # what a `with` block passes on to `__exit__`
+    assert traceback is not None
+
+    # No `gc.collect()` rescue: the mapping has to be closable by refcount alone, the way it is
+    # in the run above.
+    gc.disable()
+    try:
+        client.close()
+    finally:
+        gc.enable()
+
+    assert client._mmap is None
+    client.close()  # idempotent, and still quiet on a second pass
+
+
+def test_close_tolerates_a_view_it_cannot_drop(shm_segment):
+    """A holder that `close()` has no way to reach must not turn shutdown into an exception.
+
+    The traceback above is one such holder and is now released before the raise, but it is not
+    the only shape: a KeyboardInterrupt landing inside `read_output`, or a frame kept by a
+    debugger or a profiler, leaves the same exported pointer and cannot be reached from here.
+    Detaching is best-effort by nature; the segment is the daemon's and is never unlinked either
+    way, so the mapping simply outlives `close()` until its last view is dropped.
+    """
+    client = ImpedanceShmClient(shm_segment.name)
+    stray_view = client._layout.output  # stands in for a view held somewhere unreachable
+
+    gc.disable()
+    try:
+        client.close()
+    finally:
+        gc.enable()
+
+    assert client._mmap is None
+    assert stray_view.seq == 0  # the mapping is still readable through the surviving view

@@ -26,6 +26,7 @@ out of sync.
 """
 
 import ctypes
+import logging
 import mmap
 import os
 import time
@@ -33,6 +34,8 @@ import time
 # Linux/glibc maps POSIX shared-memory objects to files here, which is what the Rust daemon's
 # `shm_open` creates and what this client opens directly.
 SHM_DIR = "/dev/shm"  # nosec B108
+
+logger = logging.getLogger(__name__)
 
 # All 6 servos -- the 5 arm joints AND the gripper -- are impedance-controlled. A rigid
 # position-mode gripper crushes fragile objects before it can sense resistance; running it under
@@ -246,13 +249,33 @@ class ImpedanceShmClient:
         self._layout = layout
 
     def _close_shm(self) -> None:
-        # `ShmLayout.from_buffer(...)` holds an exported buffer reference on the mapping; that
-        # reference must be dropped (by clearing `self._layout`, its only owner) before
-        # `mmap.close()` will succeed, or it raises `BufferError: cannot close exported pointers`.
+        # Every ctypes view over the mapping exports a pointer into it, and `mmap.close()` refuses
+        # while any of them is alive (`BufferError: cannot close exported pointers exist`).
+        # Clearing `self._layout` drops the one this object owns -- but that is not the only one
+        # that can exist, and assuming it was is what used to make shutdown raise.
+        #
+        # The other holders are frames. Every method below binds a `region`/`cmd` sub-view of
+        # `self._layout` while it runs, and a traceback keeps the frame it was raised from alive
+        # for as long as anything references it -- including `with ... as checker:`, which hands
+        # that traceback straight to `__exit__`, which then calls `close()`. Seen 2026-09-01:
+        # `examples/check_so101_impedance.py` finished its run and then died here, losing no data
+        # but dirtying the exit code, which is enough to fail a measurement script.
+        #
+        # Those holders cannot be enumerated from here, so closing must not depend on there being
+        # none. Drop our own reference either way: the mapping is unmapped once the last view is
+        # released, and nothing here ever unlinks, so the daemon's segment is untouched.
         self._layout = None
-        if self._mmap is not None:
-            self._mmap.close()
-            self._mmap = None
+        mapped, self._mmap = self._mmap, None
+        if mapped is None:
+            return
+        try:
+            mapped.close()
+        except BufferError:
+            logger.debug(
+                "shared memory segment '%s' still had live views at close(); its mapping will be "
+                "released when the last one is dropped",
+                self.shm_name,
+            )
 
     def close(self) -> None:
         """Detaches from the segment. Never unlinks it -- the daemon owns its lifetime."""
@@ -333,6 +356,9 @@ class ImpedanceShmClient:
                 return snapshot
         if self._last_output is not None:
             return self._last_output
+        # The traceback of the raise below outlives this frame, and a frame holding `region`
+        # holds an exported pointer into the mapping -- see `_close_shm`.
+        del region
         raise ImpedanceShmClientError(
             f"Could not obtain a stable read of the output region within {max_retries} retries, "
             "and no prior known-good snapshot exists yet. Is the so101_impedance_ctrl daemon "
@@ -364,9 +390,11 @@ class ImpedanceShmClient:
             if cmd.ack_seq == cmd_seq:
                 return cmd.status
             time.sleep(0.005)
+        last_ack = cmd.ack_seq
+        del cmd  # as in `read_output`: the traceback must not pin a view over the mapping
         raise ImpedanceShmClientError(
             f"Timed out after {timeout_s}s waiting for the impedance daemon to ack command "
-            f"seq={cmd_seq} (last ack_seq={cmd.ack_seq})."
+            f"seq={cmd_seq} (last ack_seq={last_ack})."
         )
 
     def send_command_and_wait(
