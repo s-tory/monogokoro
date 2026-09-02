@@ -275,9 +275,12 @@ costs instead is parameters: 16k granule cells to get the separation a trained h
 get with a few hundred -- which is precisely the trade an idle iGPU is there to absorb.
 
 Position enters as a phase pair rather than a count for the same reason `wrapped_delta` exists:
-`Present_Position` rolls over mid-travel, and `wrist_roll` is calibrated over the full turn, so a
-raw count would make the network see a full-scale jump where the joint moved one tick -- and learn
-a feedforward with a cliff in it.
+`Present_Position` rolls over mid-travel, so a raw count would make the network see a full-scale
+jump where the joint moved one tick -- and learn a feedforward with a cliff in it. (This used to
+add "and `wrist_roll` is calibrated over the full turn" as the example. That was true only because
+the calibration script assigned `0-4095` without measuring; on this arm the joint reaches 340 deg
+and stops. The seam argument never needed that example -- a homing offset moves the seam, it does
+not remove it.)
 
 ### The pontine relay
 

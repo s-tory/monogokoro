@@ -53,11 +53,11 @@ pub const ENCODER_RESOLUTION: f32 = 4096.0;
 /// Shortest-path difference between two positions on a wrapping encoder.
 ///
 /// `Present_Position` is a 12-bit value, so it rolls over mid-travel -- and no `Homing_Offset`
-/// makes that go away in general: it only moves *where* the seam sits, and a continuously-rotating
-/// joint (the SO101 calibrates `wrist_roll` over the full [0, 4095]) has no seam-free placement at
-/// all. Subtracting naively turns a one-count rollover into a ~4096-count error, which saturates
-/// PWM and slams the joint. Wrapping the difference into +/- half a revolution keeps the error
-/// continuous across the seam, so the controller always drives the short way round.
+/// makes that go away in general: it only moves *where* the seam sits, and a joint whose travel
+/// covers the whole circle has no seam-free placement at all. Subtracting naively turns a
+/// one-count rollover into a ~4096-count error, which saturates PWM and slams the joint. Wrapping
+/// the difference into +/- half a revolution keeps the error continuous across the seam, so the
+/// controller always drives the short way round.
 pub fn wrapped_delta(a: f32, b: f32) -> f32 {
     let half = ENCODER_RESOLUTION / 2.0;
     let mut d = a - b;
@@ -491,9 +491,16 @@ pub struct TravelEnvelope {
 
 /// Travel at least this wide is no constraint at all, so the joint gets no envelope.
 ///
-/// `wrist_roll` turns freely and is calibrated `0-4095`; an uncalibrated servo reports the same
-/// thing. Both mean "anywhere is reachable", and a check that admits everything is worse than no
-/// check because it reads like protection.
+/// A servo reporting `0-4095` says "anywhere is reachable", and a check that admits everything is
+/// worse than no check because it reads like protection.
+///
+/// This used to name `wrist_roll` as the joint that genuinely turns freely. On this arm it does
+/// not: measured 2026-09-03 with torque off, it reaches 113-3981 -- 340 deg -- and is stopped
+/// from both directions by a printed corner, with the 11 deg it cannot reach lying on the encoder
+/// seam. It reported `0-4095` because the calibration script assigned that value without ever
+/// sweeping the joint, which has since been fixed (`so_follower.py`). So a full-width travel now
+/// means one of two things, and the threshold treats them the same on purpose: the joint really
+/// does spin, or nobody has measured it. Neither is an envelope this code can enforce.
 const UNCONSTRAINED_TRAVEL: i32 = 4000;
 
 /// Reads each joint's calibrated travel from the servos and widens it into an envelope.
