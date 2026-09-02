@@ -3,6 +3,7 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use crate::feetech::{self, FeetechBus};
 use crate::shm::{CommandKind, CommandRegion, NUM_MOTORS};
@@ -315,7 +316,11 @@ pub fn poll_and_apply_commands(bus: &mut FeetechBus, cmd: &CommandRegion) -> boo
 fn write_operating_mode(bus: &mut FeetechBus, motor_id: u8, mode: u32) -> std::io::Result<()> {
     bus.write_register(motor_id, feetech::REG_TORQUE_ENABLE, 0)?;
     bus.write_register(motor_id, feetech::REG_LOCK, 0)?; // unlock EPROM
-    bus.write_register(motor_id, feetech::REG_OPERATING_MODE, mode)?;
+    // The only register write in the daemon that waits on a flash cycle, so the only one given a
+    // budget the control loop would never tolerate. See `EEPROM_ACK_TIMEOUT`.
+    bus.with_read_timeout(EEPROM_ACK_TIMEOUT, |bus| {
+        bus.write_register(motor_id, feetech::REG_OPERATING_MODE, mode)
+    })?;
     // An EPROM write is a flash commit, not a RAM poke -- the servo needs time to settle and can
     // NAK or answer stale until it finishes. Give it a beat before anyone reads the value back.
     std::thread::sleep(EPROM_COMMIT_DELAY);
@@ -325,7 +330,29 @@ fn write_operating_mode(bus: &mut FeetechBus, motor_id: u8, mode: u32) -> std::i
 }
 
 /// Settle time allowed after an EPROM write before reading the register back.
-const EPROM_COMMIT_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
+const EPROM_COMMIT_DELAY: Duration = Duration::from_millis(20);
+
+/// Read timeout for the one register write in this daemon that commits flash.
+///
+/// **Measured**, SO-101 follower on `/dev/ttyACM0` (CH343, serial 5B42076600) at 1 Mbaud,
+/// 2026-09-02, arm limp, 72 writes per case:
+///
+/// | write | median | p95 | max |
+/// | --- | --- | --- | --- |
+/// | `Torque_Enable` (RAM) | 0.23 ms | 0.32 ms | 0.36 ms |
+/// | `Operating_Mode`, value unchanged | 0.41 ms | 0.49 ms | 0.56 ms |
+/// | `Operating_Mode`, value changed | **20.36 ms** | **42.73 ms** | **43.52 ms** |
+///
+/// So this is not a slow or flaky bus: it is an erase/program cycle, and the servo skips it
+/// entirely when the value already matches. The loop's `--serial-timeout-ms` (5 ms by default)
+/// could never cover it, which made *every* genuine mode change time out, desynchronise the
+/// stream (see `FeetechBus::transact`) and take the following motors in the burst down with it.
+/// The symptom read as an intermittent bus fault; the tell was that writing the same mode twice
+/// always worked the second time, because by then there was nothing left to commit.
+///
+/// 150 ms is ~3.5x the measured worst case. It costs nothing in normal operation -- modes are set
+/// when a client attaches, never inside the control loop.
+const EEPROM_ACK_TIMEOUT: Duration = Duration::from_millis(150);
 
 /// How many times to attempt the write+verify cycle before giving up.
 const OPERATING_MODE_ATTEMPTS: usize = 3;

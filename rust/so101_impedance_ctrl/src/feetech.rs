@@ -11,7 +11,7 @@
 use std::io::{Read, Write};
 use std::time::Duration;
 
-use serialport::SerialPort;
+use serialport::{ClearBuffer, SerialPort};
 
 pub const HEADER: [u8; 2] = [0xFF, 0xFF];
 pub const BROADCAST_ID: u8 = 0xFE;
@@ -208,12 +208,54 @@ impl FeetechBus {
         Ok(Self { port })
     }
 
+    /// Sends `packet` and reads back exactly `expected_len` bytes of reply.
+    ///
+    /// Dropping the input buffer first is not belt-and-braces. `read_exact` discards whatever it
+    /// already consumed when it times out, so a reply that lands *after* its own transaction gave
+    /// up stays queued and is read as the *next* transaction's reply -- which then reads the one
+    /// after that. One slow servo silently becomes a cascade of `bad Feetech ack`, `bad Feetech
+    /// status packet` and timeouts across motors that were never asked anything difficult, and it
+    /// self-heals only once the queue drains, which is why it looked intermittent.
+    ///
+    /// It was not intermittent. Measured on this arm, an `Operating_Mode` write that actually
+    /// changes the value acks in 20-44 ms (see `control::EEPROM_ACK_TIMEOUT`), so against a 5 ms
+    /// read timeout *every* mode change seeded exactly that cascade, and the motors later in the
+    /// burst took the blame for it.
+    ///
+    /// Nothing legitimate is discarded: every exchange here is request-then-reply with the reply
+    /// consumed before the next request goes out, so bytes still queued at this point are by
+    /// definition orphans of a transaction that has already failed.
     fn transact(&mut self, packet: &[u8], expected_len: usize) -> std::io::Result<Vec<u8>> {
+        self.port.clear(ClearBuffer::Input)?;
         self.port.write_all(packet)?;
         self.port.flush()?;
         let mut buf = vec![0u8; expected_len];
         self.port.read_exact(&mut buf)?;
         Ok(buf)
+    }
+
+    /// Runs `f` with the read timeout raised, restoring the previous value even when `f` fails.
+    ///
+    /// The control loop's timeout is deliberately tight so a dropped reply costs one tick rather
+    /// than several. A flash commit needs tens of milliseconds and happens when a client attaches,
+    /// never inside the loop -- so it gets its own budget instead of making all six reads per tick
+    /// wait for the worst case one register can produce.
+    pub fn with_read_timeout<T>(
+        &mut self,
+        timeout: Duration,
+        f: impl FnOnce(&mut Self) -> std::io::Result<T>,
+    ) -> std::io::Result<T> {
+        let previous = self.port.timeout();
+        self.port.set_timeout(timeout)?;
+        let out = f(self);
+        let restored = self.port.set_timeout(previous);
+        match out {
+            Err(e) => Err(e),
+            Ok(v) => {
+                restored?;
+                Ok(v)
+            }
+        }
     }
 
     /// Writes `value` to `reg` on servo `id` and waits for the status-packet ack.

@@ -248,7 +248,9 @@ cd rust/so101_impedance_ctrl && cargo build --release
 sudo setcap cap_sys_nice+ep ./target/release/so101_impedance_ctrl
 
 # 2. 启动守护进程。它必须在 Python 挂上来之前就在运行。
-./target/release/so101_impedance_ctrl \
+#    不加 RUST_LOG=info 就什么日志都不会打印。小脑实际取到的 backend 和首次电压读数
+#    只在那里出现。
+RUST_LOG=info ./target/release/so101_impedance_ctrl \
   --port /dev/ttyACM0 --shm-name so101_impedance --cpu-core 3 --priority 99
 
 # 3. 确认遥测。此时机械臂力矩关闭，处于可以用手搬动的安全状态。

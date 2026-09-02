@@ -277,7 +277,9 @@ cd rust/so101_impedance_ctrl && cargo build --release
 sudo setcap cap_sys_nice+ep ./target/release/so101_impedance_ctrl
 
 # 2. デーモンを起動する。Python がアタッチする前に動いている必要がある。
-./target/release/so101_impedance_ctrl \
+#    RUST_LOG=info を外すと起動ログが一切出ない。小脳の backend や supply の初回読みは
+#    そこにしか出ないので、確認するつもりなら必須。
+RUST_LOG=info ./target/release/so101_impedance_ctrl \
   --port /dev/ttyACM0 --shm-name so101_impedance --cpu-core 3 --priority 99
 
 # 3. テレメトリを確認する。アームはトルクオフで、手で動かして安全な状態になっている。

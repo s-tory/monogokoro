@@ -287,7 +287,9 @@ cd rust/so101_impedance_ctrl && cargo build --release
 sudo setcap cap_sys_nice+ep ./target/release/so101_impedance_ctrl
 
 # 2. Start the daemon. It must be running before any Python attaches.
-./target/release/so101_impedance_ctrl \
+#    Without RUST_LOG=info it prints nothing at all. The cerebellum backend it
+#    actually got, and the first supply reading, are only ever reported there.
+RUST_LOG=info ./target/release/so101_impedance_ctrl \
   --port /dev/ttyACM0 --shm-name so101_impedance --cpu-core 3 --priority 99
 
 # 3. Confirm telemetry, with the arm torque-limp and safe to move by hand.
