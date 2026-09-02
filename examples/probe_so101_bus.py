@@ -98,6 +98,20 @@ INST_READ, INST_WRITE = 2, 3
 REG_PRESENT_POSITION = (56, 2)
 REG_PRESENT_VOLTAGE = (62, 1)
 REG_GOAL_PWM = (44, 2)
+REG_PRESENT_TEMPERATURE = (63, 1)
+REG_PRESENT_CURRENT = (69, 2)
+REG_TORQUE_ENABLE = (40, 1)
+REG_OPERATING_MODE = (33, 1)
+REG_LOCK = (55, 1)
+OPERATING_MODE_POSITION, OPERATING_MODE_PWM = 0, 2
+# `Goal_PWM` is a 10-bit duty field with bit 10 as the sign, and `Present_Current` signs at bit 15.
+# Both were measured on the bench rather than read off a datasheet; see the Rust daemon's
+# `feetech.rs`, which carries the evidence for each.
+PWM_SIGN_BIT, CURRENT_SIGN_BIT = 10, 15
+DUTY_FULL_SCALE = 1000
+# An `Operating_Mode` write is a flash commit: 20.4 ms median, 43.5 ms worst, measured 2026-09-02.
+EPROM_ACK_TIMEOUT_S = 0.150
+EPROM_COMMIT_DELAY_S = 0.020
 # Long enough that the previous trial's disturbance is over. Measured: a shorted power stage held
 # the rail down for ~820 ms, and reads stayed degraded for seconds after that.
 HEAL_S = 4.0
@@ -139,6 +153,36 @@ class Bus:
             if len(reply) == 6 + size and reply[:2] == b"\xff\xff" and reply[2] == motor_id:
                 return reply[5] if size == 1 else reply[5] | (reply[6] << 8)
         return None
+
+    def write_register(self, motor_id: int, reg: tuple[int, int], value: int) -> bool:
+        """Writes one register and waits for the acknowledgement. True if the servo answered."""
+        addr, size = reg
+        payload = [value & 0xFF] if size == 1 else [value & 0xFF, (value >> 8) & 0xFF]
+        self.ser.reset_input_buffer()
+        self.ser.write(write_packet(motor_id, addr, payload))
+        self.ser.flush()
+        return len(self.ser.read(6)) == 6
+
+    def write_operating_mode(self, motor_id: int, mode: int) -> bool:
+        """Torque off, unlock EPROM, commit the mode, settle.
+
+        `Operating_Mode` lives in EPROM, so a write that actually changes it is a flash
+        erase/program cycle: measured on this arm at 20.4 ms median and 43.5 ms worst against the
+        0.23 ms a RAM write takes. The port's normal timeout is far below that, so the ack arrives
+        after we have stopped listening and is then read as the *next* transaction's reply. Widen
+        the timeout for this one write, and give the flash a beat before anyone reads it back.
+        Mirrors `write_operating_mode` in the Rust daemon, which measured those numbers.
+        """
+        self.write_register(motor_id, REG_TORQUE_ENABLE, 0)
+        self.write_register(motor_id, REG_LOCK, 0)
+        previous = self.ser.timeout
+        self.ser.timeout = EPROM_ACK_TIMEOUT_S
+        try:
+            ok = self.write_register(motor_id, REG_OPERATING_MODE, mode)
+        finally:
+            self.ser.timeout = previous
+        time.sleep(EPROM_COMMIT_DELAY_S)
+        return ok
 
     def poke(self, motor_id: int) -> bool:
         """Writes `Goal_PWM` back to itself: a write that asks for no change at all.
@@ -476,6 +520,128 @@ def cmd_protection(bus: Bus, args) -> None:
     print("the current logged.")
 
 
+def decode_sign_magnitude(value: int, sign_bit: int) -> int:
+    magnitude = value & ((1 << sign_bit) - 1)
+    return -magnitude if value & (1 << sign_bit) else magnitude
+
+
+def encode_sign_magnitude(value: int, sign_bit: int) -> int:
+    out = abs(value) & ((1 << sign_bit) - 1)
+    return out | (1 << sign_bit) if value < 0 else out
+
+
+def cmd_stall(bus: Bus, args) -> None:
+    """Holds one joint against a stall at a rising duty, and watches whether the servo backs off.
+
+    **This one drives the arm.** Everything else in this file is read-only or writes a value back
+    to itself; this commands torque on purpose, and holds it into something that will not move.
+
+    The question it answers cannot be answered by reading. `Protection_Current`, `Overload_Torque`
+    and `Over_Current_Protection_Time` say what the servo has been *told* to do about a stall, and
+    `protection` prints them -- but the impedance daemon runs the joints in PWM mode, which is
+    open-loop duty, and whether the firmware still applies an overload cutback in that mode is
+    undocumented. If it does, a saturated duty ends by itself. If it does not, nothing inside the
+    control loop can end it, and the release path is a human watching the arm.
+
+    So: raise the duty in steps, hold each one, and log current and temperature throughout. A
+    cutback shows up as current falling while the commanded duty stays put.
+    """
+    motor = args.motor
+    steps = [int(d) for d in args.duties.split(",")]
+    if any(not 0 < d <= DUTY_FULL_SCALE for d in steps):
+        sys.exit(f"duties must each be in 1..{DUTY_FULL_SCALE}")
+
+    entry_mode = bus.read_register(motor, REG_OPERATING_MODE, retries=4)
+    temp = bus.read_register(motor, REG_PRESENT_TEMPERATURE, retries=4)
+    pos = bus.read_register(motor, REG_PRESENT_POSITION, retries=4)
+    volts = bus.read_register(motor, REG_PRESENT_VOLTAGE, retries=4)
+    if None in (entry_mode, temp, pos, volts):
+        sys.exit(f"motor {motor} did not answer the preflight read; not driving anything")
+    if temp >= args.abort_temp:
+        sys.exit(f"motor {motor} is already at {temp} C, at or over the {args.abort_temp} C abort")
+
+    print(f"motor {motor}: mode {entry_mode}, {temp} C, position {pos}, rail {volts / 10:.1f} V")
+    print(f"about to drive it at duty {steps} x {args.hold:.1f} s, direction {args.direction:+d}")
+    print(f"aborting on {args.abort_temp} C, or Ctrl-C, whichever comes first\n")
+    print("Put the arm where a stall is safe -- for the gripper, close it onto something solid and")
+    print("blunt. Watch it while this runs; nothing here is a substitute for that.")
+    input("Press ENTER when the joint is where you want it, or Ctrl-C to stop....")
+
+    rows = []
+    verdict = "completed"
+    try:
+        if not bus.write_operating_mode(motor, OPERATING_MODE_PWM):
+            sys.exit("the servo did not acknowledge the mode change; nothing was driven")
+        bus.write_register(motor, REG_TORQUE_ENABLE, 1)
+        t0 = time.monotonic()
+        for duty in steps:
+            bus.write_register(
+                motor, REG_GOAL_PWM, encode_sign_magnitude(duty * args.direction, PWM_SIGN_BIT)
+            )
+            step_end = time.monotonic() + args.hold
+            while time.monotonic() < step_end:
+                raw_i = bus.read_register(motor, REG_PRESENT_CURRENT)
+                t = bus.read_register(motor, REG_PRESENT_TEMPERATURE)
+                pos = bus.read_register(motor, REG_PRESENT_POSITION)
+                v = bus.read_register(motor, REG_PRESENT_VOLTAGE)
+                if None in (raw_i, t, pos, v):
+                    continue
+                rows.append(
+                    (time.monotonic() - t0, duty, decode_sign_magnitude(raw_i, CURRENT_SIGN_BIT), t, pos, v)
+                )
+                if t >= args.abort_temp:
+                    verdict = f"aborted: {t} C at duty {duty}"
+                    raise KeyboardInterrupt
+    except KeyboardInterrupt:
+        if verdict == "completed":
+            verdict = "aborted by hand"
+    finally:
+        # Order matters and none of it is optional: duty first so the joint stops pushing even if a
+        # later write fails, then torque, then the mode. Leaving a servo in PWM is the trap the Rust
+        # daemon documents -- the next program to command a position lands in `Goal_Time` instead.
+        bus.write_register(motor, REG_GOAL_PWM, 0)
+        bus.write_register(motor, REG_TORQUE_ENABLE, 0)
+        if entry_mode is not None and entry_mode != OPERATING_MODE_PWM:
+            bus.write_operating_mode(motor, entry_mode)
+        back = bus.read_register(motor, REG_OPERATING_MODE, retries=6)
+        print(f"\nstopped ({verdict}); Operating_Mode restored to {back} (was {entry_mode})")
+        if back != entry_mode:
+            print("*** the mode did NOT come back. Fix that before running the daemon. ***")
+
+    if not rows:
+        print("no samples; nothing to report")
+        return
+
+    if args.csv:
+        with open(args.csv, "w") as fh:
+            fh.write("t_s,duty,current,temp_c,position,rail_dV\n")
+            for r in rows:
+                fh.write(",".join(str(x) for x in r) + "\n")
+        print(f"wrote {len(rows)} samples to {args.csv}")
+
+    print(
+        f"\n{'duty':>6}{'n':>7}{'|I| first 1s':>14}{'|I| last 1s':>13}{'peak |I|':>10}{'move':>8}{'max C':>7}"
+    )
+    for duty in steps:
+        step = [r for r in rows if r[1] == duty]
+        if not step:
+            continue
+        t_end = step[-1][0]
+        early = [abs(r[2]) for r in step if r[0] <= step[0][0] + 1.0]
+        late = [abs(r[2]) for r in step if r[0] >= t_end - 1.0]
+        moved = step[-1][4] - step[0][4]
+        print(
+            f"{duty:>6}{len(step):>7}{statistics.median(early) if early else 0:>14.0f}"
+            f"{statistics.median(late) if late else 0:>13.0f}{max(abs(r[2]) for r in step):>10}"
+            f"{moved:>8}{max(r[3] for r in step):>7}"
+        )
+    print()
+    print("Read it like this: a step whose current falls from 'first 1s' to 'last 1s' while the")
+    print("duty is unchanged, and whose joint did not move, is the servo cutting its own torque --")
+    print("the overload protection firing in PWM mode. Current that holds flat at a stall is the")
+    print("other answer, and the more expensive one: the release path is not in the servo.")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--port", required=True, help="e.g. /dev/ttyACM0. The daemon must not be running.")
@@ -501,6 +667,21 @@ def main() -> None:
     v.add_argument("--motor", type=int, required=True)
     v.add_argument("--seconds", type=float, default=2.5)
     v.set_defaults(func=cmd_voltage)
+
+    st = sub.add_parser("stall", help="DRIVES THE ARM. Hold a joint at a rising duty and log current.")
+    st.add_argument("--motor", type=int, default=6, help="Default 6, the gripper: lowest threshold.")
+    st.add_argument("--direction", type=int, choices=(1, -1), required=True, help="Sign of the duty.")
+    st.add_argument("--duties", default="150,300,450", help="Duty magnitudes to hold, out of 1000.")
+    st.add_argument(
+        "--hold",
+        type=float,
+        default=4.0,
+        help="Seconds to hold each step. Must outlast Over_Current_Protection_Time (200 on this "
+        "arm) or a cutback has no chance to appear; 4 s gives it room either way.",
+    )
+    st.add_argument("--abort-temp", type=int, default=50, help="Stop at this temperature (C).")
+    st.add_argument("--csv", help="Write the samples here.")
+    st.set_defaults(func=cmd_stall)
 
     a = sub.add_parser("accept", help="All of the above, over every motor. Run after swapping a servo.")
     a.add_argument("--seconds", type=float, default=20.0, help="Read-only phase (s).")
