@@ -482,6 +482,104 @@ pub fn read_supply_and_temperature(bus: &mut FeetechBus, motor_id: u8) -> Option
     Some((volts as u32, temp as u32))
 }
 
+/// A joint's physically reachable band of `Present_Position`, in counts, widened by a margin.
+#[derive(Clone, Copy, Debug)]
+pub struct TravelEnvelope {
+    pub min: f32,
+    pub max: f32,
+}
+
+/// Travel at least this wide is no constraint at all, so the joint gets no envelope.
+///
+/// `wrist_roll` turns freely and is calibrated `0-4095`; an uncalibrated servo reports the same
+/// thing. Both mean "anywhere is reachable", and a check that admits everything is worse than no
+/// check because it reads like protection.
+const UNCONSTRAINED_TRAVEL: i32 = 4000;
+
+/// Reads each joint's calibrated travel from the servos and widens it into an envelope.
+///
+/// The numbers come off the arm rather than out of the calibration JSON on purpose. They are the
+/// same numbers -- `lerobot-calibrate` writes `range_min`/`range_max` into these registers as it
+/// writes the homing offset -- but reading them here means the daemon cannot be driving one arm
+/// while trusting a file that describes another, or a file that was recalibrated and not copied.
+///
+/// `margin` buys room for three things that are all real and none of them large: the stop itself
+/// is compliant, the calibration sweep can stop short of it (measured 45 counts on `elbow_flex`,
+/// 2026-09-02), and a joint can be pushed a little past its stop by hand.
+pub fn read_travel_envelopes(
+    bus: &mut FeetechBus,
+    motor_ids: &[u8],
+    margin: f32,
+) -> [Option<TravelEnvelope>; NUM_MOTORS] {
+    let mut out = [None; NUM_MOTORS];
+    for (slot, &id) in out.iter_mut().zip(motor_ids) {
+        let limits = bus
+            .read_register(id, feetech::REG_MIN_POSITION_LIMIT)
+            .and_then(|lo| {
+                bus.read_register(id, feetech::REG_MAX_POSITION_LIMIT)
+                    .map(|hi| (lo, hi))
+            });
+        match limits {
+            Ok((lo, hi)) if hi - lo >= UNCONSTRAINED_TRAVEL || hi <= lo => {
+                log::info!(
+                    "motor {id}: travel {lo}-{hi} spans the circle -- no position envelope"
+                );
+            }
+            Ok((lo, hi)) => {
+                let env = TravelEnvelope {
+                    min: lo as f32 - margin,
+                    max: hi as f32 + margin,
+                };
+                log::info!(
+                    "motor {id}: travel {lo}-{hi}, rejecting positions outside {:.0}-{:.0}",
+                    env.min,
+                    env.max
+                );
+                *slot = Some(env);
+            }
+            Err(e) => log::warn!(
+                "motor {id}: could not read position limits ({e}); no envelope for this joint"
+            ),
+        }
+    }
+    out
+}
+
+/// The first motor in a batch reporting a position its joint cannot physically reach.
+///
+/// This is deliberately *not* part of [`PositionGate`], and the difference is the whole point of
+/// it. The gate asks "could the joint have got there since last tick?", and answers a batch it
+/// doubts by holding it and accepting it if the next read agrees. That is right for a joint that
+/// really moved while the bus was quiet, and it is exactly the hole a *stable* wrong reading walks
+/// through: agreeing with itself is all corroboration asks for.
+///
+/// Measured on this arm, 2026-09-02: `shoulder_pan` reported jumps of +-4083 counts -- a whole
+/// turn -- three times in one 25-second hand sweep, while the joint's hard stops sit at 867 and
+/// 3280 (repeatable to 3-6 counts) with 815 counts of clearance to the 4095/0 wrap on either side.
+/// The joint could not have been where it said it was. A full-turn misreport is steady while it
+/// lasts, so it corroborates itself, and the impedance law then answers ~4090 counts of error with
+/// saturated duty in one direction. That is what drove a joint into its stop earlier that day:
+/// motor 1 went from 29 C to 42 C in 36 seconds and pulled the shared rail from 4.6 V to 4.0 V.
+///
+/// So this check runs first and its verdict is final. There is nothing to corroborate: a position
+/// outside the travel is not a joint that moved, it is a reading that is wrong, and the arm is
+/// better off blind (the existing `max_blind_ticks` fail-safe drops torque) than driven towards a
+/// place the joint has never been.
+pub fn first_outside_travel(
+    values: &[i32],
+    envelopes: &[Option<TravelEnvelope>],
+) -> Option<(usize, f32)> {
+    values
+        .iter()
+        .zip(envelopes)
+        .enumerate()
+        .find_map(|(i, (&value, envelope))| {
+            let env = envelope.as_ref()?;
+            let v = value as f32;
+            (v < env.min || v > env.max).then_some((i, v))
+        })
+}
+
 pub fn log_homing_offsets(bus: &mut FeetechBus, motor_ids: &[u8]) {
     for &id in motor_ids {
         match bus.read_register(id, feetech::REG_HOMING_OFFSET) {

@@ -122,6 +122,24 @@ reverses which way the joint runs. So "it runs away with the flag both on and of
 telemetry, not a wrong drive direction. The checker's `pwm` column separates them: a real sign
 error pegs PWM at `%max`, whereas a joint that is merely too soft sits near zero.
 
+One shape of that fault is now caught rather than argued about. `--travel-gate` (on by default)
+reads each joint's calibrated travel out of the servos' `Min/Max_Position_Limit` -- the registers
+`lerobot-calibrate` writes next to the homing offset -- and refuses a reported position more than
+`--travel-margin` (200 counts) outside it. Measured on this arm on 2026-09-02, `shoulder_pan`
+reported whole-turn jumps of +-4083 counts three times in one 25-second hand sweep, while its
+mechanical stops sit at 867 and 3280, repeatable to 3-6 counts, with 815 counts of clearance to the
+encoder wrap on either side. The joint had not moved; the reading was simply false.
+
+This deliberately does **not** go through the slew gate, which holds a doubted batch and accepts it
+if the next read agrees. That is right for a joint that moved while the bus was quiet and wrong
+here: a whole-turn misreport holds perfectly still, so it corroborates itself on the next tick and
+the impedance law then answers ~4090 counts of error with saturated duty in one direction. That is
+what drove a joint into its own stop earlier the same day -- motor 1 went from 29 C to 42 C in 36
+seconds and pulled the shared rail from 4.6 V to 4.0 V before a human stopped it. An uncalibrated
+joint reports the whole circle and is not checked, which is also the honest answer for
+`wrist_roll`. **The misreport itself is still unexplained**, and this bounds its consequences
+rather than removing it.
+
 Validate with **monitor mode**, which cannot run away: Python writes nothing, so the watchdog holds
 PWM at zero and the arm stays limp. Move each joint by hand and confirm the positions track it with
 no comms errors in the daemon's per-second summary. Fall back with `--sync-read false --loop-hz 300`.

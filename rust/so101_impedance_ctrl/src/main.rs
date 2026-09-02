@@ -15,7 +15,8 @@ use nix::unistd::{Gid, Uid};
 use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConfig, SensoryState};
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_startup_config, finite_difference_velocity, impedance_pwm,
-    input_is_fresh, log_homing_offsets, log_supply_and_temperature, poll_and_apply_commands,
+    first_outside_travel, input_is_fresh, log_homing_offsets, log_supply_and_temperature,
+    poll_and_apply_commands, read_travel_envelopes,
     read_supply_and_temperature, wrapped_delta, MovingAverage, PositionGate,
 };
 use so101_impedance_ctrl::feetech::{self, FeetechBus};
@@ -185,6 +186,31 @@ struct Cli {
 
     #[arg(long, default_value_t = 3995.0)]
     pos_max: f32,
+
+    /// Reject a reported position outside the joint's calibrated travel, widened by
+    /// `--travel-margin`.
+    ///
+    /// The soft limits above are a *command* rule -- they refuse to drive a joint further past a
+    /// boundary. This is a *measurement* rule: a position the joint cannot physically occupy is
+    /// not a joint that moved, it is a reading that is wrong, and acting on it is how a controller
+    /// drives an arm into its own stop. Unlike the slew check it cannot be corroborated away,
+    /// because a full-turn misreport is perfectly steady while it lasts and so agrees with itself.
+    ///
+    /// The travel comes off the servos (`Min/Max_Position_Limit`, written by `lerobot-calibrate`),
+    /// so an uncalibrated joint reports the whole circle and is simply not checked. On by default;
+    /// pass `--travel-gate false` to get the old behaviour back for a run.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    travel_gate: bool,
+
+    /// How far outside the calibrated travel a position is still believed, in counts.
+    ///
+    /// Three real effects, none of them large: the mechanical stop is compliant, the calibration
+    /// sweep can stop short of it (45 counts on `elbow_flex`, measured 2026-09-02), and a joint can
+    /// be pushed past its stop by hand. Measured the same day, `shoulder_pan`'s stops repeat to
+    /// 3-6 counts and sit 815 counts clear of the encoder wrap, so 200 is generous against the
+    /// first three and still leaves a whole-turn misreport far outside.
+    #[arg(long, default_value_t = 200.0)]
+    travel_margin: f32,
 
     /// Zero all PWM after this many consecutive failed position reads.
     ///
@@ -754,6 +780,12 @@ fn main() {
 
     apply_startup_config(&mut bus, &MOTOR_IDS);
     log_homing_offsets(&mut bus, &MOTOR_IDS);
+    let travel = if args.travel_gate {
+        read_travel_envelopes(&mut bus, &MOTOR_IDS, args.travel_margin)
+    } else {
+        log::warn!("--travel-gate false: positions are not checked against the calibrated travel");
+        Default::default()
+    };
     log_supply_and_temperature(&mut bus, &MOTOR_IDS);
 
     // Force feedback is an enhancement to teleoperation, never a prerequisite for it: if the
@@ -904,8 +936,27 @@ fn main() {
                 // one implausible motor condemns the whole batch rather than just its own slot.
                 // Distrusting all six costs one tick of staleness; trusting the rest risks driving
                 // five joints from another joint's position.
-                let verdict = pos_gate.accept(&values, pos_seeded.then_some(&prev_pos[..]));
-                if let Err(r) = verdict {
+                // Ahead of the slew gate, and not routed through it: this verdict is final.
+                // The gate accepts a doubted batch that the next read agrees with, which is right
+                // for a joint that moved unseen and wrong for a reading that is simply false --
+                // a whole-turn misreport holds still, so it corroborates itself.
+                // Ahead of the slew gate, and not routed through it: this verdict is final.
+                // The gate accepts a doubted batch that the next read agrees with, which is right
+                // for a joint that moved unseen and wrong for a reading that is simply false --
+                // a whole-turn misreport holds still, so it corroborates itself.
+                if let Some((motor, value)) = first_outside_travel(&values, &travel) {
+                    blind_ticks += 1;
+                    if blind_ticks == 1 {
+                        log::warn!(
+                            "rejected Present_Position: motor {} reported {value:.0}, outside the \
+                             travel it can physically reach (holding last known positions; see \
+                             --travel-gate / --travel-margin)",
+                            MOTOR_IDS[motor]
+                        );
+                    }
+                    comms_error = true;
+                } else if let Err(r) = pos_gate.accept(&values, pos_seeded.then_some(&prev_pos[..]))
+                {
                     blind_ticks += 1;
                     if blind_ticks == 1 {
                         log::warn!(

@@ -2,8 +2,8 @@
 //! shared memory involved.
 
 use so101_impedance_ctrl::control::{
-    apply_soft_limits, finite_difference_velocity, first_implausible_step, impedance_pwm,
-    input_is_fresh, MovingAverage, PositionGate,
+    apply_soft_limits, finite_difference_velocity, first_implausible_step, first_outside_travel,
+    impedance_pwm, input_is_fresh, MovingAverage, PositionGate, TravelEnvelope,
 };
 
 /// One tick's worth of budget at the shipped defaults: 20000 counts/s at 400 Hz.
@@ -341,4 +341,89 @@ fn without_history_the_raw_rule_still_applies() {
     );
     assert_eq!(apply_soft_limits(-500.0, 50.0, 100.0, 3995.0, None), 0.0);
     assert_eq!(apply_soft_limits(500.0, 50.0, 100.0, 3995.0, None), 500.0);
+}
+
+/// The arm's calibrated travel on 2026-09-02, widened by the shipped 200-count margin.
+///
+/// `wrist_roll` turns freely and is calibrated `0-4095`, so it gets no envelope -- the same answer
+/// an uncalibrated joint gives.
+fn measured_envelopes() -> [Option<TravelEnvelope>; 6] {
+    let band = |lo: f32, hi: f32| {
+        Some(TravelEnvelope {
+            min: lo - 200.0,
+            max: hi + 200.0,
+        })
+    };
+    [
+        band(859.0, 3285.0),  // shoulder_pan
+        band(946.0, 3343.0),  // shoulder_lift
+        band(783.0, 2940.0),  // elbow_flex
+        band(872.0, 3263.0),  // wrist_flex
+        None,                 // wrist_roll: 0-4095, no constraint
+        band(1992.0, 3566.0), // gripper
+    ]
+}
+
+/// A pose from the middle of the arm's travel is not a glitch, envelope or no envelope.
+#[test]
+fn positions_inside_the_travel_are_accepted() {
+    let values = [1995, 2294, 2158, 2153, 2003, 2048];
+    assert_eq!(first_outside_travel(&values, &measured_envelopes()), None);
+}
+
+/// The extremes of a real hand sweep, measured the same day the envelopes were: every joint
+/// pressed to its stop still reads inside, which is what the margin is for.
+#[test]
+fn the_measured_hand_sweep_stays_inside_the_envelope() {
+    for values in [
+        [854, 944, 738, 888, 105, 1997],   // low ends, including elbow 45 counts under its travel
+        [3294, 3350, 2942, 3260, 3955, 3579], // high ends
+    ] {
+        assert_eq!(
+            first_outside_travel(&values, &measured_envelopes()),
+            None,
+            "{values:?}"
+        );
+    }
+}
+
+/// The fault this exists for. `shoulder_pan` reported whole-turn jumps three times in one 25-second
+/// sweep while its hard stops sat at 867 and 3280, repeatable to 3-6 counts, with 815 counts of
+/// clearance to the wrap. Every one of those readings is outside the travel and none of them could
+/// have been where the joint was.
+#[test]
+fn the_measured_whole_turn_misreport_is_rejected() {
+    for (reported, label) in [(0, "0"), (3, "3"), (10, "10"), (4083, "4083"), (4094, "4094")] {
+        let values = [reported, 2294, 2158, 2153, 2003, 2048];
+        let (i, value) =
+            first_outside_travel(&values, &measured_envelopes()).expect(label);
+        assert_eq!(i, 0, "{label}");
+        assert_eq!(value, reported as f32, "{label}");
+    }
+}
+
+/// The envelope is not corroborable, and that is the point: the slew gate would let a steady wrong
+/// reading through on the second look, because agreeing with itself is all corroboration asks for.
+#[test]
+fn a_steady_misreport_corroborates_itself_past_the_slew_gate() {
+    let prev = [2477.0, 2294.0, 2158.0, 2153.0, 2003.0, 2048.0];
+    let values = [4083, 2294, 2158, 2153, 2003, 2048];
+    let mut gate = PositionGate::new(TICK_BUDGET);
+
+    // First look: too far in one tick, so it is held rather than used.
+    assert!(gate.accept(&values, Some(&prev)).is_err());
+    // Second look, identical: the gate is satisfied and would hand this to the impedance law.
+    assert!(gate.accept(&values, Some(&prev)).is_ok());
+
+    // The envelope refuses it both times, having nothing to be talked out of.
+    assert!(first_outside_travel(&values, &measured_envelopes()).is_some());
+}
+
+/// A joint with no calibrated travel is not checked. Inventing a limit for it would be worse than
+/// the gap: it reads like protection while resting on a number nobody measured.
+#[test]
+fn a_joint_without_travel_is_not_checked() {
+    let envelopes = [None, None, None, None, None, None];
+    let values = [0, 4095, 0, 4095, 0, 4095];
+    assert_eq!(first_outside_travel(&values, &envelopes), None);
 }
