@@ -59,7 +59,16 @@ damage outlasts the write.
 as fast as it can. A servo whose power stage is shorted pulls the shared rail down far enough that
 the others brown out, and this is what that looks like from the inside.
 
-**`accept`** -- all three, over every motor, ending in a verdict and a table worth keeping:
+**`protection`** -- reads the overload-protection EPROM and nothing else: no write, no motion, no
+torque. Separate from the four above, because it answers a different question -- not "which servo
+is breaking the bus" but "what is this servo told to do when it stalls". Worth running before any
+test that deliberately stalls a joint, and after any calibration, since these registers are
+non-volatile and outlive whichever program last wrote them. On this arm (2026-09-03) it found
+motors 1-5 at the factory values and only the gripper carrying the tighter limits `SOFollower`
+writes -- because `so_follower.py` applies them under `if motor == "gripper"`.
+
+**`accept`** -- all three of the bus modes, over every motor, ending in a verdict and a table worth
+keeping:
 
     probe_so101_bus.py accept --port /dev/ttyACM0 --save bus_baseline.json
 
@@ -400,6 +409,73 @@ def _print_comparison(record: dict, path: str) -> None:
         print(f"{motor_id:<8}{supply:>26}{reads:>26}")
 
 
+# The overload protection an sts3215 applies to itself, and the values `SOFollower` writes into it
+# (`so_follower.py`, `Max_Torque_Limit` 500 / `Protection_Current` 250 / `Overload_Torque` 25).
+# These live in EPROM, so they persist across power cycles and outlive whichever program wrote
+# them: an arm that has ever been driven by the position-mode follower still carries them when the
+# PWM daemon takes over. Reading them is how you find out whether the daemon is running against a
+# servo that will cut its own torque under a stall, or against one that will hold a stalled duty
+# until something outside the loop stops it.
+PROTECTION_REGISTERS = (
+    ("Max_Torque_Limit", (16, 2), 500),
+    ("Protection_Current", (28, 2), 250),
+    ("Protective_Torque", (34, 1), None),
+    ("Protection_Time", (35, 1), None),
+    ("Overload_Torque", (36, 1), 25),
+    ("Over_Current_Protection_Time", (38, 1), None),
+    ("Max_Temperature_Limit", (13, 1), None),
+    ("Operating_Mode", (33, 1), None),
+    ("Torque_Limit", (48, 2), None),
+    ("Status", (65, 1), None),
+    ("Present_Temperature", (63, 1), None),
+)
+# Which of the three `SOFollower` writes have to match before we can say it has run on this servo.
+FOLLOWER_WRITTEN = tuple(name for name, _, expected in PROTECTION_REGISTERS if expected is not None)
+
+
+def cmd_protection(bus: Bus, args) -> None:
+    """Reads the overload-protection EPROM, and nothing else. No write, no motion, no torque."""
+    values: dict[int, dict[str, int | None]] = {}
+    for motor_id in MOTOR_IDS:
+        values[motor_id] = {
+            name: bus.read_register(motor_id, reg, retries=4) for name, reg, _ in PROTECTION_REGISTERS
+        }
+
+    width = max(len(name) for name, _, _ in PROTECTION_REGISTERS) + 2
+    print(f"{args.port}: overload protection, read-only\n")
+    print(f"{'register':<{width}}" + "".join(f"{f'motor {i}':>10}" for i in MOTOR_IDS))
+    for name, _, expected in PROTECTION_REGISTERS:
+        row = "".join(f"{'--' if values[i][name] is None else values[i][name]:>10}" for i in MOTOR_IDS)
+        tail = f"   <- SOFollower writes {expected}" if expected is not None else ""
+        print(f"{name:<{width}}{row}{tail}")
+
+    print()
+    for motor_id in MOTOR_IDS:
+        got = values[motor_id]
+        if any(got[name] is None for name in FOLLOWER_WRITTEN):
+            print(f"motor {motor_id}: did not answer; nothing can be concluded about it")
+            continue
+        matched = [
+            name
+            for name, _, expected in PROTECTION_REGISTERS
+            if expected is not None and got[name] == expected
+        ]
+        if len(matched) == len(FOLLOWER_WRITTEN):
+            print(f"motor {motor_id}: carries the SOFollower limits -- overload protection is configured")
+        elif matched:
+            print(
+                f"motor {motor_id}: carries {len(matched)}/{len(FOLLOWER_WRITTEN)} of them ({', '.join(matched)})"
+            )
+        else:
+            print(f"motor {motor_id}: none of the SOFollower limits are present")
+
+    print()
+    print("What this does and does not settle: these registers say what the servo has been told to")
+    print("do about an overload. Whether its firmware acts on them while `Operating_Mode` is PWM (2)")
+    print("is a separate question that this read cannot answer -- it takes a stall on the bench with")
+    print("the current logged.")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--port", required=True, help="e.g. /dev/ttyACM0. The daemon must not be running.")
@@ -410,6 +486,11 @@ def main() -> None:
     r = sub.add_parser("read", help="Read-only health check. Run this first.")
     r.add_argument("--seconds", type=float, default=20.0)
     r.set_defaults(func=cmd_read)
+
+    pr = sub.add_parser(
+        "protection", help="Read the overload-protection EPROM. Read-only; nothing is written."
+    )
+    pr.set_defaults(func=cmd_protection)
 
     b = sub.add_parser("bisect", help="Find which motor breaks the bus when written to.")
     b.add_argument("--rounds", type=int, default=40, help="Read rounds per measurement.")
