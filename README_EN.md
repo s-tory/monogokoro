@@ -232,8 +232,9 @@ file and what it learns accumulates across runs.
 
 It never runs inside the control loop; see [Measured, not assumed](#measured-not-assumed) for the
 two numbers that make that non-negotiable. The handoff is a seqlock in both directions, so a slow or
-dead cerebellum cannot stall the reflex, and nothing is lost by the delay -- the load being
-predicted is quasi-static.
+dead cerebellum cannot stall the reflex, and nothing is lost by the delay while the iGPU is not
+carrying heavy work of its own -- the load being predicted is quasi-static
+([Known limitations](#known-limitations)).
 
 **Off by default**, and safe to switch on mid-hold: the weights start at zero, so an untrained
 network contributes exactly nothing. Its output is clamped, slew-limited in both directions, and
@@ -400,6 +401,16 @@ way", which look identical from across the room; and `cargo test --test cerebell
 - **Interactive calibration and `setup-motors`** are not implemented for the impedance robot. Run
   both with the stock `so101_follower` against the same servos, then copy the calibration across --
   the two robot types write to different directories.
+
+- **The cerebellum has never been measured while policy inference shares the same iGPU.** There is
+  exactly one compute queue and it is shared with graphics, so cerebellar submits queue behind
+  whatever else is running. One step that averages 307 us on an idle machine swings to a 2969 us max
+  with nothing but a live desktop competing ([Measured, not assumed](#measured-not-assumed)); there
+  is no figure for it with ACT running at ~30 Hz. The reflex is protected either way -- seqlock plus
+  `--cerebellum-staleness-ms` (200 ms by default, 40 cycles at 200 Hz) -- but what happens in the
+  band where a stale prediction is still being applied, before the gate discards it, is unknown. The
+  load to measure is inference, not training: there is no operating state in which the arm moves
+  while a training run holds the GPU.
 
 ## Upstream
 

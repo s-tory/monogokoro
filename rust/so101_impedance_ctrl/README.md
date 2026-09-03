@@ -150,14 +150,14 @@ bug is worth keeping in the README because the fix is the interesting part. With
 `Operating_Mode = 0` it reports that count minus `Homing_Offset`. `Min/Max_Position_Limit` never
 move. Measured on all six joints, 2026-09-03, torque off, nothing driven:
 
-| id | Homing_Offset | position mode | PWM | PWM - position - offset |
-|----|---------------|---------------|------|------|
-| 1 | 1739 | 2074 | 3814 | +1 |
-| 2 | -1242 | 960 | 3814 | 0 |
-| 3 | 1484 | 2937 | 325 | 0 |
-| 4 | -1917 | 2433 | 517 | +1 |
-| 5 | 1932 | 2043 | 3976 | +1 |
-| 6 | 1867 | 2200 | 4068 | +1 |
+| id  | Homing_Offset | position mode | PWM  | PWM - position - offset |
+| --- | ------------- | ------------- | ---- | ----------------------- |
+| 1   | 1739          | 2074          | 3814 | +1                      |
+| 2   | -1242         | 960           | 3814 | 0                       |
+| 3   | 1484          | 2937          | 325  | 0                       |
+| 4   | -1917         | 2433          | 517  | +1                      |
+| 5   | 1932          | 2043          | 3976 | +1                      |
+| 6   | 1867          | 2200          | 4068 | +1                      |
 
 The envelope is read at startup, in position mode; the loop reads positions after the client has
 switched to PWM. The first version compared one against the other, so every joint would have landed
@@ -186,7 +186,7 @@ the fault this gate exists for.
 Verified driven, 2026-09-03: two 40 s runs at 400 Hz with the client holding position (K=15, then
 K=5) and a hand pushing the joints, through the mode switch and with joints actually moving --
 **zero false rejections, zero comms errors**. Two things that run is not evidence for. The
-*rejecting* side has never run on hardware, because it takes a fault to produce; it is covered by
+_rejecting_ side has never run on hardware, because it takes a fault to produce; it is covered by
 unit tests against the measured misreports and nothing more. And folding the envelope moves which
 readings are impossible: `shoulder_pan`'s whole-turn misreports of 0, 3, 10 and 4094 counts, all
 refused in position mode, are ordinary raw positions for that joint and would pass in a driven run.
@@ -462,6 +462,10 @@ That max is a floor, not a bound. The same 16384-cell configuration measured fro
 running daemon (the per-second `cerebellum [...]` log line, with the control loop and the rest of
 the machine competing for the GPU) reports mean 450-650 us and **max 2969 us** -- a single step
 longer than the entire control period.
+
+Both figures were taken with an ordinary desktop competing for the GPU, not with policy inference
+on the same iGPU -- which is the state the arm actually runs in, and which has not been measured.
+Training is not the load to measure here: the arm does not move while a training run holds the GPU.
 
 That the control loop does not pay for any of it was checked rather than assumed, by alternating
 the two configurations 3 x 20 s each against a dead bus at 200 Hz, 10800 ticks per condition:
