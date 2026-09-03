@@ -342,6 +342,21 @@ Mean cost and overrun rate are indistinguishable. The worst-case tick swings by 
 _both_ columns -- one repetition had the quiet run produce the worse outlier -- so that tail belongs
 to the laptop, not to the cerebellum.
 
+**Policy inference on the same iGPU was checked the same way** (2026-09-04: a dead bus on a pty, no
+plasticity, no `SCHED_FIFO`, 25 s per condition, load from `examples/load_igpu_with_act.py`).
+
+| condition                                                            | cerebellar step, mean |
+| -------------------------------------------------------------------- | --------------------- |
+| cerebellum alone                                                     | 588-646 us            |
+| + ACT inference (once every 3.3 s -- the default `n_action_steps`)   | 504-605 us            |
+| + ACT inference (back to back -- the temporal-ensembling worst case) | **311-427 us**        |
+
+No condition dropped a single 200 Hz step (600-604 steps per 3 s), with zero errors and zero
+rejections. **The cerebellum is faster under the heavier load.** A dispatch this size costs
+submission latency rather than compute, and an idle iGPU has clocked down; a continuous load keeps
+it awake. The contention this was measured to find is not there, and what is there points the other
+way.
+
 The tooling for re-deriving all of it ships too: `--probe-direction` measures drive direction with a
 bounded, auto-aborting nudge; the checker's live table separates "too soft" from "driven the wrong
 way", which look identical from across the room; and `cargo test --test cerebellum_gpu_tests --
@@ -402,14 +417,6 @@ way", which look identical from across the room; and `cargo test --test cerebell
 - **Interactive calibration and `setup-motors`** are not implemented for the impedance robot. Run
   both with the stock `so101_follower` against the same servos, then copy the calibration across --
   the two robot types write to different directories.
-
-- **Cerebellar step time has not been measured while interleaved with inference.** The policy's
-  side of it has ([Measured, not assumed](#measured-not-assumed)): one ACT forward pass takes 30 ms,
-  and since `n_action_steps` defaults to 100, a 30 Hz robot infers once every 3.3 s -- 0.9% duty, and
-  a single burst is under a sixth of `--cerebellum-staleness-ms` (200 ms by default), so queueing
-  behind one cannot reach the band where a stale prediction is still being applied. **The exception
-  is temporal ensembling, which forces `n_action_steps` to 1**: a forward pass every control step
-  puts duty near 90%. That case is unmeasured.
 
 ## Upstream
 

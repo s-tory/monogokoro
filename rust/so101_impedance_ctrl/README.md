@@ -468,9 +468,17 @@ which is the state the arm actually runs in. Measured separately (`examples/load
 2026-09-04): one ACT forward pass on this iGPU is **30 ms** in bf16 with two 480x640 cameras, 44 ms
 in fp32, 16 ms with a single camera. `n_action_steps` defaults to 100, so a 30 Hz robot submits one
 of those every 3.3 s -- 0.9% duty, and a burst a sixth the length of the 200 ms staleness gate, so
-queueing behind one cannot age a prediction out. Temporal ensembling is the exception: it forces
-`n_action_steps` to 1, which is a forward pass per control step and duty near 90%. What has not been
-measured either way is the cerebellar step time while interleaved.
+queueing behind one cannot age a prediction out. Temporal ensembling was the case
+to worry about: it forces `n_action_steps` to 1, which is a forward pass per control step and duty
+near 90%.
+
+Both were then measured from the cerebellum's side, against a dead bus on a pty, 25 s per condition:
+alone it steps in 588-646 us mean, with ACT inference at the default cadence 504-605 us, and with
+ACT inference back to back **311-427 us**. No condition dropped a 200 Hz step. The heavier load makes
+the cerebellum _faster_, because a dispatch this size is submission latency rather than compute and
+an idle iGPU has clocked down -- a continuous load keeps it awake. Two conditions that flatter this
+result and should be redone on the arm: no plasticity ran (a dead bus produces no error to learn
+from), and `SCHED_FIFO` was not acquired.
 
 Training is not the load to measure here at all: the arm does not move while a training run holds
 the GPU.
