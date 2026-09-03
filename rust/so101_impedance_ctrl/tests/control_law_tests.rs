@@ -3,7 +3,8 @@
 
 use so101_impedance_ctrl::control::{
     apply_soft_limits, finite_difference_velocity, first_implausible_step, first_outside_travel,
-    impedance_pwm, input_is_fresh, MovingAverage, PositionGate, TravelEnvelope,
+    impedance_pwm, input_is_fresh, MovingAverage, PositionFrame, PositionGate, TravelEnvelope,
+    TravelVerdict,
 };
 
 /// One tick's worth of budget at the shipped defaults: 20000 counts/s at 400 Hz.
@@ -343,32 +344,54 @@ fn without_history_the_raw_rule_still_applies() {
     assert_eq!(apply_soft_limits(500.0, 50.0, 100.0, 3995.0, None), 500.0);
 }
 
-/// The arm's calibrated travel on 2026-09-02, widened by the shipped 200-count margin.
+/// This arm's calibration as the servos hold it, widened by the shipped 200-count margin.
 ///
-/// `wrist_roll` turns freely and is calibrated `0-4095`, so it gets no envelope -- the same answer
-/// an uncalibrated joint gives.
+/// Travel measured 2026-09-02; `Homing_Offset` read off the same six servos 2026-09-03. Two of the
+/// offsets are negative, which is why the fold is modulo a revolution rather than an add.
+///
+/// `wrist_roll` has no envelope, and the reason changed: it is not that the joint spins. Measured
+/// 2026-09-03 it reaches 113-3981 and is stopped both ways by a printed corner -- but its
+/// registers still read `0-4095`, because the calibration that wrote them never swept it. Until
+/// this arm is recalibrated, a full-width travel and an unmeasured one are the same thing here.
 fn measured_envelopes() -> [Option<TravelEnvelope>; 6] {
-    let band = |lo: f32, hi: f32| {
-        Some(TravelEnvelope {
-            min: lo - 200.0,
-            max: hi + 200.0,
-        })
-    };
+    let band = |lo: f32, hi: f32, offset: f32| TravelEnvelope::new(lo, hi, offset, 200.0);
     [
-        band(859.0, 3285.0),  // shoulder_pan
-        band(946.0, 3343.0),  // shoulder_lift
-        band(783.0, 2940.0),  // elbow_flex
-        band(872.0, 3263.0),  // wrist_flex
-        None,                 // wrist_roll: 0-4095, no constraint
-        band(1992.0, 3566.0), // gripper
+        band(859.0, 3285.0, 1739.0),   // shoulder_pan
+        band(946.0, 3343.0, -1242.0),  // shoulder_lift
+        band(783.0, 2940.0, 1484.0),   // elbow_flex
+        band(872.0, 3263.0, -1917.0),  // wrist_flex
+        band(0.0, 4095.0, 1932.0),     // wrist_roll: 0-4095, no constraint
+        band(1992.0, 3566.0, 1867.0),  // gripper
     ]
+}
+
+/// The frame each joint reports in while the arm is limp on the bench, and while it is driven.
+const ALL_CORRECTED: [Option<PositionFrame>; 6] = [Some(PositionFrame::Corrected); 6];
+const ALL_RAW: [Option<PositionFrame>; 6] = [Some(PositionFrame::Raw); 6];
+
+/// A joint calibrated over so much of the circle that the margin laps it gets no envelope.
+///
+/// 3900 counts of travel widened by 200 either side is 4300 counts of arc on a 4096-count circle:
+/// every position is inside it. A check that admits everything is worse than no check, because it
+/// reads like protection.
+#[test]
+fn travel_the_margin_laps_the_circle_gets_no_envelope() {
+    assert!(TravelEnvelope::new(0.0, 3900.0, 0.0, 200.0).is_none());
+    assert!(TravelEnvelope::new(0.0, 3600.0, 0.0, 200.0).is_none());
+    assert!(TravelEnvelope::new(0.0, 3599.0, 0.0, 200.0).is_some());
+    // A travel that is empty or inverted is a calibration nobody can enforce either.
+    assert!(TravelEnvelope::new(2000.0, 2000.0, 0.0, 200.0).is_none());
+    assert!(TravelEnvelope::new(3000.0, 900.0, 0.0, 200.0).is_none());
 }
 
 /// A pose from the middle of the arm's travel is not a glitch, envelope or no envelope.
 #[test]
 fn positions_inside_the_travel_are_accepted() {
     let values = [1995, 2294, 2158, 2153, 2003, 2048];
-    assert_eq!(first_outside_travel(&values, &measured_envelopes()), None);
+    assert_eq!(
+        first_outside_travel(&values, &measured_envelopes(), &ALL_CORRECTED),
+        None
+    );
 }
 
 /// The extremes of a real hand sweep, measured the same day the envelopes were: every joint
@@ -380,25 +403,127 @@ fn the_measured_hand_sweep_stays_inside_the_envelope() {
         [3294, 3350, 2942, 3260, 3955, 3579], // high ends
     ] {
         assert_eq!(
-            first_outside_travel(&values, &measured_envelopes()),
+            first_outside_travel(&values, &measured_envelopes(), &ALL_CORRECTED),
             None,
             "{values:?}"
         );
     }
 }
 
+/// **The bug this whole check was turned off for.** Every joint, in PWM, reading exactly what the
+/// servos reported on 2026-09-03 -- the state the daemon is in for an entire driven run.
+///
+/// The first version of the gate compared these against the position-mode envelope and rejected
+/// all six, which counts blind ticks and ends in `--max-blind-ticks` zeroing PWM on a loaded arm.
+/// It was not caught on the bench because a limp arm is in position mode, the one state where the
+/// two frames agree.
+#[test]
+fn the_measured_pwm_frame_readings_are_accepted() {
+    let values = [3814, 3814, 325, 517, 3976, 4068];
+    assert_eq!(
+        first_outside_travel(&values, &measured_envelopes(), &ALL_RAW),
+        None
+    );
+}
+
+/// The same six readings, told the arm is in position mode: refused, and the daemon says why.
+///
+/// This is the shape of the old failure preserved as a test. What makes it diagnosable rather than
+/// mysterious is that *all* the checked joints land inside the other frame at once, which no bad
+/// read does -- the client switches all six together, so only a missed mode switch looks like this.
+#[test]
+fn a_missed_mode_switch_is_refused_and_named() {
+    let values = [3814, 3814, 325, 517, 3976, 4068];
+    let reject = first_outside_travel(&values, &measured_envelopes(), &ALL_CORRECTED)
+        .expect("PWM-frame readings cannot be inside the position-mode envelopes");
+    assert_eq!(
+        reject.verdict,
+        TravelVerdict::OutsideTravel {
+            every_checked_joint_fits_the_other_frame: true
+        }
+    );
+    assert!(reject.reason().contains("mode switch this daemon did not see"));
+}
+
+/// One joint outside its travel is a bad read, not a frame error, and must not be reported as one.
+///
+/// On this arm a joint's two envelopes cover most of the circle between them, so a single wrong
+/// value lands inside the other frame's band about as often as not. The claim is only made when
+/// every checked joint makes it at once.
+#[test]
+fn one_joint_outside_is_not_blamed_on_the_frame() {
+    let values = [4083, 2294, 2158, 2153, 2003, 2048];
+    let reject = first_outside_travel(&values, &measured_envelopes(), &ALL_CORRECTED).unwrap();
+    assert_eq!(reject.motor, 0);
+    assert_eq!(
+        reject.verdict,
+        TravelVerdict::OutsideTravel {
+            every_checked_joint_fits_the_other_frame: false
+        }
+    );
+}
+
 /// The fault this exists for. `shoulder_pan` reported whole-turn jumps three times in one 25-second
 /// sweep while its hard stops sat at 867 and 3280, repeatable to 3-6 counts, with 815 counts of
 /// clearance to the wrap. Every one of those readings is outside the travel and none of them could
-/// have been where the joint was.
+/// have been where the joint was. Measured with the arm limp, so: position mode.
 #[test]
 fn the_measured_whole_turn_misreport_is_rejected() {
     for (reported, label) in [(0, "0"), (3, "3"), (10, "10"), (4083, "4083"), (4094, "4094")] {
         let values = [reported, 2294, 2158, 2153, 2003, 2048];
-        let (i, value) =
-            first_outside_travel(&values, &measured_envelopes()).expect(label);
-        assert_eq!(i, 0, "{label}");
-        assert_eq!(value, reported as f32, "{label}");
+        let reject = first_outside_travel(&values, &measured_envelopes(), &ALL_CORRECTED)
+            .expect(label);
+        assert_eq!(reject.motor, 0, "{label}");
+        assert_eq!(reject.value, reported as f32, "{label}");
+    }
+}
+
+/// The same joint while driven, i.e. in the raw frame, where its band is 2398-1128 and the arc it
+/// cannot be in is 1129-2397.
+///
+/// The fold moves *which* readings are impossible, and this is what that costs: the whole-turn
+/// misreports measured in position mode (0, 3, 10, 4094) are all perfectly ordinary raw positions
+/// for this joint, so in a driven run they would pass. 1269 counts of the circle stay impossible,
+/// and that is what is still being checked -- not the same 1269 counts, and worth knowing before
+/// reading a clean driven run as evidence the gate caught anything.
+#[test]
+fn the_whole_turn_misreport_is_still_rejected_in_the_raw_frame() {
+    for (reported, expected) in [
+        (0, None),
+        (3, None),
+        (10, None),
+        (4094, None),
+        (1000, None),
+        (1129, Some(1129.0)),
+        (2000, Some(2000.0)),
+        (2397, Some(2397.0)),
+        (2398, None),
+        (2500, None),
+    ] {
+        let values = [reported, 3814, 325, 517, 3976, 4068];
+        let got = first_outside_travel(&values, &measured_envelopes(), &ALL_RAW)
+            .map(|r| r.value);
+        assert_eq!(got, expected, "shoulder_pan reporting {reported} in the raw frame");
+    }
+}
+
+/// A position the encoder cannot report is refused whether or not the joint has an envelope, and
+/// is named as a misparsed reply rather than blamed on the calibration.
+///
+/// The envelope is folded modulo a revolution and the value is deliberately not: folding
+/// `2074 + 4096` would tuck a whole-turn misreport neatly back inside the arc and hide exactly the
+/// fault this gate was written for.
+#[test]
+fn a_position_off_the_encoder_is_refused_without_a_calibration() {
+    let no_envelopes = [None, None, None, None, None, None];
+    for reported in [6170, 4096, 65535, -1] {
+        for envelopes in [measured_envelopes(), no_envelopes] {
+            let values = [reported, 2294, 2158, 2153, 2003, 2048];
+            let reject = first_outside_travel(&values, &envelopes, &ALL_CORRECTED)
+                .unwrap_or_else(|| panic!("{reported} was accepted"));
+            assert_eq!(reject.motor, 0);
+            assert_eq!(reject.verdict, TravelVerdict::OffEncoder);
+        }
     }
 }
 
@@ -416,7 +541,7 @@ fn a_steady_misreport_corroborates_itself_past_the_slew_gate() {
     assert!(gate.accept(&values, Some(&prev)).is_ok());
 
     // The envelope refuses it both times, having nothing to be talked out of.
-    assert!(first_outside_travel(&values, &measured_envelopes()).is_some());
+    assert!(first_outside_travel(&values, &measured_envelopes(), &ALL_CORRECTED).is_some());
 }
 
 /// A joint with no calibrated travel is not checked. Inventing a limit for it would be worse than
@@ -425,5 +550,43 @@ fn a_steady_misreport_corroborates_itself_past_the_slew_gate() {
 fn a_joint_without_travel_is_not_checked() {
     let envelopes = [None, None, None, None, None, None];
     let values = [0, 4095, 0, 4095, 0, 4095];
-    assert_eq!(first_outside_travel(&values, &envelopes), None);
+    assert_eq!(
+        first_outside_travel(&values, &envelopes, &ALL_CORRECTED),
+        None
+    );
+}
+
+/// A joint whose frame is unknown is not checked against its travel either, for the same reason.
+///
+/// `Operating_Mode` 1 and 3 exist and neither has been measured here, and an unreadable mode is
+/// the same kind of ignorance. Guessing wrong does not cost a missed rejection, it rejects every
+/// read the joint makes -- which is a torque drop on a loaded arm.
+#[test]
+fn a_joint_whose_frame_is_unknown_is_not_checked() {
+    let frames = [None, None, None, None, None, None];
+    let values = [3814, 3814, 325, 517, 3976, 4068];
+    assert_eq!(
+        first_outside_travel(&values, &measured_envelopes(), &frames),
+        None
+    );
+    // ...but the encoder's own range still applies, since it needs neither frame nor calibration.
+    let values = [9999, 3814, 325, 517, 3976, 4068];
+    assert_eq!(
+        first_outside_travel(&values, &measured_envelopes(), &frames)
+            .map(|r| r.verdict),
+        Some(TravelVerdict::OffEncoder)
+    );
+}
+
+/// Every one of this arm's six envelopes crosses the 4095/0 seam once folded into the raw frame,
+/// which is structural rather than bad luck: a homing offset is chosen to keep the seam out of the
+/// travel in the corrected frame, and that is exactly what puts it inside in the raw one. A
+/// non-wrapping comparison would refuse most of every joint's travel.
+#[test]
+fn every_raw_envelope_on_this_arm_crosses_the_seam() {
+    for (motor, envelope) in measured_envelopes().into_iter().enumerate() {
+        let Some(envelope) = envelope else { continue };
+        let (low, high) = envelope.band(PositionFrame::Raw);
+        assert!(low > high, "motor {motor}: raw band {low}-{high} does not wrap");
+    }
 }

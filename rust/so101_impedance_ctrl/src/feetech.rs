@@ -59,6 +59,10 @@ pub const REG_OPERATING_MODE: (u8, u8) = (33, 1);
 /// `src/lerobot/motors/feetech/feetech.py`. This is EPROM: writing it needs the torque-off +
 /// unlock dance in `control.rs`, which is why nothing writes it directly.
 pub const OPERATING_MODE_PWM: u32 = 2;
+/// The mode the servos ship in and the mode the arm is left in. Named because the daemon has to
+/// tell the two apart to know which frame `Present_Position` is reported in -- see
+/// `control::PositionFrame`, which measured the difference.
+pub const OPERATING_MODE_POSITION: u32 = 0;
 pub const REG_TORQUE_ENABLE: (u8, u8) = (40, 1);
 /// EPROM write-protect latch: 0 = EPROM writable, 1 = locked. Mirrors the `Lock` writes in
 /// `FeetechMotorsBus.disable_torque`/`enable_torque` on the Python side.

@@ -14,10 +14,11 @@ use shared_memory::ShmemConf;
 use nix::unistd::{Gid, Uid};
 use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConfig, SensoryState};
 use so101_impedance_ctrl::control::{
-    apply_soft_limits, apply_startup_config, finite_difference_velocity, impedance_pwm,
-    first_outside_travel, input_is_fresh, log_homing_offsets, log_supply_and_temperature,
-    poll_and_apply_commands, read_travel_envelopes,
-    read_supply_and_temperature, wrapped_delta, MovingAverage, PositionGate,
+    apply_soft_limits, apply_startup_config, finite_difference_velocity, first_outside_travel,
+    impedance_pwm, input_is_fresh, log_supply_and_temperature, poll_and_apply_commands,
+    read_homing_offsets, read_position_frames, read_supply_and_temperature, read_travel_envelopes,
+    release_all,
+    wrapped_delta, MovingAverage, PositionFrame, PositionGate, TravelEnvelope,
 };
 use so101_impedance_ctrl::feetech::{self, FeetechBus};
 use so101_impedance_ctrl::leader::LeaderGripper;
@@ -199,26 +200,28 @@ struct Cli {
     /// The travel comes off the servos (`Min/Max_Position_Limit`, written by `lerobot-calibrate`),
     /// so an uncalibrated joint reports the whole circle and is simply not checked.
     ///
-    /// **Off by default, because as written it compares two different frames.** Measured
-    /// 2026-09-03 on this arm: with `Operating_Mode = 2` (PWM), the sts3215 reports
-    /// `Present_Position` *without* applying `Homing_Offset`, while `Min/Max_Position_Limit` do
-    /// not move. Motor 6 read 2200 in position mode and 4068 in PWM against a stored offset of
-    /// 1867, repeatable in both directions with torque on and off. The envelope is read at
-    /// startup, when the servos are still in position mode; the loop reads positions after the
-    /// Python client has switched them to PWM. Every joint on this arm has a non-zero offset, so
-    /// every joint would land outside its own envelope, count blind ticks, and reach
-    /// `--max-blind-ticks` -- which drops torque and lets a gravity-loaded arm fall.
+    /// **This shipped on, was found broken the next day, and is on again now that its frames
+    /// agree.** The two frames are the whole story: with `Operating_Mode = 2` (PWM) the sts3215
+    /// reports `Present_Position` as the raw encoder count, and with `Operating_Mode = 0` it
+    /// reports that count minus `Homing_Offset`; `Min/Max_Position_Limit` never move. Measured on
+    /// all six joints, 2026-09-03, residual one count or less. The envelope is read at startup, in
+    /// position mode; the loop reads positions after the client has switched to PWM. The first
+    /// version compared one against the other, so every joint would have landed outside its own
+    /// envelope, counted blind ticks and reached `--max-blind-ticks` -- dropping torque on a
+    /// gravity-loaded arm. It passed its bench check because that check hand-swept a limp arm, and
+    /// a limp arm is in position mode: the one state where the two frames agree.
     ///
-    /// It passed its own bench check because that check hand-swept a limp arm, and a limp arm is
-    /// in position mode: the one configuration where the two frames agree. The daemon has not been
-    /// run since the gate was added, so nothing has been driven with it live.
+    /// So the envelope is now held in the corrected frame with the joint's offset beside it, and
+    /// asked about a position in whichever frame that joint is reporting in. The daemon knows the
+    /// frame because it performs every mode change itself; a joint whose mode it cannot read, or
+    /// whose mode nobody has measured a frame for, is not checked rather than guessed at.
     ///
-    /// The fix is to convert the envelope into the raw frame at startup rather than to convert
-    /// every position at 400 Hz, which means folding `limit + homing_offset` modulo 4096 and
-    /// comparing with wraparound -- an arc that crosses the seam is exactly what `wrist_roll`
-    /// turned out to be. Until that is written *and verified with the arm actually driven*, the
-    /// honest default is the behaviour that predates the gate. Pass `--travel-gate true` to opt in.
-    #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
+    /// Verified driven, 2026-09-03, two runs of 40 s at 400 Hz with the client holding position
+    /// (K=15 then K=5) and a hand pushing the joints: zero false rejections, zero comms errors,
+    /// through the mode switch and with joints actually moving. **The rejecting side has never run
+    /// on hardware** -- it takes a fault to produce, so it is covered by unit tests against the
+    /// measured misreports and nothing more.
+    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     travel_gate: bool,
 
     /// How far outside the calibrated travel a position is still believed, in counts.
@@ -680,17 +683,18 @@ mod cli_tests {
         assert!(!parse(&["--sync-read=false"]).sync_read);
     }
 
-    /// `--travel-gate` shipped on by default and was turned off the next day, once it turned out
-    /// to compare a PWM-frame position against a position-mode envelope. This pins the default so
-    /// that turning it back on is a deliberate edit with a test to update, not a merge artefact:
-    /// the gate is only safe to re-enable together with the frame conversion, and the failure it
-    /// causes -- every joint outside its envelope, blind ticks, torque dropped on a loaded arm --
-    /// is not one to rediscover from the arm.
+    /// `--travel-gate` shipped on, was turned off the next day for comparing a PWM-frame position
+    /// against a position-mode envelope, and is on again now that the envelope carries the joint's
+    /// `Homing_Offset` and the daemon tracks which frame each joint reports in. The default is
+    /// pinned here so that either direction is a deliberate edit with a test to update rather than
+    /// a merge artefact -- the failure the broken version caused (every joint outside its own
+    /// envelope, blind ticks, torque dropped on a loaded arm) is not one to rediscover from the
+    /// arm.
     #[test]
-    fn the_travel_gate_stays_off_until_its_frames_agree() {
-        assert!(!parse(&[]).travel_gate);
-        assert!(parse(&["--travel-gate", "true"]).travel_gate);
-        assert!(parse(&["--travel-gate=true"]).travel_gate);
+    fn the_travel_gate_is_on_now_that_its_frames_agree() {
+        assert!(parse(&[]).travel_gate);
+        assert!(!parse(&["--travel-gate", "false"]).travel_gate);
+        assert!(!parse(&["--travel-gate=false"]).travel_gate);
     }
 }
 
@@ -811,16 +815,22 @@ fn main() {
     .expect("failed to open SO101 serial port");
 
     apply_startup_config(&mut bus, &MOTOR_IDS);
-    log_homing_offsets(&mut bus, &MOTOR_IDS);
-    let travel = if args.travel_gate {
-        read_travel_envelopes(&mut bus, &MOTOR_IDS, args.travel_margin)
+    let homing_offsets = read_homing_offsets(&mut bus, &MOTOR_IDS);
+    // Both halves of the travel check are state the daemon has to keep current for the whole run:
+    // the client rewrites the calibration and switches the operating mode after this point, and
+    // either one silently invalidates what was read here. See the command channel in the loop.
+    let (mut travel, mut pos_frames) = if args.travel_gate {
+        (
+            read_travel_envelopes(&mut bus, &MOTOR_IDS, &homing_offsets, args.travel_margin),
+            read_position_frames(&mut bus, &MOTOR_IDS),
+        )
     } else {
         log::warn!(
-            "--travel-gate is off (the default): positions are not checked against the calibrated \
-             travel. The check is disabled because it compares a PWM-frame position against a \
-             position-mode envelope; see the flag's documentation."
+            "--travel-gate is off: positions are not checked against the calibrated travel, so a \
+             reading that puts a joint somewhere it cannot be is answered by the impedance law \
+             rather than refused"
         );
-        Default::default()
+        (Default::default(), Default::default())
     };
     log_supply_and_temperature(&mut bus, &MOTOR_IDS);
 
@@ -935,7 +945,56 @@ fn main() {
     loop {
         let loop_start = std::time::Instant::now();
 
-        let command_applied = poll_and_apply_commands(&mut bus, &layout.command);
+        // Two of these change what the loop must believe about the arm, so they are acted on here
+        // rather than only forwarded to the servo. `SetOperatingMode` moves the frame
+        // `Present_Position` arrives in; `SetCalibration` rewrites the travel that was read at
+        // startup. Left untracked, either one turns the travel gate into a machine for rejecting
+        // every joint at once -- which is a torque drop on a loaded arm, not a missed rejection.
+        let applied = poll_and_apply_commands(&mut bus, &layout.command);
+        if let Some(cmd) = applied.filter(|c| c.status == 0) {
+            if let Some(i) = MOTOR_IDS.iter().position(|&id| id == cmd.motor_id) {
+                if cmd.kind == shm::CommandKind::SetOperatingMode as u32 {
+                    let frame = PositionFrame::from_operating_mode(cmd.payload[0] as u32);
+                    if frame != pos_frames[i] {
+                        log::info!(
+                            "motor {}: Operating_Mode {} -- Present_Position now read as {:?}",
+                            cmd.motor_id,
+                            cmd.payload[0] as u32,
+                            frame
+                        );
+                    }
+                    pos_frames[i] = frame;
+                } else if cmd.kind == shm::CommandKind::SetCalibration as u32 && args.travel_gate {
+                    // payload = [homing_offset, range_min, range_max, _], the same values the
+                    // command just wrote into the servo's EPROM.
+                    travel[i] = TravelEnvelope::new(
+                        cmd.payload[1],
+                        cmd.payload[2],
+                        cmd.payload[0],
+                        args.travel_margin,
+                    );
+                    match travel[i] {
+                        Some(env) => {
+                            let (rlo, rhi) = env.band(PositionFrame::Raw);
+                            log::info!(
+                                "motor {}: client calibration -- rejecting positions outside \
+                                 {:.0}-{:.0} in position mode / {rlo:.0}-{rhi:.0} in PWM",
+                                cmd.motor_id,
+                                env.min,
+                                env.max
+                            );
+                        }
+                        None => log::info!(
+                            "motor {}: client calibration travel {:.0}-{:.0} spans the circle -- \
+                             no position envelope",
+                            cmd.motor_id,
+                            cmd.payload[1],
+                            cmd.payload[2]
+                        ),
+                    }
+                }
+            }
+        }
 
         // On an unstable (possibly-torn) read, `seqlock_read` returns `None` -- reuse the last
         // known-good snapshot rather than ever act on torn data (see shm.rs's doc comment; this
@@ -976,18 +1035,15 @@ fn main() {
                 // The gate accepts a doubted batch that the next read agrees with, which is right
                 // for a joint that moved unseen and wrong for a reading that is simply false --
                 // a whole-turn misreport holds still, so it corroborates itself.
-                // Ahead of the slew gate, and not routed through it: this verdict is final.
-                // The gate accepts a doubted batch that the next read agrees with, which is right
-                // for a joint that moved unseen and wrong for a reading that is simply false --
-                // a whole-turn misreport holds still, so it corroborates itself.
-                if let Some((motor, value)) = first_outside_travel(&values, &travel) {
+                if let Some(reject) = first_outside_travel(&values, &travel, &pos_frames) {
                     blind_ticks += 1;
                     if blind_ticks == 1 {
                         log::warn!(
-                            "rejected Present_Position: motor {} reported {value:.0}, outside the \
-                             travel it can physically reach (holding last known positions; see \
-                             --travel-gate / --travel-margin)",
-                            MOTOR_IDS[motor]
+                            "rejected Present_Position: motor {} reported {:.0}, {} (holding last \
+                             known positions; see --travel-gate / --travel-margin)",
+                            MOTOR_IDS[reject.motor],
+                            reject.value,
+                            reject.reason()
                         );
                     }
                     comms_error = true;
@@ -1281,7 +1337,7 @@ fn main() {
         });
 
         let shutdown_command =
-            command_applied && layout.command.cmd_kind == shm::CommandKind::Shutdown as u32;
+            applied.is_some_and(|c| c.kind == shm::CommandKind::Shutdown as u32);
         if shutdown_command || SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
             if shutdown_command {
                 log::info!("received Shutdown command, exiting control loop");
@@ -1328,6 +1384,10 @@ fn main() {
             std::thread::sleep(loop_period - elapsed);
         }
     }
+
+    // The arm first: everything below this line is bookkeeping, and none of it should happen while
+    // six servos are still holding the last duty the loop handed them.
+    release_all(&mut bus, &MOTOR_IDS);
 
     // Joins the cerebellum thread, which persists its weights on the way out. Deliberately after
     // the loop rather than in a `Drop`, so that a session's learning is only saved on an exit we

@@ -122,9 +122,8 @@ reverses which way the joint runs. So "it runs away with the flag both on and of
 telemetry, not a wrong drive direction. The checker's `pwm` column separates them: a real sign
 error pegs PWM at `%max`, whereas a joint that is merely too soft sits near zero.
 
-One shape of that fault has a check written for it, though **the check is off by default and does
-not yet work** -- see the end of this section. `--travel-gate`
-reads each joint's calibrated travel out of the servos' `Min/Max_Position_Limit` -- the registers
+One shape of that fault has a check written for it. `--travel-gate` reads each joint's calibrated
+travel out of the servos' `Min/Max_Position_Limit` -- the registers
 `lerobot-calibrate` writes next to the homing offset -- and refuses a reported position more than
 `--travel-margin` (200 counts) outside it. Measured on this arm on 2026-09-02, `shoulder_pan`
 reported whole-turn jumps of +-4083 counts three times in one 25-second hand sweep, while its
@@ -145,21 +144,74 @@ This used to add "which is also the honest answer for `wrist_roll`". It was not:
 reported the whole circle because `lerobot-calibrate` assigned `0-4095` without ever sweeping it,
 which is now fixed -- so the next calibration gives it a real envelope like any other joint.
 
-**And the gate is off by default, because as written it compares two frames.** With
-`Operating_Mode = 2` (PWM) the sts3215 reports `Present_Position` without applying
-`Homing_Offset`; `Min/Max_Position_Limit` are unaffected. Motor 6 reads 2200 in position mode and
-4068 in PWM, against a stored offset of 1867 -- repeatable both directions, torque on and off. The
-envelope is read at startup while the servos are still in position mode, and the loop reads
-positions after the Python client has switched them to PWM, so every joint (all six offsets here
-are non-zero) lands outside its own envelope and rides `--max-blind-ticks` into a torque drop.
+**The gate shipped on, was found broken the next day, and is on again with its frames fixed.** The
+bug is worth keeping in the README because the fix is the interesting part. With
+`Operating_Mode = 2` (PWM) the sts3215 reports `Present_Position` as the raw encoder count; with
+`Operating_Mode = 0` it reports that count minus `Homing_Offset`. `Min/Max_Position_Limit` never
+move. Measured on all six joints, 2026-09-03, torque off, nothing driven:
 
-It passed its bench check because that check hand-swept a limp arm, and a limp arm is in position
-mode -- the one state where the frames agree. Monitor mode has the same property, which is why the
-README recommends it two paragraphs down and why it could not have caught this. The daemon has not
-been run since, so nothing was driven with the broken gate live. The fix is to fold the envelope
-into the raw frame at startup (`limit + homing_offset` mod 4096, compared with wraparound, since a
-folded arc can cross the seam) rather than converting six positions every tick -- unwritten, and it
-does not ship until it has been verified with the arm driven rather than limp.
+| id | Homing_Offset | position mode | PWM | PWM - position - offset |
+|----|---------------|---------------|------|------|
+| 1 | 1739 | 2074 | 3814 | +1 |
+| 2 | -1242 | 960 | 3814 | 0 |
+| 3 | 1484 | 2937 | 325 | 0 |
+| 4 | -1917 | 2433 | 517 | +1 |
+| 5 | 1932 | 2043 | 3976 | +1 |
+| 6 | 1867 | 2200 | 4068 | +1 |
+
+The envelope is read at startup, in position mode; the loop reads positions after the client has
+switched to PWM. The first version compared one against the other, so every joint would have landed
+outside its own envelope, counted blind ticks and hit `--max-blind-ticks` -- dropping torque on a
+gravity-loaded arm. The gate meant to stop a joint being driven into its stop would have dropped
+the whole arm instead. It passed its bench check because that check hand-swept a limp arm, and a
+limp arm is in position mode: the one state where the two frames agree.
+
+So the envelope is now held in the corrected frame with the joint's offset beside it and asked
+about a position in whichever frame that joint is reporting in, wrapping the comparison because
+folding an envelope into the raw frame moves it across the 4095/0 seam. That is not a corner case:
+on this arm **all six** raw envelopes cross the seam, and structurally so -- a homing offset is
+chosen to keep the seam out of the travel in the corrected frame, which is exactly what puts it
+inside the travel in the raw one. The daemon knows each joint's frame because it performs every
+mode change itself, and a joint whose mode it cannot read (or whose mode nobody has measured a
+frame for) is not checked rather than guessed at: a wrong guess is not a missed rejection, it is
+every read rejected at once.
+
+Two things are checked separately, because they are certain in different degrees. A position
+outside `[0, 4096)` is refused for every joint, calibrated or not -- the encoder cannot report it
+once `Phase` bit 4 is clear, so it is a misparsed reply and needs neither a calibration nor a frame
+to be sure of. Only then is the travel asked about. The value is never folded, only the envelope:
+folding `2074 + 4096` would tuck a whole-turn misreport neatly back inside the arc and hide exactly
+the fault this gate exists for.
+
+Verified driven, 2026-09-03: two 40 s runs at 400 Hz with the client holding position (K=15, then
+K=5) and a hand pushing the joints, through the mode switch and with joints actually moving --
+**zero false rejections, zero comms errors**. Two things that run is not evidence for. The
+*rejecting* side has never run on hardware, because it takes a fault to produce; it is covered by
+unit tests against the measured misreports and nothing more. And folding the envelope moves which
+readings are impossible: `shoulder_pan`'s whole-turn misreports of 0, 3, 10 and 4094 counts, all
+refused in position mode, are ordinary raw positions for that joint and would pass in a driven run.
+1269 counts of its circle stay impossible, not the same 1269 counts.
+
+The mode switch itself is visible in the log as a one-tick position step of exactly each joint's
+`Homing_Offset`, caught by `--max-pos-slew` and recovered on the next read. Harmless, since the
+client has not begun writing targets yet -- but it is what a frame change looks like from inside
+the loop, and it is worth recognising rather than rediscovering.
+
+### Shutdown leaves the arm down, and that took a measurement
+
+On exit -- Ctrl-C, `SIGTERM`, or Python's Shutdown command -- the daemon writes duty 0 to every
+follower servo, then `Torque_Enable = 0`, then reads the torque back and says so. The order is not
+cosmetic. Measured 2026-09-03 on motor 6: `Torque_Enable` written to 0 reads back 0, and then a
+single `Goal_PWM = 0` write puts it back to 1. **Writing the duty re-arms the torque.**
+
+Two consequences, both found on the arm rather than reasoned about. Until this was added the daemon
+exited leaving each servo holding the last duty it was handed: a joint carrying the arm's weight at
+250/1000 keeps driving at 250 after Ctrl-C, for as long as it has power, because nothing else on
+the bus will ever tell it otherwise. And while the loop is running, `SetTorqueEnable(0)` from Python
+cannot make the arm limp -- the next tick's duty write takes it straight back. The state that gave
+this away was an arm found stiff by hand after a session had ended: torque enabled at duty 0 brakes
+the joint (both bridge legs low), which is a stiffness nobody commanded and no telemetry reported.
+It also means "limp" is not `K = 0`; it is torque off, and that needs the loop to stop writing.
 
 Validate with **monitor mode**, which cannot run away: Python writes nothing, so the watchdog holds
 PWM at zero and the arm stays limp. Move each joint by hand and confirm the positions track it with

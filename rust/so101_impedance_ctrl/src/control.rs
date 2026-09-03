@@ -284,13 +284,36 @@ pub fn input_is_fresh(now_ns: u64, last_input_ns: u64, timeout_ns: u64) -> bool 
     now_ns.saturating_sub(last_input_ns) <= timeout_ns
 }
 
-/// Polls the live command channel and applies at most one pending command per call. Returns
-/// `true` if a command was applied (caller may want to log/rate-limit around this).
-pub fn poll_and_apply_commands(bus: &mut FeetechBus, cmd: &CommandRegion) -> bool {
+/// A command the daemon has just carried out, handed back to the caller.
+///
+/// The channel's fields are returned by value rather than left to be re-read from shared memory:
+/// Python is free to write the next command as soon as `ack_seq` moves, so a later look at
+/// `cmd_kind` can describe a different command than the one that was applied.
+///
+/// It exists because two of these commands change what the loop must believe about the arm.
+/// `SetOperatingMode` changes which frame `Present_Position` arrives in, and `SetCalibration`
+/// rewrites the travel the daemon read at startup -- both silently, in the middle of a run, from
+/// the other side of the shared memory.
+#[derive(Clone, Copy, Debug)]
+pub struct AppliedCommand {
+    /// A [`CommandKind`] value.
+    pub kind: u32,
+    pub motor_id: u8,
+    pub payload: [f32; 4],
+    /// 0 on success, as reported back to Python.
+    pub status: u32,
+}
+
+/// Polls the live command channel and applies at most one pending command per call. Returns what
+/// was applied, or `None` if there was nothing new.
+pub fn poll_and_apply_commands(
+    bus: &mut FeetechBus,
+    cmd: &CommandRegion,
+) -> Option<AppliedCommand> {
     let cmd_seq = cmd.cmd_seq.load(Ordering::Acquire);
     let ack_seq = cmd.ack_seq.load(Ordering::Acquire);
     if cmd_seq == ack_seq {
-        return false; // nothing new
+        return None; // nothing new
     }
 
     let kind = cmd.cmd_kind;
@@ -300,7 +323,12 @@ pub fn poll_and_apply_commands(bus: &mut FeetechBus, cmd: &CommandRegion) -> boo
 
     cmd.status.store(status, Ordering::Release);
     cmd.ack_seq.store(cmd_seq, Ordering::Release);
-    true
+    Some(AppliedCommand {
+        kind,
+        motor_id,
+        payload,
+        status,
+    })
 }
 
 /// Writes the EPROM-resident `Operating_Mode` register, which the servo silently ignores unless
@@ -434,9 +462,6 @@ pub fn apply_startup_config(bus: &mut FeetechBus, motor_ids: &[u8]) {
     }
 }
 
-/// Logs each servo's stored `Homing_Offset` so it is obvious from the daemon's own output whether
-/// a calibration is in effect. An all-zero column here means positions are raw encoder counts and
-/// any joint whose travel crosses 4095/0 will report a full-scale jump.
 /// Logs each servo's supply voltage and case temperature.
 ///
 /// Neither feeds the control law, which is exactly why they were missing: the loop had no use for
@@ -482,69 +507,290 @@ pub fn read_supply_and_temperature(bus: &mut FeetechBus, motor_id: u8) -> Option
     Some((volts as u32, temp as u32))
 }
 
-/// A joint's physically reachable band of `Present_Position`, in counts, widened by a margin.
-#[derive(Clone, Copy, Debug)]
-pub struct TravelEnvelope {
-    pub min: f32,
-    pub max: f32,
+/// Which frame a joint reports `Present_Position` in, which is a property of its `Operating_Mode`.
+///
+/// Measured on this arm 2026-09-03, all six joints, torque off, nothing driven: in
+/// `Operating_Mode = 2` (PWM) the servo reports the raw encoder count, and in `Operating_Mode = 0`
+/// (position) it reports that count with `Homing_Offset` subtracted, wrapped into `[0, 4096)`.
+/// `Min/Max_Position_Limit` do not move with the mode -- they are always in the corrected frame.
+///
+/// | id | Homing_Offset | position | PWM  | PWM - position - offset |
+/// |----|---------------|----------|------|-------------------------|
+/// | 1  |          1739 |     2074 | 3814 | +1                      |
+/// | 2  |         -1242 |      960 | 3814 | 0 (delta +2854)         |
+/// | 3  |          1484 |     2937 |  325 | 0 (delta -2612)         |
+/// | 4  |         -1917 |     2433 |  517 | +1                      |
+/// | 5  |          1932 |     2043 | 3976 | +1                      |
+/// | 6  |          1867 |     2200 | 4068 | +1                      |
+///
+/// The residual is one count or less everywhere -- encoder noise on a limp arm, and 200 times
+/// inside `--travel-margin`. Two of the six offsets are negative, so the fold has to be modulo the
+/// revolution rather than a saturating add.
+///
+/// The loop runs in PWM, so `Raw` is the frame the gate almost always faces; `Corrected` is the
+/// state the arm starts and ends in, and the state a limp arm on the bench is in -- which is why
+/// the first version of this check passed its bench test and would still have dropped the arm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PositionFrame {
+    /// `Operating_Mode = 0`: the servo has already applied `Homing_Offset`.
+    Corrected,
+    /// `Operating_Mode = 2`: raw encoder counts, `Homing_Offset` not applied.
+    Raw,
 }
 
-/// Travel at least this wide is no constraint at all, so the joint gets no envelope.
+impl PositionFrame {
+    /// The frame implied by an `Operating_Mode` value, or `None` for a mode nobody has measured.
+    ///
+    /// Modes 1 and 3 exist on this servo and neither has been on a bench here, so they get no
+    /// answer rather than a plausible one. `None` switches that joint's travel check off, which
+    /// costs a rejection that will not happen; guessing the frame wrong costs *every* read
+    /// rejected, and that rides `--max-blind-ticks` into a torque drop on a loaded arm.
+    pub fn from_operating_mode(mode: u32) -> Option<Self> {
+        match mode {
+            feetech::OPERATING_MODE_POSITION => Some(Self::Corrected),
+            feetech::OPERATING_MODE_PWM => Some(Self::Raw),
+            _ => None,
+        }
+    }
+
+    fn other(self) -> Self {
+        match self {
+            Self::Corrected => Self::Raw,
+            Self::Raw => Self::Corrected,
+        }
+    }
+}
+
+/// A joint's physically reachable band of positions, in counts, widened by a margin.
+///
+/// Held in the *corrected* frame -- the one `Min/Max_Position_Limit` are written in -- next to the
+/// joint's own `Homing_Offset`, so that one envelope can answer for a position reported in either
+/// [`PositionFrame`]. The first version of this stored the band alone and compared it against
+/// whatever the loop happened to read, which is how it came to compare a PWM-frame position
+/// against a position-mode envelope and would have rejected every joint on the arm.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TravelEnvelope {
+    /// Low end of the calibrated travel, corrected frame, margin already subtracted.
+    pub min: f32,
+    /// High end of the calibrated travel, corrected frame, margin already added.
+    pub max: f32,
+    /// The joint's stored `Homing_Offset`, signed: `raw = corrected + homing_offset (mod 4096)`.
+    pub homing_offset: f32,
+}
+
+/// Travel this wide, *once the margin is added to it*, is no constraint at all, so the joint gets
+/// no envelope.
 ///
 /// A servo reporting `0-4095` says "anywhere is reachable", and a check that admits everything is
-/// worse than no check because it reads like protection.
+/// worse than no check because it reads like protection. The margin is counted in here for the
+/// same reason: the comparison wraps, so a 3900-count travel widened by 200 counts either side is
+/// an arc that laps itself and silently admits the whole circle.
 ///
 /// This used to name `wrist_roll` as the joint that genuinely turns freely. On this arm it does
-/// not: measured 2026-09-03 with torque off, it reaches 113-3981 -- 340 deg -- and is stopped
-/// from both directions by a printed corner, with the 11 deg it cannot reach lying on the encoder
-/// seam. It reported `0-4095` because the calibration script assigned that value without ever
-/// sweeping the joint, which has since been fixed (`so_follower.py`). So a full-width travel now
-/// means one of two things, and the threshold treats them the same on purpose: the joint really
-/// does spin, or nobody has measured it. Neither is an envelope this code can enforce.
-const UNCONSTRAINED_TRAVEL: i32 = 4000;
+/// not: measured 2026-09-03 with torque off, it reaches 113-3981 -- 340 deg -- and is stopped from
+/// both directions by a printed corner, with the 11 deg it cannot reach lying on the encoder seam.
+/// It reported `0-4095` because the calibration script assigned that without ever sweeping the
+/// joint, which has since been fixed (`so_follower.py`) -- and until this arm is recalibrated its
+/// registers still hold `0-4095`, which is what they read today. So a full-width travel means one
+/// of two things, and the threshold treats them the same on purpose: the joint really does spin,
+/// or nobody has measured it. Neither is an envelope this code can enforce.
+const UNCONSTRAINED_TRAVEL: f32 = 4000.0;
 
-/// Reads each joint's calibrated travel from the servos and widens it into an envelope.
+impl TravelEnvelope {
+    /// The envelope for one joint's calibration, or `None` when that travel constrains nothing.
+    ///
+    /// `margin` buys room for three things that are all real and none of them large: the stop
+    /// itself is compliant, the calibration sweep can stop short of it (measured 45 counts on
+    /// `elbow_flex`, 2026-09-02), and a joint can be pushed a little past its stop by hand.
+    pub fn new(range_min: f32, range_max: f32, homing_offset: f32, margin: f32) -> Option<Self> {
+        if range_max <= range_min || range_max - range_min + 2.0 * margin >= UNCONSTRAINED_TRAVEL {
+            return None;
+        }
+        Some(Self {
+            min: range_min - margin,
+            max: range_max + margin,
+            homing_offset,
+        })
+    }
+
+    /// The envelope's two ends as the servo would report them in `frame`.
+    ///
+    /// `low > high` is not an error and not rare: folding this arm's six envelopes into the raw
+    /// frame moved *every one of them* across the 4095/0 seam (2026-09-03). That is structural
+    /// rather than bad luck -- a homing offset is chosen to put the seam outside the travel in the
+    /// corrected frame, which is exactly what puts it inside the travel in the raw one.
+    pub fn band(&self, frame: PositionFrame) -> (f32, f32) {
+        let shift = match frame {
+            PositionFrame::Corrected => 0.0,
+            PositionFrame::Raw => self.homing_offset,
+        };
+        (
+            (self.min + shift).rem_euclid(ENCODER_RESOLUTION),
+            (self.max + shift).rem_euclid(ENCODER_RESOLUTION),
+        )
+    }
+
+    /// Whether a position reported in `frame` lies inside the joint's travel.
+    ///
+    /// The envelope is folded and the value is not, which is the whole asymmetry: a position
+    /// outside `[0, 4096)` is not a joint that wrapped, it is a bad read, and folding it would
+    /// tuck it neatly inside the arc and hide it. [`first_outside_travel`] refuses those before it
+    /// ever gets here.
+    pub fn contains(&self, value: f32, frame: PositionFrame) -> bool {
+        let (low, _) = self.band(frame);
+        (value - low).rem_euclid(ENCODER_RESOLUTION) <= self.max - self.min
+    }
+}
+
+/// Puts every follower servo down before the process exits: duty to zero first, then torque off.
+///
+/// The order is the whole point, and it is measured rather than assumed. On this arm, 2026-09-03,
+/// motor 6: `Torque_Enable` was written to 0 and read back 0, then a single `Goal_PWM = 0` write
+/// put it back to 1 and it stayed there. **Writing the duty re-arms the torque**, so torque has to
+/// be cleared after the last duty write; clearing it first is undone by the next tick.
+///
+/// Without this the daemon exits leaving each servo holding the last duty it was handed. A joint
+/// carrying the arm's weight at 250/1000 keeps driving at 250 after Ctrl-C, for as long as it has
+/// power, because nothing else on the bus will ever tell it otherwise. The leader's gripper has
+/// had this since it was written -- "the operator is never left holding a powered trigger" -- and
+/// the same sentence is more true of the arm.
+///
+/// It also explains a state the arm was found in: torque enabled with duty 0 after a session had
+/// ended, which brakes the joint (both bridge legs low) and reads by hand as a stiffness nobody
+/// commanded. The client's `SetTorqueEnable(0)` had been sent and had worked; the loop's next duty
+/// write took it back. While the loop runs, torque cannot be revoked from outside at all.
+pub fn release_all(bus: &mut FeetechBus, motor_ids: &[u8]) {
+    for &id in motor_ids {
+        if let Err(e) = bus.write_register(id, feetech::REG_GOAL_PWM, 0) {
+            log::warn!("motor {id}: failed to zero PWM on shutdown: {e}");
+        }
+    }
+    for &id in motor_ids {
+        if let Err(e) = bus.write_register(id, feetech::REG_TORQUE_ENABLE, 0) {
+            log::warn!("motor {id}: failed to disable torque on shutdown: {e}");
+        }
+    }
+    // Read back rather than assume: this is the last thing standing between a driven arm and an
+    // unattended one, and a dropped write here is silent.
+    let still_on: Vec<u8> = motor_ids
+        .iter()
+        .copied()
+        .filter(|&id| !matches!(bus.read_register(id, feetech::REG_TORQUE_ENABLE), Ok(0)))
+        .collect();
+    if still_on.is_empty() {
+        log::info!("all motors released: duty zeroed, torque off");
+    } else {
+        log::error!(
+            "motors {still_on:?} are still energised after shutdown -- they hold whatever duty \
+             they were last given; power the arm down or re-run and stop it again"
+        );
+    }
+}
+
+/// Each servo's stored `Homing_Offset`, logged as it is read.
+///
+/// Logged because it is otherwise invisible: an all-zero column here means positions are raw
+/// encoder counts and any joint whose travel crosses 4095/0 will report a full-scale jump.
+/// Returned because the travel gate cannot work without it -- the offset *is* the difference
+/// between the frame the envelope is written in and the frame the loop reads in.
+pub fn read_homing_offsets(bus: &mut FeetechBus, motor_ids: &[u8]) -> [Option<f32>; NUM_MOTORS] {
+    let mut out = [None; NUM_MOTORS];
+    for (slot, &id) in out.iter_mut().zip(motor_ids) {
+        match bus.read_register(id, feetech::REG_HOMING_OFFSET) {
+            Ok(raw) => {
+                let offset =
+                    feetech::decode_sign_magnitude(raw as u16, feetech::HOMING_OFFSET_SIGN_BIT);
+                log::info!("motor {id}: stored Homing_Offset = {offset}");
+                *slot = Some(offset as f32);
+            }
+            Err(e) => log::warn!("motor {id}: could not read Homing_Offset: {e}"),
+        }
+    }
+    out
+}
+
+/// Each joint's position frame at startup, read from `Operating_Mode`.
+///
+/// Read once and then tracked rather than re-read: every mode change on this bus goes through the
+/// daemon's own command channel (`SetOperatingMode`), so its belief stays exact as long as it
+/// updates on the writes it performs -- and a stale belief here is not a missed rejection, it is
+/// every joint rejected at once. Polling the register instead would cost six transactions per
+/// sweep and still be wrong for however long the sweep takes.
+pub fn read_position_frames(
+    bus: &mut FeetechBus,
+    motor_ids: &[u8],
+) -> [Option<PositionFrame>; NUM_MOTORS] {
+    let mut out = [None; NUM_MOTORS];
+    for (slot, &id) in out.iter_mut().zip(motor_ids) {
+        match bus.read_register(id, feetech::REG_OPERATING_MODE) {
+            Ok(mode) => {
+                *slot = PositionFrame::from_operating_mode(mode as u32);
+                match slot {
+                    Some(frame) => {
+                        log::info!("motor {id}: Operating_Mode {mode}, positions in the {frame:?} frame")
+                    }
+                    None => log::warn!(
+                        "motor {id}: Operating_Mode {mode} -- which frame that reports positions in \
+                         has not been measured, so this joint's travel is not checked"
+                    ),
+                }
+            }
+            Err(e) => log::warn!(
+                "motor {id}: could not read Operating_Mode ({e}); this joint's travel is not checked"
+            ),
+        }
+    }
+    out
+}
+
+/// Reads each joint's calibrated travel from the servos and folds it into an envelope.
 ///
 /// The numbers come off the arm rather than out of the calibration JSON on purpose. They are the
 /// same numbers -- `lerobot-calibrate` writes `range_min`/`range_max` into these registers as it
 /// writes the homing offset -- but reading them here means the daemon cannot be driving one arm
 /// while trusting a file that describes another, or a file that was recalibrated and not copied.
-///
-/// `margin` buys room for three things that are all real and none of them large: the stop itself
-/// is compliant, the calibration sweep can stop short of it (measured 45 counts on `elbow_flex`,
-/// 2026-09-02), and a joint can be pushed a little past its stop by hand.
+/// The Python client re-sends both as a `SetCalibration` command when it connects, and the caller
+/// rebuilds the affected envelope from that payload rather than leaving this startup read to go
+/// stale behind it.
 pub fn read_travel_envelopes(
     bus: &mut FeetechBus,
     motor_ids: &[u8],
+    homing_offsets: &[Option<f32>],
     margin: f32,
 ) -> [Option<TravelEnvelope>; NUM_MOTORS] {
     let mut out = [None; NUM_MOTORS];
-    for (slot, &id) in out.iter_mut().zip(motor_ids) {
+    for ((slot, &id), offset) in out.iter_mut().zip(motor_ids).zip(homing_offsets) {
         let limits = bus
             .read_register(id, feetech::REG_MIN_POSITION_LIMIT)
             .and_then(|lo| {
                 bus.read_register(id, feetech::REG_MAX_POSITION_LIMIT)
                     .map(|hi| (lo, hi))
             });
-        match limits {
-            Ok((lo, hi)) if hi - lo >= UNCONSTRAINED_TRAVEL || hi <= lo => {
-                log::info!(
-                    "motor {id}: travel {lo}-{hi} spans the circle -- no position envelope"
-                );
+        match (limits, offset) {
+            (Ok((lo, hi)), &Some(offset)) => {
+                match TravelEnvelope::new(lo as f32, hi as f32, offset, margin) {
+                    Some(env) => {
+                        let (rlo, rhi) = env.band(PositionFrame::Raw);
+                        log::info!(
+                            "motor {id}: travel {lo}-{hi}, rejecting positions outside \
+                             {:.0}-{:.0} in position mode / {rlo:.0}-{rhi:.0} in PWM \
+                             (Homing_Offset {offset:+.0})",
+                            env.min,
+                            env.max
+                        );
+                        *slot = Some(env);
+                    }
+                    None => log::info!(
+                        "motor {id}: travel {lo}-{hi} widened by {margin:.0} spans the circle -- \
+                         no position envelope"
+                    ),
+                }
             }
-            Ok((lo, hi)) => {
-                let env = TravelEnvelope {
-                    min: lo as f32 - margin,
-                    max: hi as f32 + margin,
-                };
-                log::info!(
-                    "motor {id}: travel {lo}-{hi}, rejecting positions outside {:.0}-{:.0}",
-                    env.min,
-                    env.max
-                );
-                *slot = Some(env);
-            }
-            Err(e) => log::warn!(
+            (Ok((lo, hi)), None) => log::warn!(
+                "motor {id}: travel {lo}-{hi} is known but `Homing_Offset` is not, so the envelope \
+                 cannot be put in the frame the loop reads; no envelope for this joint"
+            ),
+            (Err(e), _) => log::warn!(
                 "motor {id}: could not read position limits ({e}); no envelope for this joint"
             ),
         }
@@ -552,7 +798,61 @@ pub fn read_travel_envelopes(
     out
 }
 
-/// The first motor in a batch reporting a position its joint cannot physically reach.
+/// Why a batch of positions was refused by [`first_outside_travel`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TravelVerdict {
+    /// Outside `[0, 4096)`, which the encoder cannot report at all once `Phase` bit 4 is clear --
+    /// so it is a misparsed reply rather than a joint anywhere. Checked for every joint, envelope
+    /// or no envelope, because it needs neither a calibration nor a frame to be certain of itself.
+    OffEncoder,
+    /// Inside the encoder's range but outside this joint's own travel.
+    OutsideTravel {
+        /// Whether *every* joint being checked is outside its travel in the frame the daemon
+        /// believes it is in and inside it in the other frame.
+        ///
+        /// That is the signature of a mode switch the daemon did not see, because the client
+        /// switches all six joints together -- and it is the failure the first version of this
+        /// gate would have produced, so the daemon says it in its own log rather than leaving it
+        /// to be rediscovered from the arm.
+        ///
+        /// It takes all of them because one joint proves nothing: on this arm a joint's two
+        /// envelopes cover most of the circle between them, so a single bad reading lands inside
+        /// the other frame's band about as often as not.
+        every_checked_joint_fits_the_other_frame: bool,
+    },
+}
+
+/// One motor's refused position, and why.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TravelReject {
+    pub motor: usize,
+    pub value: f32,
+    pub verdict: TravelVerdict,
+}
+
+impl TravelReject {
+    /// The middle of the daemon's warning line, so the reason travels with the rejection.
+    pub fn reason(&self) -> &'static str {
+        match self.verdict {
+            TravelVerdict::OffEncoder => {
+                "outside the encoder's own range 0-4095, so the reply was misparsed rather than \
+                 the joint being anywhere"
+            }
+            TravelVerdict::OutsideTravel {
+                every_checked_joint_fits_the_other_frame: false,
+            } => "outside the travel it can physically reach",
+            TravelVerdict::OutsideTravel {
+                every_checked_joint_fits_the_other_frame: true,
+            } => {
+                "outside the travel it can physically reach -- and so is every other checked \
+                 joint, each of them landing inside its travel in the other position frame. That \
+                 is a mode switch this daemon did not see, i.e. a bug here rather than a bad read"
+            }
+        }
+    }
+}
+
+/// The first motor in a batch reporting a position its joint cannot physically be at.
 ///
 /// This is deliberately *not* part of [`PositionGate`], and the difference is the whole point of
 /// it. The gate asks "could the joint have got there since last tick?", and answers a batch it
@@ -572,32 +872,50 @@ pub fn read_travel_envelopes(
 /// outside the travel is not a joint that moved, it is a reading that is wrong, and the arm is
 /// better off blind (the existing `max_blind_ticks` fail-safe drops torque) than driven towards a
 /// place the joint has never been.
+///
+/// `frames` says which frame each joint is reporting in *now*. A joint whose frame is unknown is
+/// not checked against its travel, and is still checked against the encoder's own range -- that
+/// one needs no calibration and no frame to be sure.
 pub fn first_outside_travel(
     values: &[i32],
     envelopes: &[Option<TravelEnvelope>],
-) -> Option<(usize, f32)> {
-    values
-        .iter()
-        .zip(envelopes)
-        .enumerate()
-        .find_map(|(i, (&value, envelope))| {
-            let env = envelope.as_ref()?;
-            let v = value as f32;
-            (v < env.min || v > env.max).then_some((i, v))
-        })
-}
-
-pub fn log_homing_offsets(bus: &mut FeetechBus, motor_ids: &[u8]) {
-    for &id in motor_ids {
-        match bus.read_register(id, feetech::REG_HOMING_OFFSET) {
-            Ok(raw) => {
-                let offset =
-                    feetech::decode_sign_magnitude(raw as u16, feetech::HOMING_OFFSET_SIGN_BIT);
-                log::info!("motor {id}: stored Homing_Offset = {offset}");
-            }
-            Err(e) => log::warn!("motor {id}: could not read Homing_Offset: {e}"),
-        }
+    frames: &[Option<PositionFrame>],
+) -> Option<TravelReject> {
+    // Off the encoder first, and for every joint: it is the more certain of the two verdicts, and
+    // reporting it as a travel violation would blame the calibration for a misparsed reply.
+    if let Some((motor, value)) = values.iter().enumerate().find_map(|(motor, &value)| {
+        let value = value as f32;
+        (!(0.0..ENCODER_RESOLUTION).contains(&value)).then_some((motor, value))
+    }) {
+        return Some(TravelReject {
+            motor,
+            value,
+            verdict: TravelVerdict::OffEncoder,
+        });
     }
+
+    let checked = || {
+        values
+            .iter()
+            .zip(envelopes)
+            .zip(frames)
+            .enumerate()
+            .filter_map(|(motor, ((&value, envelope), frame))| {
+                Some((motor, value as f32, envelope.as_ref()?, (*frame)?))
+            })
+    };
+    let (motor, value, ..) =
+        checked().find(|(_, value, envelope, frame)| !envelope.contains(*value, *frame))?;
+    let every_checked_joint_fits_the_other_frame = checked().all(|(_, value, envelope, frame)| {
+        !envelope.contains(value, frame) && envelope.contains(value, frame.other())
+    });
+    Some(TravelReject {
+        motor,
+        value,
+        verdict: TravelVerdict::OutsideTravel {
+            every_checked_joint_fits_the_other_frame,
+        },
+    })
 }
 
 fn configure_one_motor(bus: &mut FeetechBus, motor_id: u8) -> std::io::Result<()> {
