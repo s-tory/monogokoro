@@ -197,9 +197,28 @@ struct Cli {
     /// because a full-turn misreport is perfectly steady while it lasts and so agrees with itself.
     ///
     /// The travel comes off the servos (`Min/Max_Position_Limit`, written by `lerobot-calibrate`),
-    /// so an uncalibrated joint reports the whole circle and is simply not checked. On by default;
-    /// pass `--travel-gate false` to get the old behaviour back for a run.
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    /// so an uncalibrated joint reports the whole circle and is simply not checked.
+    ///
+    /// **Off by default, because as written it compares two different frames.** Measured
+    /// 2026-09-03 on this arm: with `Operating_Mode = 2` (PWM), the sts3215 reports
+    /// `Present_Position` *without* applying `Homing_Offset`, while `Min/Max_Position_Limit` do
+    /// not move. Motor 6 read 2200 in position mode and 4068 in PWM against a stored offset of
+    /// 1867, repeatable in both directions with torque on and off. The envelope is read at
+    /// startup, when the servos are still in position mode; the loop reads positions after the
+    /// Python client has switched them to PWM. Every joint on this arm has a non-zero offset, so
+    /// every joint would land outside its own envelope, count blind ticks, and reach
+    /// `--max-blind-ticks` -- which drops torque and lets a gravity-loaded arm fall.
+    ///
+    /// It passed its own bench check because that check hand-swept a limp arm, and a limp arm is
+    /// in position mode: the one configuration where the two frames agree. The daemon has not been
+    /// run since the gate was added, so nothing has been driven with it live.
+    ///
+    /// The fix is to convert the envelope into the raw frame at startup rather than to convert
+    /// every position at 400 Hz, which means folding `limit + homing_offset` modulo 4096 and
+    /// comparing with wraparound -- an arc that crosses the seam is exactly what `wrist_roll`
+    /// turned out to be. Until that is written *and verified with the arm actually driven*, the
+    /// honest default is the behaviour that predates the gate. Pass `--travel-gate true` to opt in.
+    #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
     travel_gate: bool,
 
     /// How far outside the calibrated travel a position is still believed, in counts.
@@ -660,6 +679,19 @@ mod cli_tests {
         assert!(!parse(&["--sync-read", "false"]).sync_read);
         assert!(!parse(&["--sync-read=false"]).sync_read);
     }
+
+    /// `--travel-gate` shipped on by default and was turned off the next day, once it turned out
+    /// to compare a PWM-frame position against a position-mode envelope. This pins the default so
+    /// that turning it back on is a deliberate edit with a test to update, not a merge artefact:
+    /// the gate is only safe to re-enable together with the frame conversion, and the failure it
+    /// causes -- every joint outside its envelope, blind ticks, torque dropped on a loaded arm --
+    /// is not one to rediscover from the arm.
+    #[test]
+    fn the_travel_gate_stays_off_until_its_frames_agree() {
+        assert!(!parse(&[]).travel_gate);
+        assert!(parse(&["--travel-gate", "true"]).travel_gate);
+        assert!(parse(&["--travel-gate=true"]).travel_gate);
+    }
 }
 
 fn main() {
@@ -783,7 +815,11 @@ fn main() {
     let travel = if args.travel_gate {
         read_travel_envelopes(&mut bus, &MOTOR_IDS, args.travel_margin)
     } else {
-        log::warn!("--travel-gate false: positions are not checked against the calibrated travel");
+        log::warn!(
+            "--travel-gate is off (the default): positions are not checked against the calibrated \
+             travel. The check is disabled because it compares a PWM-frame position against a \
+             position-mode envelope; see the flag's documentation."
+        );
         Default::default()
     };
     log_supply_and_temperature(&mut bus, &MOTOR_IDS);

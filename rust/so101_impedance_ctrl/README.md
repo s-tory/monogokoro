@@ -122,7 +122,8 @@ reverses which way the joint runs. So "it runs away with the flag both on and of
 telemetry, not a wrong drive direction. The checker's `pwm` column separates them: a real sign
 error pegs PWM at `%max`, whereas a joint that is merely too soft sits near zero.
 
-One shape of that fault is now caught rather than argued about. `--travel-gate` (on by default)
+One shape of that fault has a check written for it, though **the check is off by default and does
+not yet work** -- see the end of this section. `--travel-gate`
 reads each joint's calibrated travel out of the servos' `Min/Max_Position_Limit` -- the registers
 `lerobot-calibrate` writes next to the homing offset -- and refuses a reported position more than
 `--travel-margin` (200 counts) outside it. Measured on this arm on 2026-09-02, `shoulder_pan`
@@ -136,9 +137,29 @@ here: a whole-turn misreport holds perfectly still, so it corroborates itself on
 the impedance law then answers ~4090 counts of error with saturated duty in one direction. That is
 what drove a joint into its own stop earlier the same day -- motor 1 went from 29 C to 42 C in 36
 seconds and pulled the shared rail from 4.6 V to 4.0 V before a human stopped it. An uncalibrated
-joint reports the whole circle and is not checked, which is also the honest answer for
-`wrist_roll`. **The misreport itself is still unexplained**, and this bounds its consequences
-rather than removing it.
+joint reports the whole circle and is not checked. **The misreport itself is still unexplained**,
+and this bounds its consequences rather than removing it.
+
+This used to add "which is also the honest answer for `wrist_roll`". It was not: measured
+2026-09-03, that joint reaches 113-3981 (340 deg) and is stopped both ways by a printed corner. It
+reported the whole circle because `lerobot-calibrate` assigned `0-4095` without ever sweeping it,
+which is now fixed -- so the next calibration gives it a real envelope like any other joint.
+
+**And the gate is off by default, because as written it compares two frames.** With
+`Operating_Mode = 2` (PWM) the sts3215 reports `Present_Position` without applying
+`Homing_Offset`; `Min/Max_Position_Limit` are unaffected. Motor 6 reads 2200 in position mode and
+4068 in PWM, against a stored offset of 1867 -- repeatable both directions, torque on and off. The
+envelope is read at startup while the servos are still in position mode, and the loop reads
+positions after the Python client has switched them to PWM, so every joint (all six offsets here
+are non-zero) lands outside its own envelope and rides `--max-blind-ticks` into a torque drop.
+
+It passed its bench check because that check hand-swept a limp arm, and a limp arm is in position
+mode -- the one state where the frames agree. Monitor mode has the same property, which is why the
+README recommends it two paragraphs down and why it could not have caught this. The daemon has not
+been run since, so nothing was driven with the broken gate live. The fix is to fold the envelope
+into the raw frame at startup (`limit + homing_offset` mod 4096, compared with wraparound, since a
+folded arc can cross the seam) rather than converting six positions every tick -- unwritten, and it
+does not ship until it has been verified with the arm driven rather than limp.
 
 Validate with **monitor mode**, which cannot run away: Python writes nothing, so the watchdog holds
 PWM at zero and the arm stays limp. Move each joint by hand and confirm the positions track it with
