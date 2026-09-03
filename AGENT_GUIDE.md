@@ -252,6 +252,8 @@ All policies typically train for **5–10 epochs** (see §7).
 
 - **Optimizer:** measured with **SGD**. LeRobot's default is **AdamW**, which keeps extra optimizer state → **peak memory will be noticeably higher** with the default, especially for `pi0`, `pi05`, `wall_x`, `xvla`.
 - **Batch size:** the large policies were profiled at batch 1. In practice use a **larger batch** for stable training (see §7.4). Memory scales roughly linearly with batch.
+- **Do not read the `Update (ms)` column as a ratio between policies.** Each row was profiled at the batch that fit, with SGD, on one machine, so dividing two rows compares three differences at once. Measured properly -- same host, same optimiser, each policy at its own best batch -- the gap is far smaller than the column implies. On an Arc 140V iGPU (bf16, AdamW, two 480x640 cameras, `examples/measure_policy_train_step.py`, 2026-09-04): `act` reaches **9.8 samples/s** at batch 16 and `smolvla` **6.5 samples/s** at batch 16, a **1.5x** gap rather than the ~17x the table suggests. `smolvla` also peaks **lower** on memory than `act` there (4.93 GB against 6.74 GB): 450 M parameters cost less than two full-resolution ResNet18s' activations.
+- **Short benchmarks overstate sustained throughput.** The same `act` configuration measures 14.2 samples/s over 15 steps, 10.4 over 20, and 9.8 over 60. A laptop settles into its sustained power limit within the first minute, so a run long enough to matter runs at the last of those numbers, not the first. All figures here are on AC power; a battery-powered run has a lower limit again.
 
 ### 6.2 Decision rules
 
