@@ -36,6 +36,16 @@ Practical consequence, in one line: **measure first, and say only what the measu
 The four above say what not to write. These say where to look first. They came out of this
 project's own mistakes, but none of them are specific to it.
 
+- **三現主義 / sangen-shugi — go to the place, look at the thing.** A register is not the
+  hardware. It is a report about the hardware, written by whoever last assumed something.
+  `wrist_roll` reported `0-4095` of travel because a calibration script assigned that without ever
+  sweeping the joint; the arm reaches 340 deg and is stopped by two printed parts touching. One
+  photograph settled what four register reads had not. And it did not only correct a number, it
+  changed what could be loaded: that stop is a printed corner, so driving a saturated duty into it
+  would have deformed the very thing defining the measurement, and the test had to move to a joint
+  whose stop is not the instrument. Before choosing what to push against, look at it — and keep
+  looking while it moves, because a human watching the arm has already stopped a run that no
+  telemetry threshold caught.
 - **Ask biology before comparing engineering options.** When an architecture has more than one
   defensible shape, look at how the animal solves it before weighing the shapes against each
   other. The load-bearing half is what the biological structure does _not_ do — finding that the
@@ -62,7 +72,10 @@ project's own mistakes, but none of them are specific to it.
   moment you think of it. But read-only is not the same as free: a query to a device that never
   answers blocks in the kernel, ignores SIGKILL, and costs a power cycle to clear. Read the logs
   first; touch the hardware only once they say it is alive. Anything that moves hardware still
-  needs a plan.
+  needs a plan. And name the state the test ran in, because a test that passes in a state the
+  system never operates in has not been run: the position gate was verified by hand-sweeping a
+  limp arm, which is the one configuration where the servo applies the homing offset the driven
+  arm does not — the check was measured in the only state that could not fail it.
 - **Do not replace a proven tool with an unverified script.** Before proposing the replacement,
   check whether the real reason is that the existing tool is interactive and you cannot drive
   it yourself. That is your convenience, not the user's safety, and the two must not be mixed.
