@@ -463,9 +463,17 @@ running daemon (the per-second `cerebellum [...]` log line, with the control loo
 the machine competing for the GPU) reports mean 450-650 us and **max 2969 us** -- a single step
 longer than the entire control period.
 
-Both figures were taken with an ordinary desktop competing for the GPU, not with policy inference
-on the same iGPU -- which is the state the arm actually runs in, and which has not been measured.
-Training is not the load to measure here: the arm does not move while a training run holds the GPU.
+Both figures were taken with an ordinary desktop competing for the GPU, not with policy inference,
+which is the state the arm actually runs in. Measured separately (`examples/load_igpu_with_act.py`,
+2026-09-04): one ACT forward pass on this iGPU is **30 ms** in bf16 with two 480x640 cameras, 44 ms
+in fp32, 16 ms with a single camera. `n_action_steps` defaults to 100, so a 30 Hz robot submits one
+of those every 3.3 s -- 0.9% duty, and a burst a sixth the length of the 200 ms staleness gate, so
+queueing behind one cannot age a prediction out. Temporal ensembling is the exception: it forces
+`n_action_steps` to 1, which is a forward pass per control step and duty near 90%. What has not been
+measured either way is the cerebellar step time while interleaved.
+
+Training is not the load to measure here at all: the arm does not move while a training run holds
+the GPU.
 
 That the control loop does not pay for any of it was checked rather than assumed, by alternating
 the two configurations 3 x 20 s each against a dead bus at 200 Hz, 10800 ticks per condition:

@@ -318,14 +318,15 @@ Development is on a ThinkPad X1 Carbon Gen 13 -- Core Ultra 7 258V (Lunar Lake),
 Several numbers here were settled on that hardware after their documented or intuitive values turned
 out to be wrong. They are specific to it and worth re-measuring on another machine:
 
-| what                | value                                        | how it was settled                                                                                                                                     |
-| ------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| PWM sign bit        | **10**                                       | bit 11 (per upstream's docstring) does not reverse the joint -- it is consumed as extra magnitude                                                      |
-| `--invert-pwm`      | **true**                                     | with the right sign bit, positive duty still lowers the encoder                                                                                        |
-| per-joint K         | 10/20/15/10/8/5                              | holding at K=1 makes the reported PWM read out as each joint's gravity+friction duty                                                                   |
-| per-joint D         | ≈ K/40                                       | bounded from above by the velocity quantisation noise floor, not by stability                                                                          |
-| iGPU compute queues | **1**                                        | one queue family, one queue, shared with graphics -- a compute submission cannot be scheduled around the compositor, and no CPU isolation changes that |
-| cerebellum step     | 307 µs mean idle, **2969 µs max under load** | one step can outlast an entire 2.5 ms control period; the max barely moves with layer size, so it is submission jitter rather than compute             |
+| what                | value                                        | how it was settled                                                                                                                                                                               |
+| ------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| PWM sign bit        | **10**                                       | bit 11 (per upstream's docstring) does not reverse the joint -- it is consumed as extra magnitude                                                                                                |
+| `--invert-pwm`      | **true**                                     | with the right sign bit, positive duty still lowers the encoder                                                                                                                                  |
+| per-joint K         | 10/20/15/10/8/5                              | holding at K=1 makes the reported PWM read out as each joint's gravity+friction duty                                                                                                             |
+| per-joint D         | ≈ K/40                                       | bounded from above by the velocity quantisation noise floor, not by stability                                                                                                                    |
+| iGPU compute queues | **1**                                        | one queue family, one queue, shared with graphics -- a compute submission cannot be scheduled around the compositor, and no CPU isolation changes that                                           |
+| cerebellum step     | 307 µs mean idle, **2969 µs max under load** | one step can outlast an entire 2.5 ms control period; the max barely moves with layer size, so it is submission jitter rather than compute                                                       |
+| ACT forward pass    | **30 ms** (bf16), 44 ms (fp32)               | on the iGPU, two 480x640 cameras; 16 ms with one, so vision dominates. `n_action_steps` defaults to 100, so a 30 Hz robot infers once every 3.3 s -- 0.9% duty. `examples/load_igpu_with_act.py` |
 
 Those last two are why the cerebellum has its own thread rather than a slot in the tick. That it
 stays out of the way was then checked rather than assumed -- 3 × 20 s each way, alternating,
@@ -402,15 +403,13 @@ way", which look identical from across the room; and `cargo test --test cerebell
   both with the stock `so101_follower` against the same servos, then copy the calibration across --
   the two robot types write to different directories.
 
-- **The cerebellum has never been measured while policy inference shares the same iGPU.** There is
-  exactly one compute queue and it is shared with graphics, so cerebellar submits queue behind
-  whatever else is running. One step that averages 307 us on an idle machine swings to a 2969 us max
-  with nothing but a live desktop competing ([Measured, not assumed](#measured-not-assumed)); there
-  is no figure for it with ACT running at ~30 Hz. The reflex is protected either way -- seqlock plus
-  `--cerebellum-staleness-ms` (200 ms by default, 40 cycles at 200 Hz) -- but what happens in the
-  band where a stale prediction is still being applied, before the gate discards it, is unknown. The
-  load to measure is inference, not training: there is no operating state in which the arm moves
-  while a training run holds the GPU.
+- **Cerebellar step time has not been measured while interleaved with inference.** The policy's
+  side of it has ([Measured, not assumed](#measured-not-assumed)): one ACT forward pass takes 30 ms,
+  and since `n_action_steps` defaults to 100, a 30 Hz robot infers once every 3.3 s -- 0.9% duty, and
+  a single burst is under a sixth of `--cerebellum-staleness-ms` (200 ms by default), so queueing
+  behind one cannot reach the band where a stale prediction is still being applied. **The exception
+  is temporal ensembling, which forces `n_action_steps` to 1**: a forward pass every control step
+  puts duty near 90%. That case is unmeasured.
 
 ## Upstream
 
