@@ -137,6 +137,9 @@ class Bus:
     def __init__(self, port: str, baud: int, timeout: float):
         self.port, self.baud, self.timeout = port, baud, timeout
         self.ser = serial.Serial(port, baud, timeout=timeout)
+        # Replies rejected by the checksum. Not an error on its own -- a busy bus orphans packets
+        # and the retry covers it -- but a count worth printing next to any number read under load.
+        self.bad_checksums = 0
 
     def read_register(self, motor_id: int, reg: tuple[int, int], retries: int = 1):
         """The register's value, or None if the servo did not answer.
@@ -150,8 +153,21 @@ class Bus:
             self.ser.reset_input_buffer()
             self.ser.write(read_packet(motor_id, addr, size))
             reply = self.ser.read(6 + size)
-            if len(reply) == 6 + size and reply[:2] == b"\xff\xff" and reply[2] == motor_id:
-                return reply[5] if size == 1 else reply[5] | (reply[6] << 8)
+            if len(reply) != 6 + size or reply[:2] != b"\xff\xff" or reply[2] != motor_id:
+                continue
+            # The checksum is not belt-and-braces here, it is the only thing that can catch a
+            # *misattributed* reply. A Feetech status packet does not echo the register it answers
+            # for, so a reply that arrived too late for the previous read -- after this one had
+            # already flushed the buffer and sent its request -- passes the header, the id and,
+            # whenever the two registers are the same width, the length. Measured on this arm
+            # while driving: `Present_Temperature` came back as 38 C on a servo that a read a
+            # second later put at 29 C, because a two-byte `Present_Position` reply was being
+            # truncated into a one-byte answer (position 2342 -> low byte 38). Silent, plausible,
+            # and wrong in exactly the direction that would have made a stall test unreadable.
+            if reply[-1] != (~sum(reply[2:-1])) & 0xFF:
+                self.bad_checksums += 1
+                continue
+            return reply[5] if size == 1 else reply[5] | (reply[6] << 8)
         return None
 
     def write_register(self, motor_id: int, reg: tuple[int, int], value: int) -> bool:
@@ -565,7 +581,16 @@ def cmd_stall(bus: Bus, args) -> None:
     print(f"aborting on {args.abort_temp} C, or Ctrl-C, whichever comes first\n")
     print("Put the arm where a stall is safe -- for the gripper, close it onto something solid and")
     print("blunt. Watch it while this runs; nothing here is a substitute for that.")
-    input("Press ENTER when the joint is where you want it, or Ctrl-C to stop....")
+    if args.yes:
+        print("(--yes: the confirmation was given elsewhere, so not asking again here)")
+    elif sys.stdin.isatty():
+        input("Press ENTER when the joint is where you want it, or Ctrl-C to stop....")
+    else:
+        sys.exit(
+            "stdin is not a terminal, so there is nobody here to press ENTER. Run this from a "
+            "terminal, or pass --yes if a human has already confirmed the joint is placed and is "
+            "watching the arm -- the gate is a person, not the keystroke."
+        )
 
     rows = []
     verdict = "completed"
@@ -605,6 +630,7 @@ def cmd_stall(bus: Bus, args) -> None:
             bus.write_operating_mode(motor, entry_mode)
         back = bus.read_register(motor, REG_OPERATING_MODE, retries=6)
         print(f"\nstopped ({verdict}); Operating_Mode restored to {back} (was {entry_mode})")
+        print(f"replies rejected by checksum: {bus.bad_checksums}")
         if back != entry_mode:
             print("*** the mode did NOT come back. Fix that before running the daemon. ***")
 
@@ -619,8 +645,16 @@ def cmd_stall(bus: Bus, args) -> None:
                 fh.write(",".join(str(x) for x in r) + "\n")
         print(f"wrote {len(rows)} samples to {args.csv}")
 
+    # Temperature is reported as a median, not a maximum, and that is not a cosmetic choice. A
+    # `Present_Temperature` read (1 byte) and a `Present_Voltage` read (1 byte) are the same width,
+    # so a voltage reply that arrived too late for its own read is a *well-formed* answer to the
+    # wrong question -- right checksum, right id, right length -- and the checksum cannot reject
+    # it. Measured here: 3049 of 3115 samples in one step read 29 C, with a scatter of outliers up
+    # to 40 that a direct read a second later put back at 29. A maximum reports the scatter; a
+    # median reports the servo. `--abort-temp` still trips on a single sample, which is the right
+    # asymmetry -- cheap to trip, expensive to miss.
     print(
-        f"\n{'duty':>6}{'n':>7}{'|I| first 1s':>14}{'|I| last 1s':>13}{'peak |I|':>10}{'move':>8}{'max C':>7}"
+        f"\n{'duty':>6}{'n':>7}{'|I| first 1s':>14}{'|I| last 1s':>13}{'peak |I|':>10}{'move':>8}{'med C':>7}"
     )
     for duty in steps:
         step = [r for r in rows if r[1] == duty]
@@ -633,7 +667,7 @@ def cmd_stall(bus: Bus, args) -> None:
         print(
             f"{duty:>6}{len(step):>7}{statistics.median(early) if early else 0:>14.0f}"
             f"{statistics.median(late) if late else 0:>13.0f}{max(abs(r[2]) for r in step):>10}"
-            f"{moved:>8}{max(r[3] for r in step):>7}"
+            f"{moved:>8}{statistics.median(r[3] for r in step):>7.0f}"
         )
     print()
     print("Read it like this: a step whose current falls from 'first 1s' to 'last 1s' while the")
@@ -681,6 +715,15 @@ def main() -> None:
     )
     st.add_argument("--abort-temp", type=int, default=50, help="Stop at this temperature (C).")
     st.add_argument("--csv", help="Write the samples here.")
+    st.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the ENTER gate because the confirmation already happened out of band -- an "
+        "agent driving this on behalf of someone who is standing at the arm, say. What the gate "
+        "is for is a human who has placed the joint and is watching it; that requirement does not "
+        "move. Without this flag and without a terminal, the run refuses rather than crashing on "
+        "a read from a stdin nobody is attached to.",
+    )
     st.set_defaults(func=cmd_stall)
 
     a = sub.add_parser("accept", help="All of the above, over every motor. Run after swapping a servo.")
