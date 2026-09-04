@@ -62,8 +62,8 @@ transients are faster than any loop on the list: a fingertip meeting an object p
 spike well inside the reflex's 2.5 ms tick, so whatever answers it _first_ cannot be a controller at
 all. Biology's answer is the **preflex** -- the intrinsic mechanical response of muscle and tissue,
 at zero latency, before any reflex arc has been traversed. Here it is three silicone finger caps
-stacked on each jaw -- the thick anti-chapping kind, ~2 mm wall, not the thin office cots sold for
-counting paper -- and it is why a soft-fingered animal can be careless with a fragile object in a way
+stacked on each jaw -- the thick anti-chapping kind, ~2 mm wall (ours are Rimikuru finger
+supporters), not the thin office cots sold for counting paper -- and it is why a soft-fingered animal can be careless with a fragile object in a way
 this arm cannot.
 
 <p align="center">
