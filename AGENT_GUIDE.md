@@ -107,6 +107,29 @@ lerobot-teleoperate \
   --display_data=true
 ```
 
+> **More than one USB camera? Address them by `by-path`.**
+>
+> Indices (`/dev/video0`, `1`, …) follow enumeration order and move between boots. `by-id` looks
+> stable but often is not: many UVC modules ship with the same serial burned in. On one rig
+> (2 x Innomaker U20CAM-1080p-S1, 2026-09-07) both reported `SN0001`, and the two `by-id` links
+> ended up pointing at **different physical cameras** — `…SN0001-video-index0` at one module,
+> `…SN0001-video-index1` at the other. `by-path` is keyed on the USB socket, so it holds as long as
+> each camera stays in the same port. List yours with `ls -l /dev/v4l/by-path/`;
+> `lerobot-find-cameras opencv` globs `/dev/video*` and will not show them.
+>
+> ```
+> --robot.cameras="{ wrist_left:  {type: opencv, index_or_path: /dev/v4l/by-path/<L-link>, width: 640, height: 360, fps: 30, fourcc: MJPG},
+>                    wrist_right: {type: opencv, index_or_path: /dev/v4l/by-path/<R-link>, width: 640, height: 360, fps: 30, fourcc: MJPG}}"
+> ```
+>
+> **Check whether the resolution you pick crops.** A 4:3 mode is not always "the 16:9 view plus more
+> height" — it can be a horizontal crop. On the camera above, `640x480` and `1280x960` covered only
+> **75%** of the horizontal field that `1920x1080` did, while `640x360` was a clean downscale at
+> 100%. For a stereo pair that is not cosmetic: the overlap between the two views is a horizontal
+> quantity, and it fell from 58% to 43% on that rig. `640x360` also carries 25% fewer pixels than
+> `640x480`, and policies such as ACT do not resize — pixel count goes straight into training cost.
+> Measure your own modes before recording; the crop factor is per-camera.
+
 > **Feetech timeout / comms error on SO-100 / SO-101?** Before touching software, check the **red motor LEDs** on the daisy chain.
 >
 > - **All steady red, gripper → base chain** → wiring OK.
