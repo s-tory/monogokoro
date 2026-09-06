@@ -319,15 +319,17 @@ Development is on a ThinkPad X1 Carbon Gen 13 -- Core Ultra 7 258V (Lunar Lake),
 Several numbers here were settled on that hardware after their documented or intuitive values turned
 out to be wrong. They are specific to it and worth re-measuring on another machine:
 
-| what                | value                                        | how it was settled                                                                                                                                                                               |
-| ------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| PWM sign bit        | **10**                                       | bit 11 (per upstream's docstring) does not reverse the joint -- it is consumed as extra magnitude                                                                                                |
-| `--invert-pwm`      | **true**                                     | with the right sign bit, positive duty still lowers the encoder                                                                                                                                  |
-| per-joint K         | 10/20/15/10/8/5                              | holding at K=1 makes the reported PWM read out as each joint's gravity+friction duty                                                                                                             |
-| per-joint D         | ≈ K/40                                       | bounded from above by the velocity quantisation noise floor, not by stability                                                                                                                    |
-| iGPU compute queues | **1**                                        | one queue family, one queue, shared with graphics -- a compute submission cannot be scheduled around the compositor, and no CPU isolation changes that                                           |
-| cerebellum step     | 307 µs mean idle, **2969 µs max under load** | one step can outlast an entire 2.5 ms control period; the max barely moves with layer size, so it is submission jitter rather than compute                                                       |
-| ACT forward pass    | **30 ms** (bf16), 44 ms (fp32)               | on the iGPU, two 480x640 cameras; 16 ms with one, so vision dominates. `n_action_steps` defaults to 100, so a 30 Hz robot infers once every 3.3 s -- 0.9% duty. `examples/load_igpu_with_act.py` |
+| what                  | value                                        | how it was settled                                                                                                                                                                                                           |
+| --------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PWM sign bit          | **10**                                       | bit 11 (per upstream's docstring) does not reverse the joint -- it is consumed as extra magnitude                                                                                                                            |
+| `--invert-pwm`        | **true**                                     | with the right sign bit, positive duty still lowers the encoder                                                                                                                                                              |
+| per-joint K           | 10/20/15/10/8/5                              | holding at K=1 makes the reported PWM read out as each joint's gravity+friction duty                                                                                                                                         |
+| per-joint D           | ≈ K/40                                       | bounded from above by the velocity quantisation noise floor, not by stability                                                                                                                                                |
+| wrist stereo baseline | **55 mm**                                    | estimated 57.8 mm from disparity, measured 55 mm with a ruler. The 5% gap is a constant rotation offset riding on the disparity (+39 px), matching the +42 px measured independently in the vertical direction               |
+| recording resolution  | **640x360**                                  | this camera's 4:3 modes do not add height, they crop 25% off the width. At 640x480 the stereo overlap falls from 58% to 43%, and it costs 25% more pixels than 640x360. ACT does not resize, so pixel count is training cost |
+| iGPU compute queues   | **1**                                        | one queue family, one queue, shared with graphics -- a compute submission cannot be scheduled around the compositor, and no CPU isolation changes that                                                                       |
+| cerebellum step       | 307 µs mean idle, **2969 µs max under load** | one step can outlast an entire 2.5 ms control period; the max barely moves with layer size, so it is submission jitter rather than compute                                                                                   |
+| ACT forward pass      | **30 ms** (bf16), 44 ms (fp32)               | on the iGPU, two 480x640 cameras; 16 ms with one, so vision dominates. `n_action_steps` defaults to 100, so a 30 Hz robot infers once every 3.3 s -- 0.9% duty. `examples/load_igpu_with_act.py`                             |
 
 Those last two are why the cerebellum has its own thread rather than a slot in the tick. That it
 stays out of the way was then checked rather than assumed -- 3 × 20 s each way, alternating,
@@ -362,6 +364,16 @@ The tooling for re-deriving all of it ships too: `--probe-direction` measures dr
 bounded, auto-aborting nudge; the checker's live table separates "too soft" from "driven the wrong
 way", which look identical from across the room; and `cargo test --test cerebellum_gpu_tests --
 --nocapture` reprints the latency table on whatever host you are on.
+
+<p align="center">
+  <img src="media/readme/wrist_stereo.jpg" width="420"
+       alt="Two U20CAM-1080P camera boards on a printed bracket at the SO-101 wrist, each held by two standoffs at diagonal corners, with the silicone fingertips behind them" />
+</p>
+
+The two wrist-stereo rows above are legible in this photograph. That the lenses are wide is visible.
+That each camera board is held by only two standoffs at diagonal corners is also visible -- and the
+second is the most likely source of the constant offset riding on the disparity. Neither the
+registers nor the feature matching said that much.
 
 ## Known limitations
 
