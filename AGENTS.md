@@ -8,9 +8,10 @@ LeRobot is a PyTorch-based library for real-world robotics, providing datasets, 
 
 ## Principles
 
-This fork exists to build a reflex layer, and it is being built on four observations that
-predate the field by 2500 years. They are not decoration. Each one is a rule about what to
-write and — more often — what to refuse to write.
+This fork exists to build a reflex layer, and it is being built on four observations and one
+commitment, all of which predate the field by 2500 years. They are not decoration. The four are
+rules about what to write and — more often — what to refuse to write; the fifth is about what to
+build.
 
 - **諸行無常 / anicca — nothing holds still.** Every measured constant decays. Gains, offsets,
   calibration, latency, the droop of a servo under load: each is a snapshot of one machine on
@@ -31,10 +32,22 @@ write and — more often — what to refuse to write.
 
 Practical consequence, in one line: **measure first, and say only what the measurement says.**
 
+Those four are one half of a pair. They bound what may be claimed; not one of them says what the
+claiming is for. The fifth is the other half, and it is a commitment rather than an observation.
+
+- **慈悲 / karuṇā — difficulty is a choice.** The four above bound what may be asserted; this one
+  bounds what the work is spent on. A technique is neutral in the abstract and never in the
+  particular: what is hard here is not crushing the chip, and feeling the slip through encoder
+  counts, and none of that difficulty transfers to a weapon. Dexterity is dual-use and cannot be
+  separated at the level of technique — a permissive licence cannot forbid that use, and this one
+  does not pretend to. So the commitment is not a restriction placed on anyone downstream. It is
+  upstream and it is ours: **do not take on the problem whose hard part is aiming.** Where the
+  difficulty is put is the only lever a permissive licence leaves, and it is enough of one.
+
 ## Method
 
-The four above say what not to write. These say where to look first. They came out of this
-project's own mistakes, but none of them are specific to it.
+Those five say what not to write and what not to build. These say where to look first. They
+came out of this project's own mistakes, but none of them are specific to it.
 
 - **三現主義 / sangen-shugi — go to the place, look at the thing.** A register is not the
   hardware. It is a report about the hardware, written by whoever last assumed something.
