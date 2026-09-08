@@ -31,6 +31,11 @@ captured once to a file and replayed, so the two runs share a target exactly.
     # 0. Once, with the daemon running and the arm held by hand where it carries its own weight:
     python examples/measure_so101_cerebellum.py capture --pose-file pose.json
 
+    # `capture` switches the servos into the control loop's own PWM mode before sampling and
+    # records that in the file, because `Present_Position` means a different number under
+    # POSITION mode and a pose replayed in the wrong frame is a saturated drive at the stops.
+    # A pose file written before this was recorded is refused rather than guessed at; re-capture.
+
     # 1. Baseline: the daemon started with --cerebellum-backend off
     python examples/measure_so101_cerebellum.py hold --pose-file pose.json --label baseline \
         --seconds 180 --out baseline.csv
@@ -95,9 +100,47 @@ def _as_dict(g):
     return g if isinstance(g, dict) else dict.fromkeys(MOTOR_NAMES, g)
 
 
+# The frame a pose file is written in, recorded inside the file itself.
+#
+# `Present_Position` means two different numbers depending on `Operating_Mode`: the raw encoder
+# count under PWM (2), and that count minus `Homing_Offset` under POSITION (0). A pose captured in
+# one and replayed in the other is wrong by the homing offset -- up to 1937 counts, 170 deg, on this
+# arm -- and `cmd_hold` turns that straight into saturated PWM against the stops.
+#
+# This bit us on 2026-09-08 and the reason it had never bitten before is the whole lesson:
+# `lerobot-calibrate` leaves all six servos in POSITION mode, while every `hold` leaves them in PWM.
+# So capture-then-hold agreed on the frame in every session that had already run a hold, and
+# disagreed exactly once -- on the first run after a calibration. A latent bug that is *masked by
+# having run the tool before* cannot be found by running the tool again.
+#
+# So the frame is neither inferred nor assumed. `capture` puts the servos into the mode the control
+# loop runs in and writes down which one that was; `hold` refuses a file that does not say.
+POSE_FRAME = "pwm_raw"
+
+
+def _load_pose(path: str) -> dict[str, float]:
+    with open(path) as f:
+        blob = json.load(f)
+    if not isinstance(blob, dict) or "pose" not in blob:
+        raise SystemExit(
+            f"{path} has no frame recorded, so the ticks in it cannot be interpreted -- it was "
+            "written before this file was versioned. Re-run `capture`; a pose is 20 samples and "
+            "costs nothing, and a pose replayed in the wrong frame drives the arm into its stops."
+        )
+    if blob.get("frame") != POSE_FRAME:
+        raise SystemExit(
+            f"{path} was captured in frame {blob.get('frame')!r}, but the control loop runs in "
+            f"{POSE_FRAME!r}. Re-run `capture`."
+        )
+    return {m: float(blob["pose"][m]) for m in MOTOR_NAMES}
+
+
 def cmd_capture(args) -> None:
     with SO101ImpedanceChecker(shm_name=args.shm_name) as checker:
-        # Read-only: the watchdog keeps PWM at zero, so the arm stays limp while it is positioned.
+        # Into the loop's own mode *before* sampling, so there is only ever one frame in play.
+        # This does not energise anything: the watchdog holds PWM at zero with no client writing,
+        # so the arm stays limp and backdrivable exactly as it was.
+        checker.set_pwm_mode()
         samples = []
         for _ in range(20):
             samples.append({m: s["present_pos"] for m, s in checker.read_state().items()})
@@ -105,16 +148,23 @@ def cmd_capture(args) -> None:
         pose = {m: statistics.median(s[m] for s in samples) for m in MOTOR_NAMES}
         spread = {m: max(s[m] for s in samples) - min(s[m] for s in samples) for m in MOTOR_NAMES}
     with open(args.pose_file, "w") as f:
-        json.dump(pose, f, indent=2)
-    print(f"captured -> {args.pose_file}")
+        json.dump(
+            {
+                "frame": POSE_FRAME,
+                "captured": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+                "pose": pose,
+            },
+            f,
+            indent=2,
+        )
+    print(f"captured -> {args.pose_file}  (frame {POSE_FRAME})")
     for m in MOTOR_NAMES:
         note = "  <- moving, hold it still" if spread[m] > 8 else ""
         print(f"  {m:<14}{pose[m]:>9.1f} ticks  (spread {spread[m]:.0f}){note}")
 
 
 def cmd_hold(args) -> None:
-    with open(args.pose_file) as f:
-        pose = {m: float(v) for m, v in json.load(f).items()}
+    pose = _load_pose(args.pose_file)
 
     k, d = _as_dict(args.k), _as_dict(args.d)
     rows, stop = [], False
