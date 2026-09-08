@@ -526,7 +526,11 @@ bounded four ways, none of which depend on the network having learned anything s
 
 1. **Zero at rest.** Weights start at zero; enabling it cannot change the arm's behaviour until it
    has learned.
-2. **Clamped** to `--cerebellum-ff-max` (300), far below `--pwm-max` (1000).
+2. **Clamped** to `--cerebellum-ff-max` (300), far below `--pwm-max` (1000). **Measured
+   2026-09-08: this bound is in the wrong place.** On a healthy rail (4.50 V min) `elbow_flex`
+   needs 315 to hold one ordinary pose, so the clamp binds while nothing is wrong -- and a bound
+   that binds during correct operation cannot separate a runaway from a loaded joint. Re-siting
+   it needs the legitimate maximum across poses, which is unmeasured; 315 is one pose's number.
 3. **Slew-limited** to `--cerebellum-ff-slew` (500/s), in both directions -- including on the way
    back to zero, since dropping a held feedforward instantly is a step input into a compliant
    joint.

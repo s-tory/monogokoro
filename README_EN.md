@@ -194,21 +194,22 @@ registers nor the feature matching said that much.
   recorded as an action column -- but its two constants were measured against the CPU reference
   rather than an arm, and a policy reproduces whatever the operator labelled until it learns to
   predict it from the images.
-- **The cerebellum's droop numbers are withdrawn. The whole measurement has to be retaken.** The
-  2026-08-28 session reported `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00 and
-  `shoulder_lift` 12.57 -> 3.00 counts of droop at unchanged K, against baselines that were
-  `err = holding_duty / K` to the decimal. Do not rely on any of it. `shoulder_pan`'s power stage
-  had shorted, and writing to it pulls the shared supply from 4.6 V to 2.4 V for ~820 ms -- with
-  the daemon writing to all six every 2.5 ms, the rail was down for most of the session. An
-  under-volted servo makes less torque per PWM count, so the holding duties and the
-  `--cerebellum-ff-max` clamp being reached on two joints are inflated by an unknown amount.
-  This page previously claimed the _comparison_ survived because both sides ran under the same
-  fault. That was wrong: the fault began partway through the session, so which side of it each run
-  fell on decides whether the effect is understated or overstated -- and the CSVs are gone, with
-  only a run-relative monotonic clock in them, so it can no longer be established either way. The
-  daemon now publishes the rail voltage into the same telemetry snapshot as the duty, and the
-  measurement CSV records it per sample alongside a wall clock, so a future run carries the
-  evidence needed to judge it.
+- **The cerebellum's droop numbers were retaken on 2026-09-08; the 2026-08-28 ones are withdrawn.**
+  The old session reported `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00 and
+  `shoulder_lift` 12.57 -> 3.00 counts of droop at unchanged K. Do not rely on any of it.
+  `shoulder_pan`'s power stage had shorted, and writing to it pulled the shared rail from 4.6 V to
+  2.4 V for ~820 ms. This page previously claimed the _comparison_ survived because both sides ran
+  under the same fault. That was wrong: the fault began partway through the session, so which side
+  of it each run fell on decides the direction of the effect -- and the CSVs are gone.
+  **The retaken numbers** (rail mean 4.52 V, min 4.50 V; one pose file across all runs; K
+  unchanged; two stereo cameras carried on the wrist): droop of `shoulder_lift` 5.00 -> 1.02 and
+  `elbow_flex` 21.00 -> 1.00 counts, against baselines where `err = pwm / K` held to the decimal
+  (100/20, 315/15, sd 0.00). **The instrument for a holding duty is the cerebellum-off droop, not
+  the ff readout** -- ff becomes path-dependent depending on `--cerebellum-cf-deadband`. And the
+  `--cerebellum-ff-max` clamp being reached on two joints **was not inflated**: on a healthy rail
+  `elbow_flex` still asks for 315 and still hits the 300 clamp. **A clamp that binds in normal
+  operation cannot tell normal from abnormal**, so it needs re-siting -- not yet done, because 315
+  is one pose's number and the legitimate maximum across poses is unmeasured.
 - **The feedforward decayed instead of settling. Fixed; the fix is unmeasured.** In both learning
   runs it bled away with a time constant of minutes while the joint sat perfectly still, then
   snapped back to the clamp once the arm finally slipped. The cause was the rule, not the arm: the
@@ -216,10 +217,15 @@ registers nor the feature matching said that much.
   `w = cf / leak` -- weights that need a standing error to hold them up. The residual that leaves is
   under a PWM count, narrower than the stick band, and inside that band the joint cannot move to
   report the error at all. Both halves are now gated on a live climbing fibre, and
-  `--cerebellum-cf-deadband` (default 5.0) sets where the reflex counts as silent. That default is
-  derived rather than measured -- above the leak's residual, below one encoder count times the joint
-  stiffness -- so it wants confirming on a healthy arm; `0` restores the old behaviour for an A/B
-  inside one session. Whether the stick band is a property of the gearboxes or an artefact of the
+  `--cerebellum-cf-deadband` (default 5.0) sets where the reflex counts as silent. **That default was measured on a
+  healthy arm on 2026-09-08 and is too low.** It was derived as "above the leak's residual, below one
+  encoder count times the joint stiffness" -- but position is quantised and the error never reaches
+  zero. `wrist_flex` (K=10) alternates between +/-2 counts, so its feedback duty never drops below
+  20 and never enters a band of 5; the ff hunted between 0 and 126 with a **69-second period**.
+  Raising it to 25 removes the oscillation entirely (0.2 counts over 173 s, and within 4% of the
+  true load) -- but the ff then freezes the moment the error enters the band, so **it stops being a
+  measurement of the load and becomes a function of how far the transient got**. Which way to settle
+  it is undecided. `0` restores the old behaviour. Whether the stick band is a property of the gearboxes or an artefact of the
   supply collapsing is still what the re-measurement has to separate.
 - **Touch stops at how hard, not where or whether it is slipping.** A compliant fingertip turns grip
   force into encoder counts, and that is the whole of the tactile sense here: one scalar per jaw,
