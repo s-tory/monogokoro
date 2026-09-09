@@ -1,4 +1,4 @@
-# MONOGOKORO — details
+# ものごころ/MONOGOKORO, Thinks of Things, 物心 — details
 
 ← back to [README_EN.md](README_EN.md)
 

@@ -1,4 +1,4 @@
-# ものごころ — 詳細
+# ものごころ/MONOGOKORO, Thinks of Things, 物心 — 詳細
 
 ← [README.md](README.md) に戻る
 

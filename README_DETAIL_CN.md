@@ -1,4 +1,4 @@
-# MONOGOKORO — 详细
+# ものごころ/MONOGOKORO, Thinks of Things, 物心 — 详细
 
 ← 返回 [README_CN.md](README_CN.md)
 
