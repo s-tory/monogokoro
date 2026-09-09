@@ -234,8 +234,16 @@ registers nor the feature matching said that much.
   Raising it to 25 removes the oscillation entirely (0.2 counts over 173 s, and within 4% of the
   true load) -- but the ff then freezes the moment the error enters the band, so **it stops being a
   measurement of the load and becomes a function of how far the transient got**. Which way to settle
-  it is undecided. `0` restores the old behaviour. Whether the stick band is a property of the gearboxes or an artefact of the
-  supply collapsing is still what the re-measurement has to separate.
+  it is undecided. `0` restores the old behaviour. ~~Whether the stick band is a property of the
+  gearboxes or an artefact of the supply collapsing is still what the re-measurement has to
+  separate.~~ **Separated on 2026-09-09: the band appears on a healthy rail (4.44-4.51 V mean,
+  4.40 V min), so it is not an artefact of the supply.** Its width is now measured -- approaching
+  one target from above and from below leaves `shoulder_lift` resting 18.0 counts apart (duty 120
+  vs 480) and `elbow_flex` 12.9 counts apart (duty 300 vs 106). **The band is the same order as the
+  holding duty it brackets**, and four runs at identical settings, every one at sd 0.00, put that
+  duty at 100/180/200/255. **Neither `err = pwm/K` holding nor sd 0.00 is evidence of balance**:
+  the first is an identity when only a PD law is in the path, and the second says the arm is
+  stationary, which stiction produces as readily as balance.
 - **Touch stops at how hard, not where or whether it is slipping.** A compliant fingertip turns grip
   force into encoder counts, and that is the whole of the tactile sense here: one scalar per jaw,
   available to the reflex at 400 Hz. Where on the finger contact happened, and the micro-vibration
@@ -253,6 +261,18 @@ registers nor the feature matching said that much.
   fixing the first half; deriving stiffness from cross-demonstration variance is the likely next.
 - **Open-loop PWM** is noisier than true torque control -- the STS3215 has no host-streamable torque
   register, so this is a constraint of the hardware rather than a choice.
+- **The bus produces comms errors while driving: 0% to 43% of samples across runs at identical
+  settings. Cause unsettled.** Only visible since `fault_flags` was logged on 2026-09-09. The errors
+  arrive in bursts of a fixed **~800 ms** (39-41 samples at 20 ms), 75% of which start within 60 ms
+  of a PWM saturation. A burst past `--max-blind-ticks` zeroes the duty and the arm falls, which in
+  the duty columns is indistinguishable from a gain that is merely too soft -- and was read as
+  exactly that. **With the arm limp the rate is 0.00% on the same hardware**, so the trigger is the
+  drive, not the bus at rest. `--current-read-divisor 4` cuts tick time 16% and leaves the rate
+  unchanged, so it is not congestion; `--serial-timeout-ms 2` makes it **worse** (2 ms cuts replies
+  that were going to arrive, and a late reply is read as the answer to the next question). The
+  800 ms matches `Protection_Time`/`Over_Current_Protection_Time`, both 200 on every motor, if that
+  register counts in 4 ms units -- **unverified**, and if true it means the servo's own overload
+  protection fires in PWM mode. **Every number measured here sits on top of this.**
 - **The daemon is not part of the Python build.** It is a separate Cargo project, deployed by hand.
 - **Interactive calibration and `setup-motors`** are not implemented for the impedance robot. Run
   both with the stock `so101_follower` against the same servos, then copy the calibration across --

@@ -26,7 +26,10 @@ Open-loop PWM, because the STS3215 exposes no host-streamable torque register. N
 torque control, and an accepted trade-off rather than a hidden one.
 
 Loop rate is bounded by the servo link, not the CPU: three bus transactions per tick at ~256 µs of
-USB round trip each is ~0.8 ms against a 2.5 ms period. Beyond 400 Hz there is nothing to gain --
+USB round trip each is ~0.8 ms against a 2.5 ms period. **The measured tick is longer**: 1.1-1.5 ms
+mean over intervals with a healthy bus (2026-09-09, defaults; 1.1 ms with
+`--current-read-divisor 4`), so about 1.5x the figure above, with the margin still intact.
+Beyond 400 Hz there is nothing to gain --
 what limits how the arm feels is open-loop PWM and gearbox friction, and 400 Hz is already far past
 the arm's mechanical bandwidth.
 

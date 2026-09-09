@@ -190,6 +190,20 @@ _rejecting_ side has never run on hardware, because it takes a fault to produce;
 unit tests against the measured misreports and nothing more. And folding the envelope moves which
 readings are impossible: `shoulder_pan`'s whole-turn misreports of 0, 3, 10 and 4094 counts, all
 refused in position mode, are ordinary raw positions for that joint and would pass in a driven run.
+
+That run's zero comms errors is not the general case, and 2026-09-09 says so. Driving the arm to a
+held pose produced comms error rates between **0% and 43% of samples across runs at identical
+settings**, and the errors arrive in bursts of a fixed **~800 ms** (39-41 samples at 20 ms), 75% of
+which begin within 60 ms of a PWM saturation. A burst blinds the loop past `--max-blind-ticks` and
+the duty drops to zero, so the arm falls -- which in the duty columns is indistinguishable from a
+gain that is simply too soft, and was mistaken for exactly that until `fault_flags` was logged.
+With the arm limp the rate is 0.00% on the same hardware, so the trigger is the drive, not the bus
+at rest. Cause unsettled: `--current-read-divisor 4` cuts tick time 16% and changes the rate not at
+all, which rules out congestion, and `--serial-timeout-ms 2` makes it worse (2 ms cuts replies that
+were going to arrive, and a late reply is read as the answer to the next question). The 800 ms
+matches `Protection_Time`/`Over_Current_Protection_Time`, both 200 on every motor, if that register
+counts in 4 ms units -- unverified, and it would mean the servo's own overload protection is firing
+in PWM mode.
 1269 counts of its circle stay impossible, not the same 1269 counts.
 
 The mode switch itself is visible in the log as a one-tick position step of exactly each joint's
