@@ -104,7 +104,9 @@ first. They came out of this project's own mistakes, but none of them are specif
   the claims your change just touched and ask whether any of them became false. Adding a section
   for every change is how docs stop being readable; deleting and correcting is the normal case.
   When you withdraw a number, leave what it used to say and why it was wrong — readers remember
-  the old version.
+  the old version. The docs are three languages deep and each is self-contained, so a term settled
+  in one of them is a term owed to the other two: [`GLOSSARY.md`](./GLOSSARY.md) carries the
+  wording, which translations were rejected, and whether anyone has actually checked them.
 
 ## Tech Stack
 
