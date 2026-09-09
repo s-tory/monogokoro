@@ -1,5 +1,7 @@
 # ものごころ/MONOGOKORO, Thinks of Things, 物心 — 详细
 
+[日本語](README_DETAIL.md) | [English](README_DETAIL_EN.md) | **简体中文**
+
 ← 返回 [README_CN.md](README_CN.md)
 
 README 中「这个 fork 增加了什么」的分层详述，以及「实测值而非假设」中的 A/B 测量。

@@ -1,5 +1,7 @@
 # ものごころ/MONOGOKORO, Thinks of Things, 物心 — 詳細
 
+**日本語** | [English](README_DETAIL_EN.md) | [简体中文](README_DETAIL_CN.md)
+
 ← [README.md](README.md) に戻る
 
 README の「このフォークが追加するもの」と「実測値であって仮定ではない」の詳細部分。層ごとの深掘りと、レイテンシの A/B 測定を置いている。

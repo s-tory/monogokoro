@@ -1,5 +1,7 @@
 # ものごころ/MONOGOKORO, Thinks of Things, 物心 — details
 
+[日本語](README_DETAIL.md) | **English** | [简体中文](README_DETAIL_CN.md)
+
 ← back to [README_EN.md](README_EN.md)
 
 The long half of the README: the per-layer write-ups from "What this fork adds", and the A/B latency work from "Measured, not assumed".
