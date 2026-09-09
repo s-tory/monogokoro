@@ -14,8 +14,9 @@ use shared_memory::ShmemConf;
 use nix::unistd::{Gid, Uid};
 use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConfig, SensoryState};
 use so101_impedance_ctrl::control::{
-    apply_soft_limits, apply_startup_config, finite_difference_velocity, first_outside_travel,
-    impedance_pwm, input_is_fresh, log_supply_and_temperature, poll_and_apply_commands,
+    apply_soft_limits, apply_startup_config, apply_tendon_inhibition, finite_difference_velocity,
+    first_outside_travel, impedance_pwm, input_is_fresh, log_supply_and_temperature,
+    poll_and_apply_commands,
     read_homing_offsets, read_position_frames, read_supply_and_temperature, read_travel_envelopes,
     release_all,
     wrapped_delta, MovingAverage, PositionFrame, PositionGate, TravelEnvelope,
@@ -144,6 +145,23 @@ struct Cli {
     /// If no fresh input is received within this window, PWM output is zeroed (fail-safe).
     #[arg(long, default_value_t = 75)]
     watchdog_timeout_ms: u64,
+
+    /// Golgi tendon organ / foldback current limiting: the current above which the command starts
+    /// being reduced, in `Present_Current` counts. Zero (the default) disables the term.
+    ///
+    /// This is the loop's only release path for a saturated duty against a joint that cannot move --
+    /// see `control::apply_tendon_inhibition` for why position limits and the watchdog do not cover
+    /// it. It ships off because the threshold is a *measurement* that has not been taken: currents
+    /// here are a property of pose x load x supply x servo, and only one pose has ever been logged
+    /// (`elbow_flex` drew 25.4 counts holding 315 duty on 2026-09-08). A guessed threshold either
+    /// vetoes a legitimate holding duty or never fires.
+    #[arg(long, default_value_t = 0.0)]
+    tendon_inhibition_current: f32,
+
+    /// Duty removed per count of current above `--tendon-inhibition-current`. Zero (the default)
+    /// disables the term. Both have to be positive for any inhibition to happen.
+    #[arg(long, default_value_t = 0.0)]
+    tendon_inhibition_gain: f32,
 
     #[arg(long, default_value_t = 1000.0)]
     pwm_max: f32,
@@ -728,7 +746,7 @@ fn main() {
          vel_filter_window={} pos_limits=[{}, {}] max_blind_ticks={} max_pos_slew={} \
          watchdog_ms={} \
          serial_timeout_ms={} leader_port={:?} force_feedback_gain={} force_feedback_damping={} \
-         leader_pwm_max={}",
+         leader_pwm_max={} tendon_inhibition_current={} tendon_inhibition_gain={}",
         args.invert_pwm,
         args.pwm_sign_bit,
         args.loop_hz,
@@ -746,6 +764,8 @@ fn main() {
         args.force_feedback_gain,
         args.force_feedback_damping,
         args.leader_pwm_max,
+        args.tendon_inhibition_current,
+        args.tendon_inhibition_gain,
     );
     log::info!(
         "cerebellum config: backend={:?} gc_dim={} seed={:#x} hz={} rate={} leak={} cf_deadband={} sparsity={} \
@@ -1227,6 +1247,10 @@ fn main() {
         // teaching signal never reach zero, and it would learn until it saturated.
         let mut fb_pwm = [0f32; NUM_MOTORS];
         let mut pwm_cmd = [0f32; NUM_MOTORS];
+        // Reported per tick, not latched, for the same reason the term itself does not latch: a
+        // flag that stayed set would say "this run inhibited something" when the question is
+        // "is it inhibiting now". The CSV column keeps the history.
+        let mut tendon_inhibited = false;
         let mut sync_values: Vec<(u8, u32)> = Vec::with_capacity(NUM_MOTORS);
         for i in 0..NUM_MOTORS {
             pwm_cmd[i] = if safe {
@@ -1243,8 +1267,19 @@ fn main() {
                 // be too. Soft limits are applied last so they still veto a feedforward that would
                 // drive a joint further past its limit.
                 let total = (fb_pwm[i] + ff_pwm[i]).clamp(-args.pwm_max, args.pwm_max);
-                apply_soft_limits(
+                // Ib inhibition goes between the clamp and the limits: it answers force where they
+                // answer position, and the comment above is why they have to stay last.
+                let folded = apply_tendon_inhibition(
                     total,
+                    present_current[i],
+                    args.tendon_inhibition_current,
+                    args.tendon_inhibition_gain,
+                );
+                if folded != total {
+                    tendon_inhibited = true;
+                }
+                apply_soft_limits(
+                    folded,
                     present_pos[i],
                     args.pos_min,
                     args.pos_max,
@@ -1317,6 +1352,9 @@ fn main() {
         }
         if past_limits {
             fault_flags |= shm::FAULT_POS_LIMIT;
+        }
+        if tendon_inhibited {
+            fault_flags |= shm::FAULT_TENDON_INHIBITION;
         }
 
         shm::seqlock_write(&layout.output.seq, &mut layout.output.data, |o| {

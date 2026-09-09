@@ -232,6 +232,61 @@ impl PositionGate {
 /// been seen inside the limits at all since startup: there is no observation to appeal to, so this
 /// falls back to the raw rule, which is right whenever the travel does not cross the seam and
 /// declines to guess when it does.
+/// Ib inhibition: reduces the command in proportion to how far the measured current exceeds
+/// `threshold`, and does nothing at all below it.
+///
+/// This is the release path the rest of the loop does not have. A PD law against a joint that
+/// cannot move -- a mechanical stop, a jam, the arm's own weight -- keeps a standing error, so the
+/// duty stays saturated and stall current keeps flowing. `apply_soft_limits` only answers *position*
+/// and the watchdog only answers *silence from Python*; neither looks at force. So nothing inside
+/// the loop takes the command back, and the arm is rescued only from outside it: by a human, or by
+/// the watchdog zeroing everything. An output that is saturated with no in-loop release is the
+/// definition of a cramp, and this daemon shipped one.
+///
+/// Biology's release path for exactly this failure is the Golgi tendon organ, which measures
+/// *tension* (the spindle measures length) and inhibits the same muscle's alpha motor neurons via
+/// the Ib interneuron. Two of its properties are the ones worth copying, and both are about what it
+/// does *not* do:
+///
+///   * **It does not latch.** Inhibition tracks present tension, so it releases the moment tension
+///     does. A protection that has to be cleared is another cramp under a different name.
+///   * **It does nothing below threshold.** In a shortened muscle the tendon is slack and Ib is not
+///     firing, which is why cramps happen in that position. The same shape here leaves a legitimate
+///     holding duty untouched: on 2026-09-08 `elbow_flex` needed 315 duty and drew 25.4 counts of
+///     current to hold a pose 20-30 cm off the table, so any threshold above that never sees it.
+///
+/// Control engineering found the same shape independently and calls it foldback current limiting:
+/// past a knee, *reduce* the output rather than merely cap it. Capping is what `--pwm-max` already
+/// does, and capping is what produces the latch.
+///
+/// The magnitude floors at zero and the sign is never flipped: inhibition weakens a muscle, it does
+/// not drive it the other way.
+///
+/// Identity unless both `threshold` and `gain` are positive and finite, and there is deliberately
+/// no default for either. The threshold is a current, currents on this arm are a property of pose x
+/// load x supply x servo, and exactly one pose has been measured. Filling the blank with a
+/// plausible number is how a protection ends up vetoing normal operation instead of a fault.
+///
+/// Not addressed here: inhibiting the duty lowers the current, which lowers the inhibition. Whether
+/// that settles or hunts depends on the joint's mechanics and on this signal's own lag
+/// (`Present_Current` is read round-robin, one motor per tick, then averaged over a fixed window),
+/// and neither is measured. Hysteresis is the usual answer and is left out until a run actually
+/// shows a limit cycle -- adding it now would mean inventing a second constant for a problem nobody
+/// has seen.
+pub fn apply_tendon_inhibition(pwm: f32, current_avg: f32, threshold: f32, gain: f32) -> f32 {
+    // Finiteness is checked before the sign, so a NaN disables the term rather than propagating
+    // into the command: a bare `threshold <= 0.0` is false for NaN and would let it through.
+    if !threshold.is_finite() || !gain.is_finite() || threshold <= 0.0 || gain <= 0.0 {
+        return pwm;
+    }
+    let excess = current_avg.abs() - threshold;
+    if excess.is_nan() || excess <= 0.0 {
+        return pwm;
+    }
+    let magnitude = (pwm.abs() - gain * excess).max(0.0);
+    magnitude * pwm.signum()
+}
+
 pub fn apply_soft_limits(
     pwm: f32,
     present_pos: f32,

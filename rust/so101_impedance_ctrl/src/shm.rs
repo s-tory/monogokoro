@@ -124,6 +124,11 @@ pub const FAULT_LEADER_COMMS_ERROR: u32 = 1 << 3;
 /// otherwise indistinguishable from several unrelated ones: a joint the limits are holding at zero
 /// PWM looks exactly like the watchdog, a blind run, or a gain that is simply too soft.
 pub const FAULT_POS_LIMIT: u32 = 1 << 4;
+/// Ib inhibition reduced at least one joint's command this tick. Not an error: it means the
+/// protection is doing its job, and the duty columns for that tick are a folded-back command rather
+/// than what the control law asked for. Without this bit an inhibited run and a soft gain look
+/// identical from outside, which is the same hole `FAULT_POS_LIMIT` exists to close.
+pub const FAULT_TENDON_INHIBITION: u32 = 1 << 5;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

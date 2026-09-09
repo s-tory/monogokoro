@@ -68,12 +68,21 @@ FAULT_LEADER_COMMS_ERROR = 1 << 3
 # joint the limits are holding at zero PWM looks exactly like the watchdog, a blind run, or a gain
 # that is simply too soft.
 FAULT_POS_LIMIT = 1 << 4
+# Ib inhibition folded back at least one joint's command this tick -- the protection working, not an
+# error. Mirrors shm.rs's FAULT_TENDON_INHIBITION. Set per tick, never latched, because the question
+# it answers is "is it inhibiting now"; the CSV column is what keeps the history.
+FAULT_TENDON_INHIBITION = 1 << 5
 
 _FAULT_NAMES: tuple[tuple[int, str], ...] = (
     (FAULT_WATCHDOG_TIMEOUT, "watchdog_timeout (no fresh input from Python -- PWM held at zero)"),
     (FAULT_COMMS_ERROR, "comms_error (a register read/write to a servo failed)"),
     (FAULT_OVERCURRENT, "overcurrent"),
     (FAULT_LEADER_COMMS_ERROR, "leader_comms_error (force feedback dropped; the follower is unaffected)"),
+    (
+        FAULT_TENDON_INHIBITION,
+        "tendon_inhibition (Ib folded back a saturated command; the duty columns for this tick are "
+        "the reduced command, not what the control law asked for)",
+    ),
     (
         FAULT_POS_LIMIT,
         "pos_limit (a joint is outside --pos-min/--pos-max; it is driven back only toward "

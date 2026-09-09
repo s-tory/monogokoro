@@ -2,9 +2,9 @@
 //! shared memory involved.
 
 use so101_impedance_ctrl::control::{
-    apply_soft_limits, finite_difference_velocity, first_implausible_step, first_outside_travel,
-    impedance_pwm, input_is_fresh, MovingAverage, PositionFrame, PositionGate, TravelEnvelope,
-    TravelVerdict,
+    apply_soft_limits, apply_tendon_inhibition, finite_difference_velocity, first_implausible_step,
+    first_outside_travel, impedance_pwm, input_is_fresh, MovingAverage, PositionFrame, PositionGate,
+    TravelEnvelope, TravelVerdict,
 };
 
 /// One tick's worth of budget at the shipped defaults: 20000 counts/s at 400 Hz.
@@ -588,5 +588,74 @@ fn every_raw_envelope_on_this_arm_crosses_the_seam() {
         let Some(envelope) = envelope else { continue };
         let (low, high) = envelope.band(PositionFrame::Raw);
         assert!(low > high, "motor {motor}: raw band {low}-{high} does not wrap");
+    }
+}
+
+
+/// The measured holding duty has to survive untouched. On 2026-09-08 `elbow_flex` held a pose
+/// 20-30 cm off the table at 315 duty while drawing 25.4 counts of current -- a legitimate standing
+/// load, not a fault. If a threshold above that current changed the command at all, the protection
+/// would be vetoing the thing the arm is for.
+#[test]
+fn a_measured_holding_duty_is_left_alone() {
+    assert_eq!(apply_tendon_inhibition(315.0, 25.4, 50.0, 1.0), 315.0);
+    // At the knee exactly, too: the comparison is strict, so the threshold is not a cliff edge.
+    assert_eq!(apply_tendon_inhibition(315.0, 50.0, 50.0, 1.0), 315.0);
+}
+
+/// Past the knee the command folds back in proportion to the excess rather than stepping to zero.
+/// 91 counts is the peak the gripper drew stalled against a wood block at 450 duty on 2026-09-03 --
+/// the run that could not answer whether the servo's own protection fires in PWM mode.
+#[test]
+fn past_the_knee_the_command_folds_back_in_proportion() {
+    // excess = 91 - 50 = 41, gain 2.0 -> 82 taken off a 450 command.
+    assert_eq!(apply_tendon_inhibition(450.0, 91.0, 50.0, 2.0), 368.0);
+    // The command's sign changes what is returned, not how much is taken off.
+    assert_eq!(apply_tendon_inhibition(-450.0, 91.0, 50.0, 2.0), -368.0);
+    // Current is a magnitude here: the register's sign says which way the servo is loaded, which is
+    // not what the tendon organ reports.
+    assert_eq!(apply_tendon_inhibition(450.0, -91.0, 50.0, 2.0), 368.0);
+}
+
+/// Inhibition weakens a muscle; it never drives it the other way. A gain big enough to overshoot has
+/// to floor at zero, because a sign flip here would turn a stall into a reversal under load.
+#[test]
+fn inhibition_floors_at_zero_and_never_reverses_the_sign() {
+    assert_eq!(apply_tendon_inhibition(100.0, 200.0, 50.0, 10.0), 0.0);
+    assert_eq!(apply_tendon_inhibition(-100.0, 200.0, 50.0, 10.0), 0.0);
+}
+
+/// The property that separates this from the cramp it exists to fix: nothing is remembered. The full
+/// command returns on the same tick the current does -- no clearing step, no cooldown, no state to
+/// get stuck in. A protection that had to be reset would be the same failure under a new name, since
+/// the release path would once again live outside the loop.
+#[test]
+fn inhibition_does_not_latch() {
+    let (pwm, threshold, gain) = (400.0, 50.0, 2.0);
+    assert_eq!(apply_tendon_inhibition(pwm, 150.0, threshold, gain), 200.0);
+    // Current drops back under the knee on the very next sample: full command, immediately.
+    assert_eq!(apply_tendon_inhibition(pwm, 20.0, threshold, gain), pwm);
+}
+
+/// Off unless both numbers are real and positive. NaN is in the list because a `<= 0.0` guard would
+/// pass it through and hand the servo a NaN duty: the threshold is unmeasured, so every shape of
+/// "no number yet" has to mean off.
+#[test]
+fn a_missing_threshold_or_gain_disables_the_term() {
+    for (threshold, gain) in [
+        (0.0, 2.0),
+        (50.0, 0.0),
+        (-50.0, 2.0),
+        (50.0, -2.0),
+        (f32::NAN, 2.0),
+        (50.0, f32::NAN),
+        (f32::INFINITY, 2.0),
+        (50.0, f32::INFINITY),
+    ] {
+        assert_eq!(
+            apply_tendon_inhibition(450.0, 1000.0, threshold, gain),
+            450.0,
+            "threshold={threshold} gain={gain} must disable the term"
+        );
     }
 }
