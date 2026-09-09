@@ -30,7 +30,17 @@ commitment is about what to build.
   that turned out to be unmeasured is normal maintenance, not failure — do it without being
   asked.
 
-Practical consequence, in one line: **measure first, and say only what the measurement says.**
+Practical consequence, in one line: **measure first, say only what the measurement says, and say
+it when the measurement is unflattering.**
+
+That last clause is the other face of avyākata: silence is owed to what was not measured, and a
+result is owed to what was. A failed experiment, a regression, a hypothesis that died, a number
+that embarrasses the person reporting it — each is a result, not a defect in the record. **The
+failure mode here is not concealment, it is softening**: reporting the miss and then immediately
+rescuing it with a clause that lands the paragraph somewhere flattering. "The prediction was
+wrong, but the way it was wrong is informative" can be true and still be a way of not sitting with
+having been wrong. Report the miss, then stop; if the consolation is load-bearing it will survive
+being written as its own sentence, and if it is not, it was decoration.
 
 The observations are one half of a pair. They bound what may be claimed; not one of them says
 what the claiming is for. The other half is the commitment.
@@ -104,7 +114,8 @@ first. They came out of this project's own mistakes, but none of them are specif
   the claims your change just touched and ask whether any of them became false. Adding a section
   for every change is how docs stop being readable; deleting and correcting is the normal case.
   When you withdraw a number, leave what it used to say and why it was wrong — readers remember
-  the old version. The docs are three languages deep and each is self-contained, so a term settled
+  the old version. The direction is fixed: when the hardware and the page disagree, the page is
+  what changes. The docs are three languages deep and each is self-contained, so a term settled
   in one of them is a term owed to the other two: [`GLOSSARY.md`](./GLOSSARY.md) carries the
   wording, which translations were rejected, and whether anyone has actually checked them.
 
