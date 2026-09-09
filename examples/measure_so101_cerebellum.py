@@ -166,6 +166,12 @@ def cmd_capture(args) -> None:
 
 def cmd_hold(args) -> None:
     pose = _load_pose(args.pose_file)
+    # Approaching the same target from two sides is the only way to separate a joint that is
+    # balanced from one that is stuck: static friction lets the arm stop anywhere inside a band, and
+    # a single approach cannot say where in that band it landed. Ramping straight back down at the
+    # end of a run (see the `finally` below) means two consecutive runs both start from the resting
+    # pose, so the second approach has to happen inside one process.
+    approach = _load_pose(args.approach_from) if args.approach_from else None
 
     k, d = _as_dict(args.k), _as_dict(args.d)
     rows, stop = [], False
@@ -189,15 +195,39 @@ def cmd_hold(args) -> None:
         print(checker.describe_cerebellum())
 
         t0 = time.monotonic()
-        total = args.ramp + args.seconds
+        # start -> approach -> settle -> pose -> hold. Without `--approach-from` the first two
+        # stages have zero length and the timeline is the original one.
+        t_settle_start = args.ramp if approach else 0.0
+        t_settle_end = t_settle_start + (args.settle if approach else 0.0)
+        t_hold_start = t_settle_end + (args.ramp if approach else 0.0)
+        total = t_hold_start + args.seconds
         try:
             while not stop:
                 t = time.monotonic() - t0
                 if t >= total:
                     break
+
                 # Ramp in, then hold. A step onto a compliant arm saturates PWM; a ramp does not.
-                frac = min(1.0, t / args.ramp) if args.ramp > 0 else 1.0
-                target = {m: start[m] + (pose[m] - start[m]) * frac for m in MOTOR_NAMES}
+                def _lerp(a, b, frac):
+                    return {m: a[m] + (b[m] - a[m]) * frac for m in MOTOR_NAMES}
+
+                if approach is None:
+                    frac = min(1.0, t / args.ramp) if args.ramp > 0 else 1.0
+                    target = _lerp(start, pose, frac)
+                    phase = "ramp" if frac < 1.0 else "hold"
+                elif t < t_settle_start:
+                    target = _lerp(start, approach, t / args.ramp if args.ramp > 0 else 1.0)
+                    phase = "approach"
+                elif t < t_settle_end:
+                    target = dict(approach)
+                    phase = "settle"
+                elif t < t_hold_start:
+                    frac = (t - t_settle_end) / args.ramp if args.ramp > 0 else 1.0
+                    target = _lerp(approach, pose, min(1.0, frac))
+                    phase = "ramp"
+                else:
+                    target = dict(pose)
+                    phase = "hold"
                 checker.move_to(target, k=k, d=d)
 
                 state = checker.read_state()
@@ -207,7 +237,7 @@ def cmd_hold(args) -> None:
                 row = {
                     "wall": datetime.now(UTC).astimezone().isoformat(timespec="milliseconds"),
                     "t": t,
-                    "phase": "ramp" if frac < 1.0 else "hold",
+                    "phase": phase,
                 }
                 # Logged every sample, next to the duty it explains. An under-volted arm needs more
                 # duty to hold the same pose, so a droop number without a concurrent rail reading
@@ -395,6 +425,16 @@ def main() -> None:
     h = sub.add_parser("hold", help="Hold the stored pose and log the droop.")
     h.add_argument("--shm-name", default="so101_impedance")
     h.add_argument("--pose-file", default="pose.json")
+    h.add_argument(
+        "--approach-from",
+        default=None,
+        help="Pose file to settle on first, so the target is reached from a chosen direction. "
+        "Use it with a pose above and a pose below the target: the gap between where the arm stops "
+        "in the two runs is the static-friction band, which a single approach cannot measure.",
+    )
+    h.add_argument(
+        "--settle", type=float, default=10.0, help="Seconds held at --approach-from before moving on."
+    )
     h.add_argument("--label", required=True)
     h.add_argument("--out", required=True)
     h.add_argument("--calibration", default=None)
