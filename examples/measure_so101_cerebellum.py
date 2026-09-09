@@ -77,6 +77,7 @@ from lerobot.robots.so101_impedance_follower.checker import (
 from lerobot.robots.so101_impedance_follower.config_so101_impedance_follower import (
     SO101ImpedanceFollowerConfig,
 )
+from lerobot.robots.so101_impedance_follower.shm_client import describe_fault_flags
 
 # The shipped per-joint gains, not a scalar. A single K/D is either too soft for the shoulder or
 # needlessly stiff everywhere else -- and an over-large D on a joint that holds nothing (wrist_roll)
@@ -215,6 +216,11 @@ def cmd_hold(args) -> None:
                 row["supply_v"] = supply["volts"] if supply else float("nan")
                 row["case_temp_c"] = supply["temp_c"] if supply else float("nan")
                 row["health_motor_id"] = supply["motor_id"] if supply else float("nan")
+                # Logged raw so a finished run can be re-read for faults nobody was looking for at
+                # the time. The watchdog bit is the one this rig can trip without anything else
+                # showing it: PWM held at zero is indistinguishable from a gain that is simply too
+                # soft if all you have is the duty columns.
+                row["fault_flags"] = checker.fault_flags
                 for m in MOTOR_NAMES:
                     s = state[m]
                     row[f"{m}.target"] = target[m]
@@ -282,6 +288,13 @@ def _summarise(rows: list[dict], args) -> dict:
     # measured. A `supply_min` well under `supply_mean` means this run's absolute numbers are not
     # comparable with anything else.
     volts = [r["supply_v"] for r in window if r["supply_v"] == r["supply_v"]]
+    # OR-ed over the *whole* run, ramp included, and counted separately from the window the duties
+    # come from. A single tripped sample is worth knowing about even when the window average looks
+    # clean, because every fault here changes what the duty columns mean.
+    faulted = [r["fault_flags"] for r in rows if r.get("fault_flags")]
+    faults_seen = 0
+    for f in faulted:
+        faults_seen |= f
     return {
         "label": args.label,
         "pose_file": args.pose_file,
@@ -292,6 +305,9 @@ def _summarise(rows: list[dict], args) -> dict:
         "ended_at": rows[-1]["wall"],
         "supply_mean_v": statistics.fmean(volts) if volts else None,
         "supply_min_v": min(volts) if volts else None,
+        "faults_seen": faults_seen,
+        "fault_samples": len(faulted),
+        "faults": describe_fault_flags(faults_seen),
         "motors": per_motor,
     }
 
@@ -309,6 +325,11 @@ def _print_summary(s: dict) -> None:
         sag = s["supply_mean_v"] - s["supply_min_v"]
         note = "  <-- the rail sagged; absolute duties from this run are not comparable" if sag >= 0.3 else ""
         print(f"supply: mean {s['supply_mean_v']:.2f} V, min {s['supply_min_v']:.2f} V{note}")
+    # `.get` because a summary written before this field existed is still readable by `compare`.
+    if s.get("faults_seen"):
+        print(f"faults: {s['fault_samples']} sample(s) with a flag set over the whole run")
+        for f in s["faults"]:
+            print(f"  - {f}")
     print(f"{'motor':<14}{'K':>6}{'err':>10}{'|err|':>9}{'sd':>7}{'pwm':>9}{'ff':>9}{'cur':>8}")
     print("-" * 72)
     for m, v in s["motors"].items():

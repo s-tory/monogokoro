@@ -69,6 +69,29 @@ FAULT_LEADER_COMMS_ERROR = 1 << 3
 # that is simply too soft.
 FAULT_POS_LIMIT = 1 << 4
 
+_FAULT_NAMES: tuple[tuple[int, str], ...] = (
+    (FAULT_WATCHDOG_TIMEOUT, "watchdog_timeout (no fresh input from Python -- PWM held at zero)"),
+    (FAULT_COMMS_ERROR, "comms_error (a register read/write to a servo failed)"),
+    (FAULT_OVERCURRENT, "overcurrent"),
+    (FAULT_LEADER_COMMS_ERROR, "leader_comms_error (force feedback dropped; the follower is unaffected)"),
+    (
+        FAULT_POS_LIMIT,
+        "pos_limit (a joint is outside --pos-min/--pos-max; it is driven back only toward "
+        "where it was last seen in range, and not driven at all if it was never seen there)",
+    ),
+)
+
+
+def describe_fault_flags(flags: int) -> list[str]:
+    """Name the faults in a bitmask.
+
+    Takes the mask rather than reading it, so a mask recorded during a run (a CSV column, a summary
+    field) can be named afterwards. `SO101ImpedanceChecker.describe_faults` is the live-daemon
+    caller; anything reading a finished run calls this directly.
+    """
+    return [name for bit, name in _FAULT_NAMES if flags & bit]
+
+
 # `cerebellum_flags` bits, mirroring `cerebellum::mod`'s CEREBELLUM_* constants. They describe why
 # the feedforward is what it is, which is otherwise unanswerable from the outside: a zero
 # feedforward could mean "not learned yet", "gated off", "gone stale" or "the GPU died", and those

@@ -54,14 +54,10 @@ from .shm_client import (
     CEREBELLUM_FAULTED,
     CEREBELLUM_LEARNING,
     CEREBELLUM_STALE,
-    FAULT_COMMS_ERROR,
-    FAULT_LEADER_COMMS_ERROR,
-    FAULT_OVERCURRENT,
-    FAULT_POS_LIMIT,
-    FAULT_WATCHDOG_TIMEOUT,
     CommandKind,
     ImpedanceShmClient,
     ImpedanceShmClientError,
+    describe_fault_flags,
 )
 
 logger = logging.getLogger(__name__)
@@ -210,22 +206,7 @@ class SO101ImpedanceChecker:
         return self.client.read_output()["fault_flags"]
 
     def describe_faults(self) -> list[str]:
-        flags = self.fault_flags
-        faults = []
-        if flags & FAULT_WATCHDOG_TIMEOUT:
-            faults.append("watchdog_timeout (no fresh input from Python -- PWM held at zero)")
-        if flags & FAULT_COMMS_ERROR:
-            faults.append("comms_error (a register read/write to a servo failed)")
-        if flags & FAULT_OVERCURRENT:
-            faults.append("overcurrent")
-        if flags & FAULT_LEADER_COMMS_ERROR:
-            faults.append("leader_comms_error (force feedback dropped; the follower is unaffected)")
-        if flags & FAULT_POS_LIMIT:
-            faults.append(
-                "pos_limit (a joint is outside --pos-min/--pos-max; it is driven back only toward "
-                "where it was last seen in range, and not driven at all if it was never seen there)"
-            )
-        return faults
+        return describe_fault_flags(self.fault_flags)
 
     def describe_cerebellum(self) -> str:
         """One line on what the adaptive feedforward is doing, or why it is doing nothing.
