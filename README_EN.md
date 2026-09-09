@@ -203,13 +203,22 @@ registers nor the feature matching said that much.
   of it each run fell on decides the direction of the effect -- and the CSVs are gone.
   **The retaken numbers** (rail mean 4.52 V, min 4.50 V; one pose file across all runs; K
   unchanged; two stereo cameras carried on the wrist): droop of `shoulder_lift` 5.00 -> 1.02 and
-  `elbow_flex` 21.00 -> 1.00 counts, against baselines where `err = pwm / K` held to the decimal
-  (100/20, 315/15, sd 0.00). **The instrument for a holding duty is the cerebellum-off droop, not
-  the ff readout** -- ff becomes path-dependent depending on `--cerebellum-cf-deadband`. And the
-  `--cerebellum-ff-max` clamp being reached on two joints **was not inflated**: on a healthy rail
-  `elbow_flex` still asks for 315 and still hits the 300 clamp. **A clamp that binds in normal
-  operation cannot tell normal from abnormal**, so it needs re-siting -- not yet done, because 315
-  is one pose's number and the legitimate maximum across poses is unmeasured.
+  `elbow_flex` 21.00 -> 1.00 counts. ~~against baselines where `err = pwm / K` held to the decimal
+  (100/20, 315/15, sd 0.00). The instrument for a holding duty is the cerebellum-off droop~~ --
+  **both sentences were withdrawn on 2026-09-09.** `err = pwm / K` is an **identity** when nothing
+  but a PD law is in the path: it agreed to the decimal for arithmetic reasons, not physical ones.
+  And sd 0.00 only says the arm is stationary, which **stiction produces as readily as balance**.
+  Four runs at identical settings put `shoulder_lift`'s holding duty at 100 / 180 / 200 / 255, every
+  one of them at sd 0.00. **A holding duty is not a value but a band.** Measured by approaching the
+  same target from above and from below, that band is 18.0 counts wide on `shoulder_lift`
+  (duty 360) and 12.9 counts on `elbow_flex` (duty 194) -- **the same order as the holding duty it
+  brackets**. 100/315 is not the band's value; it is the edge reached from above (`--approach-from`,
+  2026-09-09, rail 4.40-4.51 V, case 26-32 C, 25% RH). The ff readout still becomes path-dependent
+  with `--cerebellum-cf-deadband`. And the `--cerebellum-ff-max` clamp being reached on two joints
+  **was not inflated**: on a healthy rail `elbow_flex` still asks for 315 and still hits the 300
+  clamp. **A clamp that binds in normal operation cannot tell normal from abnormal**, so it needs
+  re-siting -- not yet done, because 315 is one edge of one pose's band and the legitimate maximum
+  across poses is unmeasured.
 - **The feedforward decayed instead of settling. Fixed; the fix is unmeasured.** In both learning
   runs it bled away with a time constant of minutes while the joint sat perfectly still, then
   snapped back to the clamp once the arm finally slipped. The cause was the rule, not the arm: the
