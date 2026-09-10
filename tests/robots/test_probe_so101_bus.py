@@ -72,11 +72,12 @@ def _bus(reply: bytes):
     bus.port, bus.baud, bus.timeout = "fake", 1_000_000, 0.005
     bus.ser = FakeSerial(reply)
     bus.bad_checksums = 0
+    bus.servo_error = {}
     return bus
 
 
-def _status_packet(motor_id: int, params: list[int]) -> bytes:
-    body = [motor_id, len(params) + 2, 0, *params]
+def _status_packet(motor_id: int, params: list[int], error: int = 0) -> bytes:
+    body = [motor_id, len(params) + 2, error, *params]
     return bytes([0xFF, 0xFF, *body, (~sum(body)) & 0xFF])
 
 
@@ -84,6 +85,28 @@ def test_a_well_formed_reply_is_accepted():
     bus = _bus(_status_packet(6, [0x26, 0x09]))  # position 2342
     assert bus.read_register(6, probe.REG_PRESENT_POSITION) == 2342
     assert bus.bad_checksums == 0
+
+
+def test_the_servo_error_byte_is_collected_from_the_reply():
+    """The byte at offset 4 is the servo's own state, and it used to be read straight past.
+
+    Measured on this arm 2026-09-10: a supply dipping below the servos' `Min_Voltage_Limit`
+    raises bit0 on every motor at once, and the payload stays valid -- a servo in protection
+    still answers with its position. So the value must survive *and* the error must be
+    recorded; taking one at the cost of the other is what hid this for weeks.
+    """
+    bus = _bus(_status_packet(6, [0x26, 0x09], error=0x01))
+    assert bus.read_register(6, probe.REG_PRESENT_POSITION) == 2342
+    assert bus.servo_error[6] == 0x01
+
+
+def test_servo_error_bits_accumulate_across_reads():
+    """OR-ed, not overwritten: a bit that appeared on one read must not be erased by the next."""
+    bus = _bus(_status_packet(6, [0x26, 0x09], error=0x01))
+    bus.read_register(6, probe.REG_PRESENT_POSITION)
+    bus.ser = FakeSerial(_status_packet(6, [0x26, 0x09], error=0x04))
+    bus.read_register(6, probe.REG_PRESENT_POSITION)
+    assert bus.servo_error[6] == 0x05
 
 
 def test_a_corrupted_checksum_is_rejected_and_counted():

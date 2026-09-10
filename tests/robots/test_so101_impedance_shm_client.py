@@ -160,7 +160,7 @@ def test_shm_layout_size_matches_the_rust_struct():
     # catches someone who remembered to bump it. The Rust side asserts this same number in
     # tests/shm_layout_tests.rs; asserting it here too is what makes a one-sided edit fail on the
     # side that made it rather than on the next person's arm.
-    assert ctypes.sizeof(ShmLayout) == 336
+    assert ctypes.sizeof(ShmLayout) == 344
 
 
 def test_read_output_round_trips_values_from_a_simulated_daemon(shm_segment):
