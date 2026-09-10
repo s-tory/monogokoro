@@ -2039,7 +2039,11 @@ def test_molmoact2_pi05_style_precision_config():
     assert MolmoAct2Config().dtype == "bfloat16"
     assert MolmoAct2Config(dtype="float32").dtype == "float32"
 
-    with pytest.raises(ValueError, match="Unsupported dtype"):
+    # Two validators, two messages. `float64` is not a dtype any policy accepts, so
+    # PreTrainedConfig rejects it before MolmoAct2 ever sees it; `float16` is valid at that level
+    # and is rejected by this policy specifically. Asserting one message for both passed only
+    # while the base class did no dtype checking of its own.
+    with pytest.raises(ValueError, match="Invalid dtype"):
         MolmoAct2Config(dtype="float64")
 
     with pytest.raises(ValueError, match="Unsupported dtype"):
