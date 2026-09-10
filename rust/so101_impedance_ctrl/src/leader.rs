@@ -57,6 +57,15 @@ pub struct LeaderGripper {
 
 #[allow(clippy::too_many_arguments)]
 impl LeaderGripper {
+    /// Drains the leader bus's accumulated servo error byte -- see
+    /// [`FeetechBus::take_servo_error`]. Kept separate from the follower's rather than OR-ed with
+    /// it: the two arms are on different buses and different power supplies, so a bit that
+    /// appeared in a merged value would not say which arm was in trouble. The follower's supply is
+    /// the one measured to sag; whether the leader's does too is, as of 2026-09-10, unmeasured.
+    pub fn take_servo_error(&mut self) -> u8 {
+        self.bus.take_servo_error()
+    }
+
     /// Opens the leader's port and puts its gripper servo into PWM mode with torque enabled.
     ///
     /// Only the gripper is touched: the other five leader servos stay torque-off and backdrivable,

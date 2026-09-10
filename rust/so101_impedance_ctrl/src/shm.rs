@@ -10,7 +10,7 @@
 
 use std::sync::atomic::{fence, AtomicU32, Ordering};
 
-pub const LAYOUT_VERSION: u32 = 7;
+pub const LAYOUT_VERSION: u32 = 8;
 pub const SHM_MAGIC: u32 = 0x534F_3130; // ASCII "SO10"
 /// All 6 servos -- the 5 arm joints AND the gripper -- are impedance-controlled (K/D over PWM).
 /// A rigid position-mode gripper crushes anything it grips before it can sense resistance;
@@ -116,6 +116,13 @@ pub struct OutputData {
     /// faster voltmeter than anything else on this bus, and this field is how a run keeps what
     /// they said.
     pub servo_error: u32,
+    /// The same byte from the *leader* arm's bus, zero when no `--leader-port` was given.
+    ///
+    /// Separate from `servo_error` because the arms have separate buses and separate supplies. The
+    /// follower's 5 V brick is the one measured sagging under load; the leader is expected to be
+    /// clear of that because it is never commanded to hold torque -- expected, not measured, and
+    /// this field is what turns that into a measurement.
+    pub leader_servo_error: u32,
 }
 
 #[repr(C)]

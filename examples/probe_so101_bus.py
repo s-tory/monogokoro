@@ -92,6 +92,8 @@ try:
 except ImportError:  # pragma: no cover - the message is the point
     sys.exit("pyserial is required: pip install pyserial")
 
+from lerobot.robots.so101_impedance_follower.shm_client import describe_servo_error
+
 MOTOR_IDS = (1, 2, 3, 4, 5, 6)
 BROADCAST_ID = 0xFE
 INST_READ, INST_WRITE = 2, 3
@@ -137,6 +139,11 @@ class Bus:
     def __init__(self, port: str, baud: int, timeout: float):
         self.port, self.baud, self.timeout = port, baud, timeout
         self.ser = serial.Serial(port, baud, timeout=timeout)
+        # OR of the status error byte each servo reported, keyed by motor id. Every reply carries
+        # it and this tool read past it for months -- `reply[5]` is the payload, `reply[4]` is the
+        # servo saying how it is. Free to collect: no extra transaction, and it is the only signal
+        # here that comes from the servo's own judgement rather than from a register we asked for.
+        self.servo_error: dict[int, int] = {}
         # Replies rejected by the checksum. Not an error on its own -- a busy bus orphans packets
         # and the retry covers it -- but a count worth printing next to any number read under load.
         self.bad_checksums = 0
@@ -167,6 +174,7 @@ class Bus:
             if reply[-1] != (~sum(reply[2:-1])) & 0xFF:
                 self.bad_checksums += 1
                 continue
+            self.servo_error[motor_id] = self.servo_error.get(motor_id, 0) | reply[4]
             return reply[5] if size == 1 else reply[5] | (reply[6] << 8)
         return None
 
@@ -537,6 +545,25 @@ def cmd_protection(bus: Bus, args) -> None:
         else:
             print(f"motor {motor_id}: none of the SOFollower limits are present")
 
+    print()
+    if any(bus.servo_error.values()):
+        print()
+        print("Servo-reported error bytes, collected free from the replies above:")
+        for motor_id in MOTOR_IDS:
+            byte = bus.servo_error.get(motor_id, 0)
+            if byte:
+                print(f"  motor {motor_id}: {byte:#04x}  {', '.join(describe_servo_error(byte))}")
+        # The pattern is the diagnosis, not just the bit. Under-voltage is shared by everything on
+        # the rail; over-heat and over-load belong to one joint. So "all six" and "one alone" are
+        # different findings even when the byte is identical.
+        if all(bus.servo_error.get(m) for m in MOTOR_IDS):
+            print("  -> every motor at once: the supply, not any one servo.")
+        else:
+            print("  -> not every motor: look at the joints listed, not at the supply.")
+    else:
+        print()
+        print("No servo raised its error byte during these reads. Note this is a read at rest --")
+        print("the under-voltage trip this arm shows appears only while a joint is driving.")
     print()
     print("What this does and does not settle: these registers say what the servo has been told to")
     print("do about an overload. Whether its firmware acts on them while `Operating_Mode` is PWM (2)")

@@ -55,7 +55,7 @@ NUM_MOTORS = 6
 #     that picks things up and puts them down interleaves by itself.
 NUM_CONTEXT = 2
 
-LAYOUT_VERSION = 7
+LAYOUT_VERSION = 8
 SHM_MAGIC = 0x534F3130  # ASCII "SO10", matches shm::SHM_MAGIC in shm.rs
 
 FAULT_WATCHDOG_TIMEOUT = 1 << 0
@@ -225,6 +225,10 @@ class OutputData(ctypes.Structure):
         # Feetech reply carries it, so reading it adds no bus traffic. Raw rather than only a fault
         # bit because the byte names which protection tripped, and the answers differ.
         ("servo_error", ctypes.c_uint32),
+        # The same byte off the *leader* arm's bus, zero without --leader-port. Separate because the
+        # arms have separate buses and separate supplies: a merged value could not say which arm
+        # was in trouble.
+        ("leader_servo_error", ctypes.c_uint32),
     ]
 
 
@@ -437,6 +441,7 @@ class ImpedanceShmClient:
                 "case_temp_c": region.data.case_temp_c,
                 "health_motor_id": region.data.health_motor_id,
                 "servo_error": region.data.servo_error,
+                "leader_servo_error": region.data.leader_servo_error,
             }
             s2 = region.seq
             if s1 == s2:

@@ -1362,6 +1362,10 @@ fn main() {
         if servo_error != 0 {
             fault_flags |= shm::FAULT_SERVO_ERROR;
         }
+        let leader_servo_error = leader.as_mut().map_or(0, |l| l.take_servo_error());
+        if leader_servo_error != 0 {
+            fault_flags |= shm::FAULT_SERVO_ERROR;
+        }
 
         shm::seqlock_write(&layout.output.seq, &mut layout.output.data, |o| {
             o.timestamp_mono_ns = now_ns;
@@ -1379,6 +1383,7 @@ fn main() {
             o.case_temp_c = health_temp;
             o.health_motor_id = health_id;
             o.servo_error = servo_error as u32;
+            o.leader_servo_error = leader_servo_error as u32;
         });
 
         let shutdown_command = applied.is_some_and(|c| c.kind == shm::CommandKind::Shutdown as u32);
