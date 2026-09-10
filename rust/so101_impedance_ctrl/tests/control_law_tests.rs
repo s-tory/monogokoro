@@ -3,8 +3,8 @@
 
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_tendon_inhibition, finite_difference_velocity, first_implausible_step,
-    first_outside_travel, impedance_pwm, input_is_fresh, MovingAverage, PositionFrame, PositionGate,
-    TravelEnvelope, TravelVerdict,
+    first_outside_travel, impedance_pwm, input_is_fresh, MovingAverage, PositionFrame,
+    PositionGate, TravelEnvelope, TravelVerdict,
 };
 
 /// One tick's worth of budget at the shipped defaults: 20000 counts/s at 400 Hz.
@@ -356,12 +356,12 @@ fn without_history_the_raw_rule_still_applies() {
 fn measured_envelopes() -> [Option<TravelEnvelope>; 6] {
     let band = |lo: f32, hi: f32, offset: f32| TravelEnvelope::new(lo, hi, offset, 200.0);
     [
-        band(859.0, 3285.0, 1739.0),   // shoulder_pan
-        band(946.0, 3343.0, -1242.0),  // shoulder_lift
-        band(783.0, 2940.0, 1484.0),   // elbow_flex
-        band(872.0, 3263.0, -1917.0),  // wrist_flex
-        band(0.0, 4095.0, 1932.0),     // wrist_roll: 0-4095, no constraint
-        band(1992.0, 3566.0, 1867.0),  // gripper
+        band(859.0, 3285.0, 1739.0),  // shoulder_pan
+        band(946.0, 3343.0, -1242.0), // shoulder_lift
+        band(783.0, 2940.0, 1484.0),  // elbow_flex
+        band(872.0, 3263.0, -1917.0), // wrist_flex
+        band(0.0, 4095.0, 1932.0),    // wrist_roll: 0-4095, no constraint
+        band(1992.0, 3566.0, 1867.0), // gripper
     ]
 }
 
@@ -399,7 +399,7 @@ fn positions_inside_the_travel_are_accepted() {
 #[test]
 fn the_measured_hand_sweep_stays_inside_the_envelope() {
     for values in [
-        [854, 944, 738, 888, 105, 1997],   // low ends, including elbow 45 counts under its travel
+        [854, 944, 738, 888, 105, 1997], // low ends, including elbow 45 counts under its travel
         [3294, 3350, 2942, 3260, 3955, 3579], // high ends
     ] {
         assert_eq!(
@@ -442,7 +442,9 @@ fn a_missed_mode_switch_is_refused_and_named() {
             every_checked_joint_fits_the_other_frame: true
         }
     );
-    assert!(reject.reason().contains("mode switch this daemon did not see"));
+    assert!(reject
+        .reason()
+        .contains("mode switch this daemon did not see"));
 }
 
 /// One joint outside its travel is a bad read, not a frame error, and must not be reported as one.
@@ -469,10 +471,16 @@ fn one_joint_outside_is_not_blamed_on_the_frame() {
 /// have been where the joint was. Measured with the arm limp, so: position mode.
 #[test]
 fn the_measured_whole_turn_misreport_is_rejected() {
-    for (reported, label) in [(0, "0"), (3, "3"), (10, "10"), (4083, "4083"), (4094, "4094")] {
+    for (reported, label) in [
+        (0, "0"),
+        (3, "3"),
+        (10, "10"),
+        (4083, "4083"),
+        (4094, "4094"),
+    ] {
         let values = [reported, 2294, 2158, 2153, 2003, 2048];
-        let reject = first_outside_travel(&values, &measured_envelopes(), &ALL_CORRECTED)
-            .expect(label);
+        let reject =
+            first_outside_travel(&values, &measured_envelopes(), &ALL_CORRECTED).expect(label);
         assert_eq!(reject.motor, 0, "{label}");
         assert_eq!(reject.value, reported as f32, "{label}");
     }
@@ -501,9 +509,11 @@ fn the_whole_turn_misreport_is_still_rejected_in_the_raw_frame() {
         (2500, None),
     ] {
         let values = [reported, 3814, 325, 517, 3976, 4068];
-        let got = first_outside_travel(&values, &measured_envelopes(), &ALL_RAW)
-            .map(|r| r.value);
-        assert_eq!(got, expected, "shoulder_pan reporting {reported} in the raw frame");
+        let got = first_outside_travel(&values, &measured_envelopes(), &ALL_RAW).map(|r| r.value);
+        assert_eq!(
+            got, expected,
+            "shoulder_pan reporting {reported} in the raw frame"
+        );
     }
 }
 
@@ -572,8 +582,7 @@ fn a_joint_whose_frame_is_unknown_is_not_checked() {
     // ...but the encoder's own range still applies, since it needs neither frame nor calibration.
     let values = [9999, 3814, 325, 517, 3976, 4068];
     assert_eq!(
-        first_outside_travel(&values, &measured_envelopes(), &frames)
-            .map(|r| r.verdict),
+        first_outside_travel(&values, &measured_envelopes(), &frames).map(|r| r.verdict),
         Some(TravelVerdict::OffEncoder)
     );
 }
@@ -587,10 +596,12 @@ fn every_raw_envelope_on_this_arm_crosses_the_seam() {
     for (motor, envelope) in measured_envelopes().into_iter().enumerate() {
         let Some(envelope) = envelope else { continue };
         let (low, high) = envelope.band(PositionFrame::Raw);
-        assert!(low > high, "motor {motor}: raw band {low}-{high} does not wrap");
+        assert!(
+            low > high,
+            "motor {motor}: raw band {low}-{high} does not wrap"
+        );
     }
 }
-
 
 /// The measured holding duty has to survive untouched. On 2026-09-08 `elbow_flex` held a pose
 /// 20-30 cm off the table at 315 duty while drawing 25.4 counts of current -- a legitimate standing

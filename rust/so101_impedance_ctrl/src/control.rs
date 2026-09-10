@@ -399,8 +399,8 @@ pub fn poll_and_apply_commands(
 fn write_operating_mode(bus: &mut FeetechBus, motor_id: u8, mode: u32) -> std::io::Result<()> {
     bus.write_register(motor_id, feetech::REG_TORQUE_ENABLE, 0)?;
     bus.write_register(motor_id, feetech::REG_LOCK, 0)?; // unlock EPROM
-    // The only register write in the daemon that waits on a flash cycle, so the only one given a
-    // budget the control loop would never tolerate. See `EEPROM_ACK_TIMEOUT`.
+                                                         // The only register write in the daemon that waits on a flash cycle, so the only one given a
+                                                         // budget the control loop would never tolerate. See `EEPROM_ACK_TIMEOUT`.
     bus.with_read_timeout(EEPROM_ACK_TIMEOUT, |bus| {
         bus.write_register(motor_id, feetech::REG_OPERATING_MODE, mode)
     })?;

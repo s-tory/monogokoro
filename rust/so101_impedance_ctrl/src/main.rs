@@ -16,10 +16,9 @@ use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConf
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_startup_config, apply_tendon_inhibition, finite_difference_velocity,
     first_outside_travel, impedance_pwm, input_is_fresh, log_supply_and_temperature,
-    poll_and_apply_commands,
-    read_homing_offsets, read_position_frames, read_supply_and_temperature, read_travel_envelopes,
-    release_all,
-    wrapped_delta, MovingAverage, PositionFrame, PositionGate, TravelEnvelope,
+    poll_and_apply_commands, read_homing_offsets, read_position_frames,
+    read_supply_and_temperature, read_travel_envelopes, release_all, wrapped_delta, MovingAverage,
+    PositionFrame, PositionGate, TravelEnvelope,
 };
 use so101_impedance_ctrl::feetech::{self, FeetechBus};
 use so101_impedance_ctrl::leader::LeaderGripper;
@@ -1382,8 +1381,7 @@ fn main() {
             o.servo_error = servo_error as u32;
         });
 
-        let shutdown_command =
-            applied.is_some_and(|c| c.kind == shm::CommandKind::Shutdown as u32);
+        let shutdown_command = applied.is_some_and(|c| c.kind == shm::CommandKind::Shutdown as u32);
         if shutdown_command || SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
             if shutdown_command {
                 log::info!("received Shutdown command, exiting control loop");
