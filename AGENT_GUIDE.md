@@ -161,9 +161,12 @@ lerobot-teleoperate \
 > extends it — the arm never arrives, pins against the clamp, and draws a moderate current for far
 > longer than the brief large one it replaced.
 >
-> **What to do:** power it from a supply that actually holds its voltage. A regulated 5 V 6 A+ brick
-> (e.g. Akizuki 111105, 5 V 6.2 A, 5.5×2.1 mm centre-positive — the same plug the arm already uses)
-> is the smallest change. Note that the STS3215 is a **7.4 V** servo run at 5 V by the standard
+> **What to do:** power it from a supply that actually holds its voltage under load. The requirement
+> rather than a part number, since availability is regional: **regulated 5 V, 6 A or more, 5.5×2.1 mm
+> centre-positive** — the plug the arm already uses, so it is a straight swap. Judge a candidate on
+> whether it quotes _load regulation_, not on its maximum current: "4 A" is a ceiling, not a promise
+> about what the voltage does on the way there. (The one measured here: Akizuki 111105 /
+> `LTE36ES-S1-301`, 5 V 6.2 A, about ¥2,300 — Japan only.) Note that the STS3215 is a **7.4 V** servo run at 5 V by the standard
 > build: the vendors list it as **6–7.4 V**, and its rated torque is quoted at 6 V and 7.4 V, not at
 > 5 V. Running at the bottom of the range costs torque, and lost torque is paid for in current.
 
