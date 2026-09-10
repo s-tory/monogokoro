@@ -337,6 +337,7 @@ def _summarise(rows: list[dict], args) -> dict:
     servo_error_seen = 0
     for e in servo_errs:
         servo_error_seen |= e
+    episodes = _servo_error_episodes(rows)
     return {
         "label": args.label,
         "pose_file": args.pose_file,
@@ -353,8 +354,46 @@ def _summarise(rows: list[dict], args) -> dict:
         "servo_error_seen": servo_error_seen,
         "servo_error_samples": len(servo_errs),
         "servo_errors": describe_servo_error(servo_error_seen),
+        "servo_error_episodes": len(episodes),
+        "servo_error_episode_ms": [round(ms) for ms in episodes],
+        "servo_error_per_min": (
+            round(len(episodes) / (rows[-1]["t"] - rows[0]["t"]) * 60, 2)
+            if len(rows) > 1 and rows[-1]["t"] > rows[0]["t"]
+            else None
+        ),
         "motors": per_motor,
     }
+
+
+def _servo_error_episodes(rows: list[dict]) -> list[float]:
+    """Lengths in ms of each run of consecutive samples where a servo raised its error byte.
+
+    Counted rather than left in the CSV because the *count* is the number this rig is actually
+    steered by, and re-deriving it by hand after every run is how four near-identical analysis
+    scripts got written on 2026-09-10. A supply that cannot carry the arm produces a handful of
+    long episodes; the noise floor produces many one-sample ones, so the lengths are reported
+    alongside the count and not averaged into it.
+
+    Measured that day for scale: the bundled 5V4A adapter gave one 833 ms episode in 329 s with
+    the defaults, and 6 in 77 s once `--pwm-max` was lowered -- so a change of setup shows up
+    here as a change in count, and the duration stays pinned by how long the rail takes to
+    recover.
+    """
+    episodes: list[float] = []
+    start: float | None = None
+    prev: float | None = None
+    for r in rows:
+        t = r["t"]
+        if r.get("servo_error"):
+            if start is None:
+                start = t
+        elif start is not None:
+            episodes.append((prev - start) * 1000 if prev is not None else 0.0)
+            start = None
+        prev = t
+    if start is not None and prev is not None:
+        episodes.append((prev - start) * 1000)
+    return episodes
 
 
 def _print_summary(s: dict) -> None:
@@ -386,6 +425,16 @@ def _print_summary(s: dict) -> None:
         )
         for e in s.get("servo_errors", []):
             print(f"  - {e}")
+        n = s.get("servo_error_episodes")
+        if n:
+            lens = s.get("servo_error_episode_ms", [])
+            long = [ms for ms in lens if ms >= 100]
+            rate = s.get("servo_error_per_min")
+            print(
+                f"  {n} episode(s)"
+                + (f", {rate}/min" if rate is not None else "")
+                + (f" -- {len(long)} over 100 ms: {long} ms" if long else " -- all under 100 ms")
+            )
     print(f"{'motor':<14}{'K':>6}{'err':>10}{'|err|':>9}{'sd':>7}{'pwm':>9}{'ff':>9}{'cur':>8}")
     print("-" * 72)
     for m, v in s["motors"].items():
