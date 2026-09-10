@@ -205,6 +205,23 @@ class SO101ImpedanceChecker:
     def fault_flags(self) -> int:
         return self.client.read_output()["fault_flags"]
 
+    @property
+    def servo_error(self) -> int:
+        """OR of the error byte the servos reported for the daemon's most recent tick."""
+        return self.client.read_output()["servo_error"]
+
+    @property
+    def fault_snapshot(self) -> tuple[int, int]:
+        """`(fault_flags, servo_error)` taken from a **single** telemetry read.
+
+        Reading the two properties separately samples two different ticks, and these two fields are
+        only meaningful together: `FAULT_SERVO_ERROR` says a servo complained, `servo_error` says
+        which protection it was. A logger that pairs a flag from one tick with a byte from the next
+        can print "a servo faulted" next to a byte of zero.
+        """
+        out = self.client.read_output()
+        return out["fault_flags"], out["servo_error"]
+
     def describe_faults(self) -> list[str]:
         return describe_fault_flags(self.fault_flags)
 

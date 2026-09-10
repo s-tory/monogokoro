@@ -70,6 +70,66 @@ fn sync_read_reply_parses_as_back_to_back_status_packets() {
 }
 
 #[test]
+fn sync_read_reply_carries_a_nonzero_servo_error_byte_from_every_motor() {
+    // Measured on this arm 2026-09-10: a supply dip below the servos' own `Min_Voltage_Limit`
+    // (4.0 V, factory default) raises bit0 of the status error byte on **all six** motors in the
+    // same tick, for 833 ms, while a once-a-second `Present_Voltage` read still says 4.5 V.
+    //
+    // Until that day `sync_read` destructured this byte into `_`, so the only trace such a dip
+    // left was a read timeout -- and eight months of runs called it a "comms error" and went
+    // looking at bus load, serial timeouts and wiring. This test exists so the byte cannot be
+    // dropped again: it asserts the value survives parsing, and that OR-ing across the reply (what
+    // `FeetechBus::take_servo_error` publishes) reproduces it.
+    let ids = [1u8, 2, 3, 4, 5, 6];
+    const ERR_VOLTAGE: u8 = 1 << 0;
+
+    let mut stream = Vec::new();
+    for &id in &ids {
+        let body = [id, 4, ERR_VOLTAGE, 0x00, 0x08]; // id, len, error, data lo, data hi
+        stream.extend_from_slice(&[0xFF, 0xFF]);
+        stream.extend_from_slice(&body);
+        stream.push(checksum(&body));
+    }
+
+    let resp_len = 6 + 2;
+    let mut accumulated = 0u8;
+    for (i, &id) in ids.iter().enumerate() {
+        let chunk = &stream[i * resp_len..(i + 1) * resp_len];
+        let (resp_id, error, data) = parse_status_packet(chunk).expect("chunk must parse");
+        assert_eq!(resp_id, id);
+        assert_eq!(
+            error, ERR_VOLTAGE,
+            "motor {id} must report its own error byte"
+        );
+        // The reading itself stays valid: a servo in protection still answers with its position.
+        assert_eq!((data[0] as u16) | ((data[1] as u16) << 8), 2048);
+        accumulated |= error;
+    }
+    assert_eq!(accumulated, ERR_VOLTAGE);
+}
+
+#[test]
+fn a_single_motor_error_is_not_masked_by_five_healthy_replies() {
+    // The counterpart of the test above. Over-heat and over-load are per-servo, so one motor
+    // raising a bit alone is a *different* diagnosis from all six raising one together -- and the
+    // OR must not lose it just because the other five are clean.
+    let ids = [1u8, 2, 3, 4, 5, 6];
+    const ERR_OVERHEAT: u8 = 1 << 2;
+
+    let mut accumulated = 0u8;
+    for &id in &ids {
+        let error = if id == 3 { ERR_OVERHEAT } else { 0 };
+        let body = [id, 4, error, 0x00, 0x08];
+        let mut chunk = vec![0xFF, 0xFF];
+        chunk.extend_from_slice(&body);
+        chunk.push(checksum(&body));
+        let (_, parsed, _) = parse_status_packet(&chunk).expect("chunk must parse");
+        accumulated |= parsed;
+    }
+    assert_eq!(accumulated, ERR_OVERHEAT);
+}
+
+#[test]
 fn parse_status_packet_round_trips() {
     let body = [1u8, 4, 0, 10, 20]; // id, len, error, param_lo, param_hi
     let cksum = checksum(&body);

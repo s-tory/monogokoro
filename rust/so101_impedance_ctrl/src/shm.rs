@@ -10,7 +10,7 @@
 
 use std::sync::atomic::{fence, AtomicU32, Ordering};
 
-pub const LAYOUT_VERSION: u32 = 6;
+pub const LAYOUT_VERSION: u32 = 7;
 pub const SHM_MAGIC: u32 = 0x534F_3130; // ASCII "SO10"
 /// All 6 servos -- the 5 arm joints AND the gripper -- are impedance-controlled (K/D over PWM).
 /// A rigid position-mode gripper crushes anything it grips before it can sense resistance;
@@ -105,6 +105,17 @@ pub struct OutputData {
     pub case_temp_c: u32,
     /// Servo ID the two fields above were read from, or 0 before the first sample.
     pub health_motor_id: u32,
+    /// OR of the error byte the servos themselves reported this tick, straight off the wire.
+    ///
+    /// Published raw, not only as a fault bit, because the byte names *which* protection tripped
+    /// and the answers differ: under-voltage means the supply cannot carry the arm, over-heat and
+    /// over-load mean one joint is being asked for too much. Zero on a healthy tick.
+    ///
+    /// Measured on this arm 2026-09-10: `0x01` on all six servos at once, for 833 ms, while
+    /// `supply_decivolts` -- sampled once a second -- still read a healthy 4.5 V. The servos are a
+    /// faster voltmeter than anything else on this bus, and this field is how a run keeps what
+    /// they said.
+    pub servo_error: u32,
 }
 
 #[repr(C)]
@@ -129,6 +140,19 @@ pub const FAULT_POS_LIMIT: u32 = 1 << 4;
 /// than what the control law asked for. Without this bit an inhibited run and a soft gain look
 /// identical from outside, which is the same hole `FAULT_POS_LIMIT` exists to close.
 pub const FAULT_TENDON_INHIBITION: u32 = 1 << 5;
+/// A servo reported an error byte this tick -- see [`OutputData::servo_error`] for which bit.
+///
+/// Deliberately *not* folded into [`FAULT_OVERCURRENT`]: an under-voltage trip and an over-current
+/// trip call for opposite responses (a bigger supply versus a smaller command), and this project
+/// spent three weeks reading under-voltage cut-outs as bus errors. A flag that cannot tell them
+/// apart would preserve exactly that confusion.
+pub const FAULT_SERVO_ERROR: u32 = 1 << 6;
+/// Bit 0 of the Feetech status error byte. Named because it is the one this arm actually raises:
+/// on a 5 V supply the servos sit ~0.6 V above their own `Min_Voltage_Limit` of 4.0 V, and a
+/// joint lifting against gravity closes that gap. NOT confirmed against a primary protocol
+/// document -- the bit-to-meaning mapping is from secondary sources, and what *is* measured is
+/// that all six servos raise it together for the duration of a supply dip.
+pub const SERVO_ERR_VOLTAGE: u8 = 1 << 0;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

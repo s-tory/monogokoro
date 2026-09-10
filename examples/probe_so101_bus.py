@@ -484,6 +484,14 @@ PROTECTION_REGISTERS = (
     ("Overload_Torque", (36, 1), 25),
     ("Over_Current_Protection_Time", (38, 1), None),
     ("Max_Temperature_Limit", (13, 1), None),
+    # The supply envelope the servo enforces on itself. Read here because the datasheet's
+    # under-voltage protection (below 4 V, auto-released once the rail recovers) is the only one of
+    # the three whose trip lasts less than 2 s -- and on 2026-09-10 all six servos raised their
+    # status error byte together for 833 ms while `supply_v`, sampled once a second, still read a
+    # healthy 4.48 V mean. What the limit is actually set to decides how much headroom 4.4 V is.
+    ("Max_Voltage_Limit", (14, 1), None),
+    ("Min_Voltage_Limit", (15, 1), None),
+    ("Present_Voltage", (62, 1), None),
     ("Operating_Mode", (33, 1), None),
     ("Torque_Limit", (48, 2), None),
     ("Status", (65, 1), None),

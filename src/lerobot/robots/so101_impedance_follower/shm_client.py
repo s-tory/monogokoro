@@ -55,7 +55,7 @@ NUM_MOTORS = 6
 #     that picks things up and puts them down interleaves by itself.
 NUM_CONTEXT = 2
 
-LAYOUT_VERSION = 6
+LAYOUT_VERSION = 7
 SHM_MAGIC = 0x534F3130  # ASCII "SO10", matches shm::SHM_MAGIC in shm.rs
 
 FAULT_WATCHDOG_TIMEOUT = 1 << 0
@@ -72,11 +72,28 @@ FAULT_POS_LIMIT = 1 << 4
 # error. Mirrors shm.rs's FAULT_TENDON_INHIBITION. Set per tick, never latched, because the question
 # it answers is "is it inhibiting now"; the CSV column is what keeps the history.
 FAULT_TENDON_INHIBITION = 1 << 5
+# A servo raised its own status error byte this tick; `servo_error` says which bit. Kept separate
+# from FAULT_OVERCURRENT because under-voltage and over-current call for opposite responses -- a
+# bigger supply versus a smaller command -- and this arm spent three weeks reading under-voltage
+# cut-outs as bus errors.
+FAULT_SERVO_ERROR = 1 << 6
+
+# Bits of the Feetech status error byte. bit0 is the one this arm raises: on a 5 V supply the
+# servos sit ~0.6 V above their own Min_Voltage_Limit of 4.0 V, and lifting against gravity closes
+# that gap. The bit-to-meaning mapping is from secondary sources and is NOT confirmed against a
+# primary protocol document; what is measured is that all six raise bit0 together for the length of
+# a supply dip (2026-09-10, 833 ms, while a once-a-second supply read still said 4.5 V).
+SERVO_ERR_VOLTAGE = 1 << 0
 
 _FAULT_NAMES: tuple[tuple[int, str], ...] = (
     (FAULT_WATCHDOG_TIMEOUT, "watchdog_timeout (no fresh input from Python -- PWM held at zero)"),
     (FAULT_COMMS_ERROR, "comms_error (a register read/write to a servo failed)"),
     (FAULT_OVERCURRENT, "overcurrent"),
+    (
+        FAULT_SERVO_ERROR,
+        "servo_error (a servo raised its own protection flag -- see the servo_error column for "
+        "which bit; 0x01 on every motor at once is the supply dipping below 4.0 V, not a bus fault)",
+    ),
     (FAULT_LEADER_COMMS_ERROR, "leader_comms_error (force feedback dropped; the follower is unaffected)"),
     (
         FAULT_TENDON_INHIBITION,
@@ -89,6 +106,40 @@ _FAULT_NAMES: tuple[tuple[int, str], ...] = (
         "where it was last seen in range, and not driven at all if it was never seen there)",
     ),
 )
+
+
+_SERVO_ERR_NAMES: tuple[tuple[int, str], ...] = (
+    (SERVO_ERR_VOLTAGE, "voltage (supply outside the servo's Min/Max_Voltage_Limit)"),
+    (1 << 1, "sensor/angle"),
+    (1 << 2, "temperature (over Max_Temperature_Limit)"),
+    (1 << 3, "current"),
+    (1 << 5, "overload"),
+)
+
+
+def describe_servo_error(byte: int) -> list[str]:
+    """Names the bits of a Feetech status error byte, plus what the pattern implies.
+
+    The bit-to-name mapping is from secondary sources and is NOT confirmed against a primary
+    protocol document -- the STS3215 product specification names the four protections but does not
+    publish the byte layout. Unknown bits are reported by index rather than dropped.
+
+    The *pattern* carries as much as the bits do, and that part is measured: on this arm an
+    under-voltage dip raises bit0 on all six servos in the same tick, whereas over-heat and
+    over-load are properties of one joint. So "every motor at once" and "one motor alone" are
+    different diagnoses even when the bit is the same, which is why the caller is told which case
+    it is looking at rather than just which bit was set.
+    """
+    if not byte:
+        return []
+    out = [name for bit, name in _SERVO_ERR_NAMES if byte & bit]
+    known = 0
+    for bit, _ in _SERVO_ERR_NAMES:
+        known |= bit
+    for i in range(8):
+        if byte & (1 << i) and not (known & (1 << i)):
+            out.append(f"bit{i} (undocumented)")
+    return out
 
 
 def describe_fault_flags(flags: int) -> list[str]:
@@ -170,6 +221,10 @@ class OutputData(ctypes.Structure):
         ("supply_decivolts", ctypes.c_uint32),
         ("case_temp_c", ctypes.c_uint32),
         ("health_motor_id", ctypes.c_uint32),
+        # OR of the error byte the servos reported this tick, straight off the wire -- every
+        # Feetech reply carries it, so reading it adds no bus traffic. Raw rather than only a fault
+        # bit because the byte names which protection tripped, and the answers differ.
+        ("servo_error", ctypes.c_uint32),
     ]
 
 
@@ -381,6 +436,7 @@ class ImpedanceShmClient:
                 "supply_decivolts": region.data.supply_decivolts,
                 "case_temp_c": region.data.case_temp_c,
                 "health_motor_id": region.data.health_motor_id,
+                "servo_error": region.data.servo_error,
             }
             s2 = region.seq
             if s1 == s2:

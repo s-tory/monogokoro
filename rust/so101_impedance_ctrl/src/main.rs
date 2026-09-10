@@ -1356,6 +1356,13 @@ fn main() {
         if tendon_inhibited {
             fault_flags |= shm::FAULT_TENDON_INHIBITION;
         }
+        // Drained once per tick, after every transaction this tick has made, so the flag means
+        // "a servo complained while we were driving it" rather than "a servo complained once".
+        // The bytes were already on the wire; nothing extra was asked of the bus to get them.
+        let servo_error = bus.take_servo_error();
+        if servo_error != 0 {
+            fault_flags |= shm::FAULT_SERVO_ERROR;
+        }
 
         shm::seqlock_write(&layout.output.seq, &mut layout.output.data, |o| {
             o.timestamp_mono_ns = now_ns;
@@ -1372,6 +1379,7 @@ fn main() {
             o.supply_decivolts = health_volts;
             o.case_temp_c = health_temp;
             o.health_motor_id = health_id;
+            o.servo_error = servo_error as u32;
         });
 
         let shutdown_command =

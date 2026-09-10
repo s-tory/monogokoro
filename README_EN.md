@@ -258,18 +258,24 @@ registers nor the feature matching said that much.
   fixing the first half; deriving stiffness from cross-demonstration variance is the likely next.
 - **Open-loop PWM** is noisier than true torque control -- the STS3215 has no host-streamable torque
   register, so this is a constraint of the hardware rather than a choice.
-- **The bus produces comms errors while driving: 0% to 43% of samples across runs at identical
-  settings. Cause unsettled.** Only visible since `fault_flags` was logged on 2026-09-09. The errors
-  arrive in bursts of a fixed **~800 ms** (39-41 samples at 20 ms), 75% of which start within 60 ms
-  of a PWM saturation. A burst past `--max-blind-ticks` zeroes the duty and the arm falls, which in
-  the duty columns is indistinguishable from a gain that is merely too soft -- and was read as
-  exactly that. **With the arm limp the rate is 0.00% on the same hardware**, so the trigger is the
-  drive, not the bus at rest. `--current-read-divisor 4` cuts tick time 16% and leaves the rate
-  unchanged, so it is not congestion; `--serial-timeout-ms 2` makes it **worse** (2 ms cuts replies
-  that were going to arrive, and a late reply is read as the answer to the next question). The
-  800 ms matches `Protection_Time`/`Over_Current_Protection_Time`, both 200 on every motor, if that
-  register counts in 4 ms units -- **unverified**, and if true it means the servo's own overload
-  protection fires in PWM mode. **Every number measured here sits on top of this.**
+- **The "comms errors" seen while driving are the supply.** Separated on 2026-09-10. Every Feetech
+  status packet carries the servo's own error byte and the daemon was discarding it. Once read,
+  **all six motors raise the voltage bit (bit0) in the same tick, for the same 833 ms** -- not one
+  servo protecting itself, but the shared rail collapsing. `Min_Voltage_Limit` is the factory 40
+  (4.0 V) on every motor and idle `Present_Voltage` is 46 (4.6 V), so **the margin is 0.6 V**. The
+  bundled 5V4A adapter drops from 4.97 V to 4.59 V with nothing but the servos connected (measured
+  at the adapter terminals with a meter). A burst past `--max-blind-ticks` zeroes the duty and the
+  arm falls, which in the duty columns is indistinguishable from a gain that is merely too soft --
+  and was read as exactly that for weeks. **`supply_decivolts` is sampled round-robin once a
+  second, so an 833 ms dip cannot appear in it. The servos are the fastest voltmeter on this
+  machine.** They now surface as the `servo_error` column and `FAULT_SERVO_ERROR`.
+  **Software cannot rescue this** (measured the same day against the defaults `--pwm-max 1000` /
+  `--ramp 5`): `--pwm-max 700` makes it **26x worse** and `--ramp 15` **18x worse**. Both push the
+  command below the force a lift actually needs, so the arm never reaches the target, pins itself
+  against the clamp, and turns a short large current into a long moderate one.
+  `--serial-timeout-ms 2` is **worse** too (2 ms cuts replies that were going to arrive, and a late
+  reply is read as the answer to the next question). **Every number measured here sits on top of
+  this.** See [`AGENT_GUIDE.md`](./AGENT_GUIDE.md) for what to power it with.
 - **The daemon is not part of the Python build.** It is a separate Cargo project, deployed by hand.
 - **Interactive calibration and `setup-motors`** are not implemented for the impedance robot. Run
   both with the stock `so101_follower` against the same servos, then copy the calibration across --

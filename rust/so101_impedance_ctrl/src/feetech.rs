@@ -204,12 +204,30 @@ fn encode_value(value: u32, size: u8, params: &mut Vec<u8>) {
 /// runs, including for the gripper).
 pub struct FeetechBus {
     port: Box<dyn SerialPort>,
+    /// OR of the servo-reported error byte over every status packet seen since the last
+    /// [`take_servo_error`](Self::take_servo_error).
+    ///
+    /// Every Feetech reply carries this byte and the daemon discarded it until 2026-09-10, which
+    /// is why eight months of runs could only call an under-voltage cut-out a "comms error".
+    /// Reading it costs nothing: the bytes are already on the wire, so unlike polling the `Status`
+    /// register there is no added bus traffic -- and no risk of the diagnostic read itself being
+    /// swallowed by the very burst it is trying to measure.
+    ///
+    /// OR-ed rather than kept per motor because the event this exists to catch is common to the
+    /// whole bus: measured on this arm, an under-voltage trip raises the byte on all six servos in
+    /// the same tick, for the same 833 ms. A per-motor array would store six copies of one fact.
+    /// If a bit ever appears on one motor alone it is *not* the supply (over-heat and over-load are
+    /// per-servo), and the OR still reports which bit it was.
+    servo_error_acc: u8,
 }
 
 impl FeetechBus {
     pub fn open(path: &str, baud: u32, timeout: Duration) -> std::io::Result<Self> {
         let port = serialport::new(path, baud).timeout(timeout).open()?;
-        Ok(Self { port })
+        Ok(Self {
+            port,
+            servo_error_acc: 0,
+        })
     }
 
     /// Sends `packet` and reads back exactly `expected_len` bytes of reply.
@@ -262,6 +280,16 @@ impl FeetechBus {
         }
     }
 
+    /// Returns the OR of every servo-reported error byte seen since the previous call, and
+    /// clears the accumulator.
+    ///
+    /// Call once per control tick. Draining rather than peeking is what makes the flag mean "this
+    /// tick", so a single trip cannot look like a fault that never clears -- and an under-voltage
+    /// trip really does clear on its own once the rail recovers.
+    pub fn take_servo_error(&mut self) -> u8 {
+        std::mem::replace(&mut self.servo_error_acc, 0)
+    }
+
     /// Writes `value` to `reg` on servo `id` and waits for the status-packet ack.
     pub fn write_register(&mut self, id: u8, reg: (u8, u8), value: u32) -> std::io::Result<()> {
         let (addr, size) = reg;
@@ -270,9 +298,10 @@ impl FeetechBus {
         let packet = build_packet(id, INST_WRITE, &params);
         // WRITE status packet is just [header(2), id, len=2, error, checksum] = 6 bytes.
         let resp = self.transact(&packet, 6)?;
-        parse_status_packet(&resp).ok_or_else(|| {
+        let (_, servo_error, _) = parse_status_packet(&resp).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, "bad Feetech ack")
         })?;
+        self.servo_error_acc |= servo_error;
         Ok(())
     }
 
@@ -282,9 +311,10 @@ impl FeetechBus {
         let params = [addr, size];
         let packet = build_packet(id, INST_READ, &params);
         let resp = self.transact(&packet, 6 + size as usize)?;
-        let (_, _, data) = parse_status_packet(&resp).ok_or_else(|| {
+        let (_, servo_error, data) = parse_status_packet(&resp).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, "bad Feetech status packet")
         })?;
+        self.servo_error_acc |= servo_error;
         Ok(decode_unsigned(&data))
     }
 
@@ -340,21 +370,23 @@ impl FeetechBus {
                     format!("SYNC_READ: reply for motor {id} is truncated"),
                 ));
             }
-            let (resp_id, _, data) = parse_status_packet(&resp[start..end]).ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "bad Feetech SYNC_READ status packet for motor {id}: {:02X?}",
-                        &resp[start..end]
-                    ),
-                )
-            })?;
+            let (resp_id, servo_error, data) =
+                parse_status_packet(&resp[start..end]).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "bad Feetech SYNC_READ status packet for motor {id}: {:02X?}",
+                            &resp[start..end]
+                        ),
+                    )
+                })?;
             if resp_id != id {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     format!("SYNC_READ reply out of order: expected motor {id}, got {resp_id}"),
                 ));
             }
+            self.servo_error_acc |= servo_error;
             values.push(decode_unsigned(&data));
             cursor = end;
         }

@@ -138,6 +138,35 @@ lerobot-teleoperate \
 >
 > Most "timeout" errors are physical, not code.
 
+> **Timeouts that only appear while the arm is _driving_? Suspect the supply before the bus.**
+> Measured on an SO-101 with the 7.4 V servos, 2026-09-10:
+>
+> - The STS3215 protects itself below **4.0 V** (`Min_Voltage_Limit`, factory default) and releases
+>   again once the rail recovers. While it is protecting, its replies are disturbed — which reaches
+>   the host as a read timeout, not as anything mentioning voltage.
+> - On that arm the servos idled at **4.6 V**, so the margin was **0.6 V**, and a shoulder lifting
+>   against gravity closed it. All six motors raised the voltage bit together for **833 ms** at a
+>   time while a once-per-second supply reading still said 4.5 V.
+> - The bundled **5 V 4 A** adapter dropped **4.97 V → 4.59 V with nothing but the servos plugged
+>   in** (measured at the adapter's own terminals, so it was the adapter and not the cable). "4 A"
+>   is a maximum output, not a promise about regulation.
+>
+> **How to tell it apart from a bus problem:** the servos report it themselves. Runs logged with
+> this fork carry a `servo_error` column and a `FAULT_SERVO_ERROR` flag; `0x01` on every motor in
+> the same tick is the supply, because under-voltage is shared while over-heat and over-load belong
+> to one joint.
+>
+> **What does not work:** lowering `--pwm-max` or lengthening the ramp. Both were measured and both
+> made it _worse_ (26x and 18x more trips). Under-driving a lift does not reduce the load, it
+> extends it — the arm never arrives, pins against the clamp, and draws a moderate current for far
+> longer than the brief large one it replaced.
+>
+> **What to do:** power it from a supply that actually holds its voltage. A regulated 5 V 6 A+ brick
+> (e.g. Akizuki 111105, 5 V 6.2 A, 5.5×2.1 mm centre-positive — the same plug the arm already uses)
+> is the smallest change. Note that the STS3215 is a **7.4 V** servo run at 5 V by the standard
+> build: the vendors list it as **6–7.4 V**, and its rated torque is quoted at 6 V and 7.4 V, not at
+> 5 V. Running at the bottom of the range costs torque, and lost torque is paid for in current.
+
 **4.6 Record a dataset** — keys: **→** next, **←** redo, **ESC** finish & upload.
 
 ```bash

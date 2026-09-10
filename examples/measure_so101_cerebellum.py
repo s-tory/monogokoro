@@ -77,7 +77,10 @@ from lerobot.robots.so101_impedance_follower.checker import (
 from lerobot.robots.so101_impedance_follower.config_so101_impedance_follower import (
     SO101ImpedanceFollowerConfig,
 )
-from lerobot.robots.so101_impedance_follower.shm_client import describe_fault_flags
+from lerobot.robots.so101_impedance_follower.shm_client import (
+    describe_fault_flags,
+    describe_servo_error,
+)
 
 # The shipped per-joint gains, not a scalar. A single K/D is either too soft for the shoulder or
 # needlessly stiff everywhere else -- and an over-large D on a joint that holds nothing (wrist_roll)
@@ -250,7 +253,9 @@ def cmd_hold(args) -> None:
                 # the time. The watchdog bit is the one this rig can trip without anything else
                 # showing it: PWM held at zero is indistinguishable from a gain that is simply too
                 # soft if all you have is the duty columns.
-                row["fault_flags"] = checker.fault_flags
+                # Both from one read: the flag says a servo complained, the byte says which
+                # protection. Sampled apart they can disagree by a tick.
+                row["fault_flags"], row["servo_error"] = checker.fault_snapshot
                 for m in MOTOR_NAMES:
                     s = state[m]
                     row[f"{m}.target"] = target[m]
@@ -325,6 +330,13 @@ def _summarise(rows: list[dict], args) -> dict:
     faults_seen = 0
     for f in faulted:
         faults_seen |= f
+    # Kept separately from the fault mask because this one says *what the servo itself* objected
+    # to. A run where every motor raises the voltage bit together is a supply that cannot carry the
+    # arm -- which looks identical, in every other column, to a bus that drops replies.
+    servo_errs = [r["servo_error"] for r in rows if r.get("servo_error")]
+    servo_error_seen = 0
+    for e in servo_errs:
+        servo_error_seen |= e
     return {
         "label": args.label,
         "pose_file": args.pose_file,
@@ -338,6 +350,9 @@ def _summarise(rows: list[dict], args) -> dict:
         "faults_seen": faults_seen,
         "fault_samples": len(faulted),
         "faults": describe_fault_flags(faults_seen),
+        "servo_error_seen": servo_error_seen,
+        "servo_error_samples": len(servo_errs),
+        "servo_errors": describe_servo_error(servo_error_seen),
         "motors": per_motor,
     }
 
@@ -360,6 +375,17 @@ def _print_summary(s: dict) -> None:
         print(f"faults: {s['fault_samples']} sample(s) with a flag set over the whole run")
         for f in s["faults"]:
             print(f"  - {f}")
+    if s.get("servo_error_seen"):
+        # Printed on its own line rather than folded into the fault list because it is the one
+        # reading here that comes from the servos instead of from this software, and because the
+        # supply reading two lines up cannot contradict it: `supply_*` is sampled once a second and
+        # a dip lasts under a second. A run can print a healthy rail and this line together, and
+        # when it does, this line is the one that saw what happened.
+        print(
+            f"servo protection: {s['servo_error_samples']} sample(s), error byte {s['servo_error_seen']:#04x}"
+        )
+        for e in s.get("servo_errors", []):
+            print(f"  - {e}")
     print(f"{'motor':<14}{'K':>6}{'err':>10}{'|err|':>9}{'sd':>7}{'pwm':>9}{'ff':>9}{'cur':>8}")
     print("-" * 72)
     for m, v in s["motors"].items():
