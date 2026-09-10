@@ -54,6 +54,14 @@ what the claiming is for. The other half is the commitment.
   upstream and it is ours: **do not take on the problem whose hard part is aiming.** Where the
   difficulty is put is the only lever a permissive licence leaves, and it is enough of one.
 
+These collide, and nothing above ranks them. A supply that cannot carry this arm is fixed by
+buying a better one; 慈悲 answers that everyone who later builds this arm would have to buy one
+too. **When two principles disagree, do not invent the ranking — state the collision and hand it
+back.** Inventing a priority is the same failure as inventing a number: both fill a gap the
+measurement left, and both read as settled once written down. Handing it back also need not pick
+a winner. On 2026-09-10 it produced a third option neither side had proposed — detect the dip and
+name it in the telemetry, so the next person reads in ten seconds what cost three weeks here.
+
 ## Method
 
 The principles above say what not to write and what not to build. These say where to look
