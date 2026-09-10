@@ -86,7 +86,15 @@ first. They came out of this project's own mistakes, but none of them are specif
   returned a correct answer to whatever you actually asked. Before doubting the instrument,
   check what you asked. Corollary on who judges: the payment for being right is prediction, and
   the judge is nature, not the audience. Rejection carries no information in either direction —
-  Semmelweis had the measurement, published it, and was not believed.
+  Semmelweis had the measurement, published it, and was not believed. Two ways remain to measure
+  correctly and still see nothing. **The answer may already be in hand, unread**: this daemon
+  asked its servos for their state 400 times a second for three weeks and discarded the status
+  byte in every reply — `let (id, _, data)` — so a supply collapsing below the servos' own
+  under-voltage limit arrived as a read timeout, and cost three weeks of suspecting bus load,
+  serial timeouts and wiring. Re-reading a reply you already have beats asking a new question:
+  it adds no traffic, and it cannot be swallowed by the fault it is measuring. **Or the
+  instrument was too slow to have shown it**: a supply sampled once a second cannot render an
+  833 ms dip. Before writing "no anomaly", check that the instrument could have produced one.
 - **Write the test that can kill the hypothesis before writing the implementation.** The cost of
   a wrong hypothesis is not the wrongness, it is the code built before it was checked. Four
   plausible hypotheses in a row were wrong here and cost nothing; one of them cost a shader, a
