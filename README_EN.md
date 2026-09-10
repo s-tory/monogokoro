@@ -203,9 +203,7 @@ registers nor the feature matching said that much.
   of it each run fell on decides the direction of the effect -- and the CSVs are gone.
   **The retaken numbers** (rail mean 4.52 V, min 4.50 V; one pose file across all runs; K
   unchanged; two stereo cameras carried on the wrist): droop of `shoulder_lift` 5.00 -> 1.02 and
-  `elbow_flex` 21.00 -> 1.00 counts. ~~against baselines where `err = pwm / K` held to the decimal
-  (100/20, 315/15, sd 0.00). The instrument for a holding duty is the cerebellum-off droop~~ --
-  **both sentences were withdrawn on 2026-09-09.** `err = pwm / K` is an **identity** when nothing
+  `elbow_flex` 21.00 -> 1.00 counts. `err = pwm / K` is an **identity** when nothing
   but a PD law is in the path: it agreed to the decimal for arithmetic reasons, not physical ones.
   And sd 0.00 only says the arm is stationary, which **stiction produces as readily as balance**.
   Four runs at identical settings put `shoulder_lift`'s holding duty at 100 / 180 / 200 / 255, every
@@ -234,10 +232,9 @@ registers nor the feature matching said that much.
   Raising it to 25 removes the oscillation entirely (0.2 counts over 173 s, and within 4% of the
   true load) -- but the ff then freezes the moment the error enters the band, so **it stops being a
   measurement of the load and becomes a function of how far the transient got**. Which way to settle
-  it is undecided. `0` restores the old behaviour. ~~Whether the stick band is a property of the
-  gearboxes or an artefact of the supply collapsing is still what the re-measurement has to
-  separate.~~ **Separated on 2026-09-09: the band appears on a healthy rail (4.44-4.51 V mean,
-  4.40 V min), so it is not an artefact of the supply.** Its width is now measured -- approaching
+  it is undecided. `0` restores the old behaviour. **The stick band is not an artefact of the
+  supply collapsing** -- separated on 2026-09-09: the band appears on a healthy rail (4.44-4.51 V
+  mean, 4.40 V min). Its width is now measured -- approaching
   one target from above and from below leaves `shoulder_lift` resting 18.0 counts apart (duty 120
   vs 480) and `elbow_flex` 12.9 counts apart (duty 300 vs 106). **The band is the same order as the
   holding duty it brackets**, and four runs at identical settings, every one at sd 0.00, put that
