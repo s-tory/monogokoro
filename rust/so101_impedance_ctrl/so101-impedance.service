@@ -52,6 +52,12 @@ OOMScoreAdjust=-1000
 # first supply reading, are only ever reported at info.
 Environment=RUST_LOG=info
 
+# journald drops messages past 10000 per 30s by default and says so in one line. A 1 kHz loop that
+# logs once per cycle exceeds that in ten seconds, and what follows looks like a quiet daemon
+# rather than a throttled one. Nothing in the loop logs per cycle today; this keeps that from
+# mattering the first time someone adds a line while debugging.
+LogRateLimitIntervalSec=0
+
 WorkingDirectory=/home/s-tory/git/monogokoro/rust/so101_impedance_ctrl
 ExecStart=/home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/target/release/so101_impedance_ctrl \
     --port /dev/ttyACM0 \
