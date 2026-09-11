@@ -153,6 +153,7 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 - 隔離コアのセットアップ: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
 - ゲイン調整、小脳の立ち上げ、プロトコルの注意点: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)
 - LeRobot 一般の使い方 (記録、学習、評価): [`AGENT_GUIDE.md`](AGENT_GUIDE.md)
+- Intel GPU (XPU) での環境構築: [`SETUP_XPU.md`](SETUP_XPU.md) (英語)
 
 ## 実測値であって仮定ではない
 

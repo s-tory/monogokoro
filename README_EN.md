@@ -156,6 +156,7 @@ housekeeping core that is **not** `--cpu-core`):
 - Setting up the isolated core: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
 - Tuning gains, cerebellum bring-up, protocol notes: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)
 - General LeRobot usage (recording, training, eval): [`AGENT_GUIDE.md`](AGENT_GUIDE.md)
+- Setting up the environment on an Intel GPU (XPU): [`SETUP_XPU.md`](SETUP_XPU.md)
 
 ## Measured, not assumed
 

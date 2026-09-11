@@ -75,6 +75,9 @@ git lfs install && git lfs pull
 hf auth login                             # required to push datasets/policies
 ```
 
+On an Intel GPU (Arc, integrated or discrete), `torch` has to come from a different index than
+either line above installs. See [`SETUP_XPU.md`](./SETUP_XPU.md).
+
 **4.2 Find USB ports** — run once per arm, unplug when prompted.
 
 ```bash
