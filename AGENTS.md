@@ -103,6 +103,14 @@ first. They came out of this project's own mistakes, but none of them are specif
   it adds no traffic, and it cannot be swallowed by the fault it is measuring. **Or the
   instrument was too slow to have shown it**: a supply sampled once a second cannot render an
   833 ms dip. Before writing "no anomaly", check that the instrument could have produced one.
+- **A device that answers is not a device that works.** Every layer below the one you need can
+  answer correctly while the thing you actually want is dead. A B580 over USB4 bound to `xe`,
+  trained its edge connector at `16GT/s x4`, enumerated its own HDMI audio function and spun its
+  fans — four independent signs of life — while Level Zero never listed it once and not one
+  compute instruction ever ran on it. Every sign was real; not one of them was evidence for the
+  claim being made. A layer that responds is evidence about that layer and nothing above it. So
+  do not call a thing working until the path you will actually use has been driven end to end,
+  and while it has not, name the layer where the evidence stops.
 - **Write the test that can kill the hypothesis before writing the implementation.** The cost of
   a wrong hypothesis is not the wrongness, it is the code built before it was checked. Four
   plausible hypotheses in a row were wrong here and cost nothing; one of them cost a shader, a
