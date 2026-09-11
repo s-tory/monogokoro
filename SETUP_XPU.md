@@ -126,6 +126,26 @@ Both are packaged as `torch`, and whichever is installed last wins. `torch 2.11.
 `torch.version.cuda` is `None`. Installing the NVIDIA driver does not change this —
 `torch.cuda.is_available()` stays False. **If you need both, build two environments.**
 
+### conda-forge's `level-zero` shadows the system loader
+
+Measured on this rig on 2026-09-11, by running one XPU matmul and reading `/proc/self/maps`:
+
+```
+env      lib/libze_loader.so.1.29.0                      <- the Level Zero loader
+env      lib/libsycl.so.8, lib/libOpenCL.so.1
+system   /usr/lib/x86_64-linux-gnu/libze_intel_gpu.so.1.17.39395   <- the actual GPU driver
+system   /usr/lib/x86_64-linux-gnu/intel-opencl/libigdrcl.so
+```
+
+The loader comes from the environment and the driver from the system. That loader is
+conda-forge's `level-zero 1.29.0`, pulled in by the `ffmpeg` in step 3 — pip ships none. But apt
+carries one too (`libze1 1.32.0` here), and the environment's `lib/` comes first on the search
+path, so **the older conda copy is the one that gets loaded**.
+
+**Whether this costs anything is unmeasured.** It works. A Level Zero loader is meant to drive
+other generations of driver. But it is a version pin nobody asked for, and worth knowing about
+before blaming the driver for something.
+
 ### An OOM on an integrated GPU takes the desktop with it
 
 On an iGPU, GPU memory and system memory are the same pool, so a training OOM sends the OOM

@@ -148,6 +148,11 @@ uv sync --locked --extra all                # Everything
 git lfs install && git lfs pull             # Test artifacts
 ```
 
+This is the CUDA/CPU route. **On an Intel GPU the `torch` wheels come from a different index**,
+and the environment here is built with miniforge rather than `uv` — see
+[`SETUP_XPU.md`](./SETUP_XPU.md). Whether `uv` can be pointed at the `+xpu` index instead has not
+been tried on this rig.
+
 ## Key Commands
 
 ```bash
@@ -183,4 +188,4 @@ pre-commit run --all-files                           # Lint + format (ruff, typo
 - **Imports**: prefer top-level imports; relative (`from .sibling import X`) across sibling files within a module, absolute (`from lerobot.module import X`) across modules.
 - **Optional dependencies**: many policies, envs, and robots are behind extras (e.g., `lerobot[aloha]`, see `pyproject.toml`). Guard optional imports with `TYPE_CHECKING or _foo_available` at module top + a `require_package(...)` check at use time. Reuse the `_foo_available` flags in `utils/import_utils.py`; don't call `is_package_available`.
 - **Video decoding**: datasets can store observations as video files. `LeRobotDataset` handles frame extraction, but tests need ffmpeg installed.
-- **Prioritize use of `uv run`** to execute Python commands (not raw `python` or `pip`).
+- **Prioritize use of `uv run`** to execute Python commands (not raw `python` or `pip`) on CUDA and CPU. The XPU environment is miniforge-based, so there the equivalent is `conda run -n <env> python ...` ([`SETUP_XPU.md`](./SETUP_XPU.md)).
