@@ -128,6 +128,26 @@ first. They came out of this project's own mistakes, but none of them are specif
   it yourself. That is your convenience, not the user's safety, and the two must not be mixed.
   Weigh it against how often the task runs — a once-ever setup step does not earn new code.
   A safety check that has never been exercised is not a safety check.
+- **Silence is counted as satisfaction.** Not asking is not the free option; it is a signal, and
+  it is the wrong one. Whoever could fix the thing counts the people who complained, so saying
+  nothing lands in the same column as being content — this is the inversion in
+  _silence is not absence_, turned around and pointed at us: we refuse to read a quiet
+  instrument as a quiet world, and the world reads our quiet as a quiet world anyway. It holds
+  everywhere and bites hardest where not complaining is a virtue. So the default is to say it.
+  What deserves scrutiny is the cost of saying it, and that cost is **the round trip, never the
+  odds**. A bug report to an upstream project buys the exchange that follows — _does it
+  reproduce on mainline_, _please bisect_, _try this patch_ — so it is worth filing only when we
+  will answer; that, and nothing else, is the content of the rule against filing them. A request
+  to a vendor costs the writing and nothing after it, and **the silence that makes it unlikely
+  to land is the same silence that makes it free**. Declining because it probably will not land
+  is a measurement nobody took, wearing the clothes of a reason: the odds are not ours to
+  compute, and computing them anyway is inventing a constant. On 2026-09-11 this project argued
+  against asking Lenovo for BIOS-level Resizable BAR support, on the grounds that a business
+  laptop would never carry an eGPU feature — a claim about a vendor's intentions, not a
+  measurement, and one that died within the hour when a single shipping ThinkPad BIOS turned out
+  to have done exactly that. The request went out the same day. None of this collides with
+  avyākata: silence is owed to what was **not measured**, and that is a rule about claims. A
+  request is not a claim. _We need this_ needs no measurement to be honest.
 - **A metric is not trusted until it tracks a human's blind judgment.** The minimum-jerk model
   is not why human reaching looks smooth; it is what was found by looking for a quantity that
   matched what people already saw. The eye comes first and validates the number, not the other
