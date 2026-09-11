@@ -147,7 +147,14 @@ first. They came out of this project's own mistakes, but none of them are specif
   measurement, and one that died within the hour when a single shipping ThinkPad BIOS turned out
   to have done exactly that. The request went out the same day. None of this collides with
   avyākata: silence is owed to what was **not measured**, and that is a rule about claims. A
-  request is not a claim. _We need this_ needs no measurement to be honest.
+  request is not a claim. _We need this_ needs no measurement to be honest. Then prefer the
+  shape that needs no decision from anyone. A request asks a person to choose to act, and they
+  may decline; a stuck problem laid out in the open asks nothing and is much harder to walk
+  past, because **people solve what looks solvable in front of them** — that instinct, not
+  altruism, is the engine under open source (the observation is Yukihiro Matsumoto's). So
+  publish the stuck state rather than the ask: what was measured, what was ruled out, exactly
+  where it stops, and what you can still run. And publish it where anyone can read it, since
+  whoever can solve it is usually not whoever you addressed.
 - **A metric is not trusted until it tracks a human's blind judgment.** The minimum-jerk model
   is not why human reaching looks smooth; it is what was found by looking for a quantity that
   matched what people already saw. The eye comes first and validates the number, not the other
