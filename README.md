@@ -139,6 +139,8 @@ RUST_LOG=info ./target/release/so101_impedance_ctrl \
 python examples/check_so101_impedance.py --shm-name so101_impedance
 ```
 
+ステップ 3 が Python 環境を必要とする最初の場所になる。作り方は [`SETUP_XPU.md`](SETUP_XPU.md)（英語）。ステップ 1〜2 のデーモンは Rust なので、Python 環境が無くても単体で動く。
+
 あとは `--robot.type=so101_follower_impedance` で遠隔操作なり記録なりを行う。どちらもロボットの設定から
 関節ごとの K/D を自動で埋める。
 
@@ -153,7 +155,6 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 - 隔離コアのセットアップ: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
 - ゲイン調整、小脳の立ち上げ、プロトコルの注意点: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)
 - LeRobot 一般の使い方 (記録、学習、評価): [`AGENT_GUIDE.md`](AGENT_GUIDE.md)
-- Intel GPU (XPU) での環境構築: [`SETUP_XPU.md`](SETUP_XPU.md) (英語)
 
 ## 実測値であって仮定ではない
 

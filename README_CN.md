@@ -127,6 +127,8 @@ RUST_LOG=info ./target/release/so101_impedance_ctrl \
 python examples/check_so101_impedance.py --shm-name so101_impedance
 ```
 
+第 3 步是第一个需要 Python 环境的地方，搭建方法见 [`SETUP_XPU.md`](SETUP_XPU.md)（英文）。第 1〜2 步的守护进程是 Rust 写的，没有 Python 环境也能单独运行。
+
 之后用 `--robot.type=so101_follower_impedance` 去做遥操作或录制即可。两者都会从机器人配置里自动填入
 每个关节的 K/D。
 
@@ -141,7 +143,6 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 - 隔离核心的配置：[`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
 - 增益调整、小脑上电、协议注意事项：[`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)
 - LeRobot 的一般用法（录制、训练、评估）：[`AGENT_GUIDE.md`](AGENT_GUIDE.md)
-- 在 Intel GPU (XPU) 上搭建环境：[`SETUP_XPU.md`](SETUP_XPU.md)（英文）
 
 ## 实测值而非假设
 

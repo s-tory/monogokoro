@@ -142,6 +142,9 @@ RUST_LOG=info ./target/release/so101_impedance_ctrl \
 python examples/check_so101_impedance.py --shm-name so101_impedance
 ```
 
+Step 3 is the first thing that needs the Python environment; building it is
+[`SETUP_XPU.md`](SETUP_XPU.md). The daemon in steps 1-2 is Rust and runs without it.
+
 Then teleoperate or record with `--robot.type=so101_follower_impedance`; both fill in per-joint K/D
 from the robot's config automatically.
 
@@ -156,7 +159,6 @@ housekeeping core that is **not** `--cpu-core`):
 - Setting up the isolated core: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
 - Tuning gains, cerebellum bring-up, protocol notes: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)
 - General LeRobot usage (recording, training, eval): [`AGENT_GUIDE.md`](AGENT_GUIDE.md)
-- Setting up the environment on an Intel GPU (XPU): [`SETUP_XPU.md`](SETUP_XPU.md)
 
 ## Measured, not assumed
 
