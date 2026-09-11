@@ -32,10 +32,20 @@ Random tensors: only shapes, dtype and optimiser state matter for peak memory.
     python examples/measure_act_vram_scaling.py --device cuda --batches 8,16,32 --capacities 12,24
 
 On an integrated GPU the pool is shared with system RAM, so a large batch can succeed here and
-still be impossible on a discrete card with less dedicated memory. Run it under a cgroup when
-the failure mode matters: an out-of-memory kill on an iGPU takes the desktop with it.
+still be impossible on a discrete card with less dedicated memory -- and an out-of-memory kill
+there takes the desktop with it.
 
-    systemd-run --user --scope -p MemoryMax=20G python examples/measure_act_vram_scaling.py
+A cgroup does not stop that, though this docstring recommended one until 2026-09-11. Device
+allocations are not charged to the process cgroup: 2 GiB on the XPU moved a scope's
+`memory.current` by 0.00 GiB, so `MemoryMax` bounds the host side only. Cap the allocator instead,
+which fails as a `torch.OutOfMemoryError` in-process rather than reaching the kernel:
+
+    import torch
+    total = torch.xpu.get_device_properties(0).total_memory / 2**30
+    torch.xpu.set_per_process_memory_fraction(11.5 / total)   # behave like an 11.5 GiB card
+
+`measure_eo1_vram_scaling.py` takes that ceiling as a required `--target-gib`, and is the better
+model to copy.
 """
 
 import argparse

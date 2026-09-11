@@ -153,11 +153,31 @@ killer after the compositor and `dbus-daemon`. **On 2026-08-30 this rig lost its
 session that way** — not a machine reboot, but everything on screen went. A discrete card has
 isolated VRAM and would have raised `torch.OutOfMemoryError` instead.
 
-Wrap long runs in a cgroup:
+**A cgroup does not prevent this, and this page said it did until 2026-09-11.** The advice here
+used to be `systemd-run --user --scope -p MemoryMax=20G lerobot-train ...`, on the assumption that
+the limit would bound the training run's device memory too. It does not. Measured that day: 2 GiB
+allocated on the XPU moved the scope's `memory.current` by **0.00 GiB**. Device allocations are not
+charged to the process cgroup, so `MemoryMax` bounds the host side only -- and the failure this
+section is about is on the device side. A run under a cgroup will reach the kernel's OOM killer
+exactly as one without it. It did, here, and took an editor with it.
 
-```bash
-systemd-run --user --scope -p MemoryMax=20G lerobot-train ...
+What actually bounds the device is the allocator itself:
+
+```python
+import torch
+total = torch.xpu.get_device_properties(0).total_memory / 2**30
+torch.xpu.set_per_process_memory_fraction(11.5 / total)   # behave like an 11.5 GiB card
 ```
+
+Past that ceiling torch raises `torch.OutOfMemoryError` -- a Python exception, in your process,
+which never reaches the kernel. It is also how you find out whether a batch would fit on a card you
+do not own yet. `examples/measure_eo1_vram_scaling.py` requires the equivalent flag for this
+reason.
+
+Keep a cgroup as well if you like, but know what it is for: the host side, where a multi-billion
+parameter backbone is built before it moves to the device. Size it for that -- `MemoryMax=14G` was
+too small to load a 3.8 B model and killed the process during startup, silently, with the results
+still in a buffered stdout that never flushed.
 
 ---
 
