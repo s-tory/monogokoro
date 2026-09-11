@@ -1,0 +1,83 @@
+# so101_impedance_ctrl as a system unit.
+#
+# Why a *system* unit and not a user one: the point of packaging this is to stop granting
+# CAP_SYS_NICE with setcap, which is lost on every `cargo build --release` and whose absence is
+# silent -- the daemon still starts, just without realtime, and the measurements quietly rot.
+# AmbientCapabilities is the fix, and a systemd *user* manager cannot supply it: it runs
+# unprivileged and cannot hand out a capability it does not hold. So this runs under the system
+# manager with User= dropping back to the operator.
+#
+# Install (this machine has no TTY for sudo; pkexec asks through GNOME):
+#
+#     pkexec install -m 0644 rust/so101_impedance_ctrl/so101-impedance.service \
+#       /etc/systemd/system/so101-impedance.service
+#     pkexec systemctl daemon-reload
+#
+# Start it when you are there to watch the arm:
+#
+#     systemctl start so101-impedance     # asks for authentication
+#     journalctl -u so101-impedance -f
+#
+# There is deliberately no [Install] section, so `systemctl enable` refuses. See the note at the
+# bottom before adding one.
+
+[Unit]
+Description=SO-101 impedance control daemon (1 kHz, isolated core)
+Documentation=file:///home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/README.md
+Documentation=file:///home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/PREEMPT_RT.md
+
+# The serial device must exist, but "an ACM device is present" is not "the arm is present" --
+# numbering follows plug order. This orders the start; it does not verify what is on the other end.
+After=dev-ttyACM0.device
+
+[Service]
+Type=simple
+User=s-tory
+Group=dialout
+
+# Replaces `setcap cap_sys_nice+ep`, which every rebuild deletes. This user's rtprio limit is 0,
+# so without the capability the daemon cannot take SCHED_FIFO at all -- and it does not fail loudly
+# when that happens.
+AmbientCapabilities=CAP_SYS_NICE
+CapabilityBoundingSet=CAP_SYS_NICE
+
+# On 2026-09-11 an out-of-memory kill on the shared iGPU pool took an editor and part of a chat
+# client, both of which carry oom_score_adj=300 and ask to die first. This daemon carried the
+# default 0 -- no worse than an ordinary app, and no better. A process holding an arm at 1 kHz
+# should not be an ordinary app. Matters most under the two-phase plan, where training runs beside
+# a live arm.
+OOMScoreAdjust=-1000
+
+# Without this the daemon prints nothing at all: the cerebellum backend it actually got, and the
+# first supply reading, are only ever reported at info.
+Environment=RUST_LOG=info
+
+WorkingDirectory=/home/s-tory/git/monogokoro/rust/so101_impedance_ctrl
+ExecStart=/home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/target/release/so101_impedance_ctrl \
+    --port /dev/ttyACM0 \
+    --shm-name so101_impedance \
+    --cpu-core 3 \
+    --priority 99
+
+# The cerebellum stays off here on purpose. Its GPU backend submits into the iGPU's single Vulkan
+# queue, shared with graphics, so a permanently resident cerebellum contends with anything else
+# training on that GPU. Add the flags by hand for a session that wants it:
+#     --cerebellum-backend gpu --cerebellum-cpu-core 1 \
+#     --cerebellum-weights /home/s-tory/.local/share/so101/cerebellum.bin
+
+# No restart. A daemon that failed was refused the port, refused realtime, or found no arm; each
+# of those wants a person, not another attempt at a motor.
+Restart=no
+
+# The daemon pins itself to --cpu-core. Setting CPUAffinity here as well would fight it.
+
+[Install]
+# Intentionally empty -- `systemctl enable` fails with "no installation config", which is the
+# point. Starting at boot means the arm takes torque with nobody watching, and a human watching
+# the arm has already stopped a run that no telemetry threshold caught. Two other things are
+# unresolved on this rig: the supply collapses below the servos' undervoltage limit under
+# six-motor load, and /dev/ttyACM0 is whatever enumerated first.
+#
+# When those are settled and someone has decided what conditions make an unattended arm
+# acceptable, add:
+#     WantedBy=multi-user.target
