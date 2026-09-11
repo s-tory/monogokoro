@@ -163,9 +163,13 @@ def measure(policy: EO1Policy, args, batch: int) -> tuple[float, float, int]:
 
     dev_mod.empty_cache()
     dev_mod.reset_peak_memory_stats()
+    # Time the last tenth of the run, not one step. A laptop drops to its sustained power limit
+    # inside a minute, so an early step reports a throughput the machine cannot hold -- and one
+    # step alone is noisy. Averaging the tail measures what a long run will actually get.
+    timed_from = max(1, args.iters - max(1, args.iters // 10))
     start = None
     for i in range(args.iters):
-        if i == args.iters - 1:
+        if i == timed_from:
             dev_mod.synchronize()
             start = time.perf_counter()
         loss, _ = policy.forward(sample)
@@ -173,7 +177,7 @@ def measure(policy: EO1Policy, args, batch: int) -> tuple[float, float, int]:
         optimiser.step()
         optimiser.zero_grad(set_to_none=True)
     dev_mod.synchronize()
-    elapsed = time.perf_counter() - start
+    elapsed = (time.perf_counter() - start) / (args.iters - timed_from)
     peak = dev_mod.max_memory_allocated() / 2**30
 
     del sample, optimiser, loss
