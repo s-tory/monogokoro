@@ -245,6 +245,11 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 - **守护进程不包含在 Python 的构建里。** 它是独立的 Cargo 项目，需要手动部署。
 - 面向阻抗机器人的**交互式标定和 `setup-motors`** 尚未实现。两者都请用原版 `so101_follower` 对同一批
   舵机执行，然后把标定文件复制过来 —— 两种机器人类型写入的是不同的目录。
+- **在集成显卡上跑训练可能会把桌面一起搞崩，而 cgroup 防不住。** GPU 显存和系统内存是同一个池子，
+  所以训练时的 OOM 会顺带干掉合成器和 `dbus-daemon`。`systemd-run -p MemoryMax=` **并不约束设备侧
+  的分配** —— 2026-09-11 实测，在 XPU 上分配 2 GiB，该 scope 的 `memory.current` 只动了 0.00 GiB，
+  所以包不包都一样会撞上内核的 OOM killer。那天就真撞上了，还捎带杀掉了一个编辑器。真正有效的是
+  `torch.xpu.set_per_process_memory_fraction`，详见 [`SETUP_XPU.md`](SETUP_XPU.md)（英文）。
 
 ## 上游
 

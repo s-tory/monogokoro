@@ -283,6 +283,13 @@ registers nor the feature matching said that much.
 - **Interactive calibration and `setup-motors`** are not implemented for the impedance robot. Run
   both with the stock `so101_follower` against the same servos, then copy the calibration across --
   the two robot types write to different directories.
+- **Training on an integrated GPU can take the desktop down, and a cgroup does not prevent it.**
+  GPU memory and system memory are one pool, so a training OOM sends the kernel's OOM killer after
+  the compositor and `dbus-daemon`. `systemd-run -p MemoryMax=` does not bound device allocations --
+  measured 2026-09-11, 2 GiB on the XPU moved the scope's `memory.current` by 0.00 GiB -- so a
+  wrapped run reaches the OOM killer exactly as an unwrapped one. It did that day, and took an
+  editor with it. What works is `torch.xpu.set_per_process_memory_fraction`; see
+  [`SETUP_XPU.md`](SETUP_XPU.md).
 
 ## Upstream
 

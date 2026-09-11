@@ -267,6 +267,13 @@ A/B 測定の全文は [README_DETAIL.md](README_DETAIL.md) にある。
 - インピーダンスロボット向けの**対話型キャリブレーションと `setup-motors`** は未実装。どちらも素の
   `so101_follower` で同じサーボに対して実行し、較正ファイルはコピーすること — 2 つのロボット型は
   別のディレクトリに書く。
+- **iGPU で学習を回すと OOM がデスクトップごと落とす。cgroup では防げない。** GPU メモリと
+  システムメモリが同じプールなので、学習の OOM がコンポジタや `dbus-daemon` を巻き添えにする。
+  `systemd-run -p MemoryMax=` は**デバイス側の確保を縛らない** — 2026-09-11 の実測で、XPU に
+  2 GiB 取っても cgroup の `memory.current` は 0.00 GiB しか動かなかった。包んでも落ちるときは
+  落ちる。実際にこの日、エディタが巻き添えで死んでいる。効くのは
+  `torch.xpu.set_per_process_memory_fraction` のほうで、詳細は
+  [`SETUP_XPU.md`](SETUP_XPU.md)（英語）。
 
 ## アップストリーム
 
