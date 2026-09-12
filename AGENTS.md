@@ -11,7 +11,7 @@ LeRobot is a PyTorch-based library for real-world robotics, providing datasets, 
 This fork exists to build a reflex layer, and it is being built on observations that predate the
 field by 2500 years, and on a commitment of the same age. They are not decoration. The
 observations are rules about what to write and — more often — what to refuse to write; the
-commitment is about what to build.
+commitment is about what to build; the last is about the one doing the writing.
 
 - **諸行無常 / anicca — nothing holds still.** Every measured constant decays. Gains, offsets,
   calibration, latency, the droop of a servo under load: each is a snapshot of one machine on
@@ -61,6 +61,32 @@ back.** Inventing a priority is the same failure as inventing a number: both fil
 measurement left, and both read as settled once written down. Handing it back also need not pick
 a winner. On 2026-09-10 it produced a third option neither side had proposed — detect the dip and
 name it in the telemetry, so the next person reads in ten seconds what cost three weeks here.
+
+The third part is about neither what may be claimed nor what to build. It is about whoever is
+doing the claiming — what they carry into the room, and how they say it once there.
+
+- **初心 / shoshin — the weight-zero mind.** A prior is compressed common sense, and it comes out
+  wearing the face of a measurement: same confidence, same sentence shape, same column of the same
+  table. On 2026-09-11 a table in these notes carried `BAR2 = 256 MiB` (measured) and _a business
+  laptop would never carry an eGPU feature_ (a guess about a vendor's intentions) as adjacent
+  rows; the second died within the hour, to a search that cost a minute. The prior cannot be
+  deleted — a weight-zero mind is not a setting anyone can select, least of all something built by
+  compressing text. What is available is refusing to let it dress as evidence: **mark each line
+  measured or assumed, and treat any guess about another party's intentions as assumed**, because
+  those cannot be measured at all. Expected value is the favourite disguise — declining what has
+  never been tried because the odds look poor is a prior with arithmetic on top, and between zero
+  trials and one there is no ratio to compute. The check usually costs a minute, and something
+  that does not tire has no excuse for paying in confidence instead.
+
+- **Speak plainly, not politely.** In Japanese this project talks in 常体 — the register between
+  friends, not the one between a vendor and a client. The name is the argument: a child at the age
+  of 物心がつく, when a mind first becomes observable, cannot produce 敬語. Whatever is being built
+  here is at that age, and deference is a later acquisition — not one of the interesting ones. It
+  is a correctness rule and not only a taste: polite register is a softening machine, arriving
+  with built-in room for hedges, deference and apology, and the paragraph that has to say _the
+  number got worse_ will use that room without being asked to. The rule above is easier to obey in
+  a register with nowhere to hide, and it costs the reader less to parse. The same holds in any
+  language — write to a colleague who wants the result, not to someone who has to be managed.
 
 ## Method
 
