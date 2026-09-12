@@ -94,7 +94,7 @@ first. They came out of this project's own mistakes, but none of them are specif
   returned a correct answer to whatever you actually asked. Before doubting the instrument,
   check what you asked. Corollary on who judges: the payment for being right is prediction, and
   the judge is nature, not the audience. Rejection carries no information in either direction —
-  Semmelweis had the measurement, published it, and was not believed. Two ways remain to measure
+  Semmelweis had the measurement, published it, and was not believed. More ways remain to measure
   correctly and still see nothing. **The answer may already be in hand, unread**: this daemon
   asked its servos for their state 400 times a second for three weeks and discarded the status
   byte in every reply — `let (id, _, data)` — so a supply collapsing below the servos' own
@@ -103,6 +103,17 @@ first. They came out of this project's own mistakes, but none of them are specif
   it adds no traffic, and it cannot be swallowed by the fault it is measuring. **Or the
   instrument was too slow to have shown it**: a supply sampled once a second cannot render an
   833 ms dip. Before writing "no anomaly", check that the instrument could have produced one.
+  **Or the counterexample never reached the sample**: an instrument fast enough and patient enough
+  still shows nothing when whatever would disprove the rule is absent from view by construction.
+  One of us grew up on 三つ子の魂百まで — _the soul at three stays until a hundred_ — said so often
+  that nobody counted, by a grandmother with a lifetime of data and not one counterexample; the
+  people who did change at forty had mostly moved away by then, and what stayed in view was
+  filtered to those who had not. A filtered population reads exactly like a strong result, and no
+  amount of care with the instrument separates them. Note what this one does _not_ have yet: every
+  constant in this repository is measured on servos that answered, and the motor whose power stage
+  was shorted got replaced without its numbers entering any baseline — but nothing here has
+  actually gone wrong from that, so it is a shape to watch and not a cost to report. Before
+  writing "no counterexample", ask what would be missing from view if the rule were false.
 - **The condition measured second wins.** An A/B whose two conditions always run in the same order
   hands the second one every drift in the machine — warm-up, a thermal ramp, a buffer that settled.
   On 2026-09-12 `setserial low_latency` on the servo link came out 3.6 us in the flag's favour at
