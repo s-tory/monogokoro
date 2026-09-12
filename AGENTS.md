@@ -103,6 +103,15 @@ first. They came out of this project's own mistakes, but none of them are specif
   it adds no traffic, and it cannot be swallowed by the fault it is measuring. **Or the
   instrument was too slow to have shown it**: a supply sampled once a second cannot render an
   833 ms dip. Before writing "no anomaly", check that the instrument could have produced one.
+- **The condition measured second wins.** An A/B whose two conditions always run in the same order
+  hands the second one every drift in the machine — warm-up, a thermal ramp, a buffer that settled.
+  On 2026-09-12 `setserial low_latency` on the servo link came out 3.6 us in the flag's favour at
+  3.5 sigma: large enough to write down, small enough to believe. Alternating which condition ran
+  first took it to 0.9 us at 1.0 sigma, and the flag does nothing whatsoever — `cdc_acm` never
+  stored it. A knob that does nothing still looks like it does something if it is always measured
+  second. So alternate the order, and print the scatter between repeats of the _same_ condition next
+  to the difference between conditions: while the difference is the smaller of the two, there is
+  nothing there yet, however many sigma the pooled number claims.
 - **A device that answers is not a device that works.** Every layer below the one you need can
   answer correctly while the thing you actually want is dead. A B580 over USB4 bound to `xe`,
   trained its edge connector at `16GT/s x4`, enumerated its own HDMI audio function and spun its

@@ -255,12 +255,15 @@ round trip does:
 
 **0.9 us apart at 1.0 sigma**, against 15 us of scatter between blocks -- no effect. Measured
 2026-09-12, follower arm on `/dev/ttyACM0` (CH343 `1a86:55d3`, `cdc_acm`, 1 Mbaud), 4800
-`Present_Position` reads per arm, round-robin over the six motors, from Python at normal priority.
+`Present_Position` reads per condition, round-robin over the six motors. Both sit above the ~256 us
+the daemon itself measures because this probe is Python at normal priority and flushes the input
+buffer before every read -- an overhead both conditions carry equally, which is all a comparison
+needs.
 
-The order of the two arms had to be alternated to get that number. Running the flag-off block first
-every time gave `-3.6 us` in the flag's favour, which is 3.5 sigma and looks like a result; it was
-warm-up drift over the run, and it disappeared when half the blocks ran flag-on first. A knob that
-does nothing will still look like it does something if it is always measured second.
+The order had to be alternated to get that number. Running the flag-off block first every time gave
+`-3.6 us` in the flag's favour, which is 3.5 sigma and looks like a result; it was warm-up drift
+over the run, and it disappeared when half the blocks ran flag-on first. A knob that does nothing
+will still look like it does something if it is always measured second.
 
 The FTDI `latency_timer` (16 ms by default, and a real win when it applies) is the knob people
 remember. It is an `ftdi_sio` feature and these bridges do not have it. The ~256 us per transaction
