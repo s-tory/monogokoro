@@ -86,7 +86,9 @@ fails fast if the name or `layout_version` doesn't match
 The isolated core spends nearly the whole tick blocked on I/O, so the servo link sets the ceiling --
 and the dominant cost is the **USB round trip**, not baud rate. Each transaction measures ~256 us
 against the ~160 us its bytes take at 1 Mbaud, and CDC-ACM exposes no latency knob (`latency_timer`
-is an FTDI feature these CH343 bridges do not have).
+is an FTDI feature these CH343 bridges do not have). Neither does `setserial ... low_latency`,
+which is worse than useless because it reports success -- measured in
+[`PREEMPT_RT.md`](./PREEMPT_RT.md), "Knobs that do nothing on this link".
 
 So count transactions, not bytes:
 

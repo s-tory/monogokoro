@@ -231,3 +231,38 @@ result.
 **Check this before buying, not after.** `modinfo <module> | grep intree` on a machine that
 already has the hardware, or whether the driver appears under `drivers/` in the mainline tree at
 all, answers it in one line.
+
+## 7. Knobs that do nothing on this link
+
+Once the isolation above is in place the control loop spends nearly every tick blocked on the
+servo link, so the next instinct is to go tune the serial port. There is nothing there.
+
+**`setserial /dev/ttyACM0 low_latency` does not change the round trip.** The flag is a
+`serial_core` / `usbserial` feature; the SO-101's bridge is a CH343 in CDC mode, driven by
+`cdc_acm`, which has no such flag to set.
+
+What makes it worth a section is _how_ it fails: **silently, and it cannot be caught by
+inspection.** `cdc_acm` accepts the `TIOCSSERIAL` and returns success without storing anything --
+even unprivileged -- so the command prints no error. And its `TIOCGSERIAL` zeroes `flags`
+unconditionally, so reading the port back afterwards shows the flag clear whether or not anything
+was stored. Neither the command's exit status nor the read-back carries information. Only the
+round trip does:
+
+|                   | mean     | p50   | p90   | p99   |
+| ----------------- | -------- | ----- | ----- | ----- |
+| `low_latency` off | 334.9 us | 329.6 | 370.9 | 475.8 |
+| `low_latency` on  | 334.0 us | 330.0 | 368.5 | 466.5 |
+
+**0.9 us apart at 1.0 sigma**, against 15 us of scatter between blocks -- no effect. Measured
+2026-09-12, follower arm on `/dev/ttyACM0` (CH343 `1a86:55d3`, `cdc_acm`, 1 Mbaud), 4800
+`Present_Position` reads per arm, round-robin over the six motors, from Python at normal priority.
+
+The order of the two arms had to be alternated to get that number. Running the flag-off block first
+every time gave `-3.6 us` in the flag's favour, which is 3.5 sigma and looks like a result; it was
+warm-up drift over the run, and it disappeared when half the blocks ran flag-on first. A knob that
+does nothing will still look like it does something if it is always measured second.
+
+The FTDI `latency_timer` (16 ms by default, and a real win when it applies) is the knob people
+remember. It is an `ftdi_sio` feature and these bridges do not have it. The ~256 us per transaction
+the daemon sees against ~160 us of wire time at 1 Mbaud is the USB round trip itself -- host
+scheduling, not tty buffering -- and no userspace flag reaches it.
