@@ -91,6 +91,16 @@ repos:
       args: ["-c", "pyproject.toml"]
       additional_dependencies: ["bandit[toml]"]
 
+  ##### Privacy #####
+  - repo: local
+    hooks:
+      - id: check-image-exif-gps
+        name: images must not carry GPS coordinates
+        entry: python scripts/ci/check_image_exif_gps.py
+        language: python
+        additional_dependencies: ["pillow"]
+        types_or: [jpeg, png, tiff]
+
   # TODO(Steven): Uncomment when ready to use
   ##### Static Analysis & Typing #####
   - repo: https://github.com/pre-commit/mirrors-mypy
