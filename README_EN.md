@@ -289,7 +289,12 @@ registers nor the feature matching said that much.
   or over-load. So **"a bit on one motor alone is not the supply, it is heat or load" is withdrawn
   (2026-09-14)**. Either a servo sees a dip the shared reading cannot, or bit0 is not voltage: the
   bit-to-name mapping is from secondary sources and has never been checked against a protocol
-  document. Both are open.
+  document. Both are open. **It is not independent of the supply, though.** At rest and limp, at
+  matched case temperature: **0.688/s on the bundled adapter (4.6 V) against 0.200/s on the
+  regulated one (4.9 V)**, with motor 5 appearing only on the bundled one. Temperature was measured
+  out rather than assumed out -- the regulated adapter gave 0.165/s at its coldest and 0.200/s warm,
+  so heat moves this by 0.035 and the supply by 0.49. Whatever bit 0 reports, the rail's standing
+  level sets how often it fires.
   `--serial-timeout-ms 2` is **worse** too (2 ms cuts replies that were going to arrive, and a late
   reply is read as the answer to the next question). **Every number measured here sits on top of
   this.** See [`AGENT_GUIDE.md`](./AGENT_GUIDE.md) for what to power it with.

@@ -168,7 +168,12 @@ lerobot-teleoperate \
 > a state with nothing to over-heat or over-load — and each occurrence lasts exactly one control
 > tick. Either a servo sees a dip the shared reading cannot, or bit 0 is not voltage: the
 > bit-to-name mapping is from secondary sources and is not confirmed against a protocol document.
-> Either way it is not the fault this section is about, and swapping the supply does not remove it.
+> It is not the fault this section is about, and a better supply does not remove it -- but it does
+> not leave it alone either. Measured at rest, limp, at matched case temperature: **0.688/s on the
+> bundled adapter (4.6 V) against 0.200/s on the regulated one (4.9 V)**, and motor 5 appears only
+> on the bundled one. Temperature was ruled out rather than assumed away: the regulated adapter
+> read 0.165/s at its coldest and 0.200/s warm, so heat moves this by 0.035 and the supply moves it
+> by 0.49. Whatever bit 0 is reporting, the rail's standing level sets how often it fires.
 >
 > **What does not work:** lowering `--pwm-max` or lengthening the ramp. Both were measured and both
 > made it _worse_ (26x and 18x more trips). Under-driving a lift does not reduce the load, it
