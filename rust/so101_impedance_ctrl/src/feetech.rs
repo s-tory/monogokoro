@@ -16,6 +16,10 @@ use serialport::{ClearBuffer, SerialPort};
 pub const HEADER: [u8; 2] = [0xFF, 0xFF];
 pub const BROADCAST_ID: u8 = 0xFE;
 
+/// Highest servo id this bus addresses. The SO101 is 1..=6; the array indexed by it carries an
+/// unused slot 0 rather than an offset nobody would remember to apply.
+pub const MAX_MOTOR_ID: usize = 6;
+
 pub const INST_PING: u8 = 0x01;
 pub const INST_READ: u8 = 0x02;
 pub const INST_WRITE: u8 = 0x03;
@@ -215,10 +219,21 @@ pub struct FeetechBus {
     ///
     /// OR-ed rather than kept per motor because the event this exists to catch is common to the
     /// whole bus: measured on this arm, an under-voltage trip raises the byte on all six servos in
-    /// the same tick, for the same 833 ms. A per-motor array would store six copies of one fact.
-    /// If a bit ever appears on one motor alone it is *not* the supply (over-heat and over-load are
-    /// per-servo), and the OR still reports which bit it was.
+    /// the same tick, for the same 833 ms.
+    ///
+    /// This used to add that a per-motor array would store six copies of one fact, and that a bit
+    /// on one motor alone is therefore not the supply. **Withdrawn 2026-09-14.** It holds for the
+    /// 833 ms event and for nothing else: re-counting the same 2026-09-10 run found 213 further
+    /// episodes under 5 ms, and 202 of those were a single motor (motor 6: 147, motor 5: 76),
+    /// carrying the same bit 0. Either a servo really does see its own rail dip, or the
+    /// bit-to-name mapping -- which `describe_servo_error` states is from secondary sources and
+    /// unconfirmed against any protocol document -- is wrong about bit 0. The OR cannot tell those
+    /// apart, which is why the per-motor bytes are now kept beside it.
     servo_error_acc: u8,
+    /// The same byte, per motor id. `None` means that motor sent no status packet this tick, which
+    /// is not the same as answering with no error: a dip deep enough to stop a servo replying
+    /// arrives as a read timeout, and scoring that as "cleared" would split one episode into two.
+    servo_error_by_id: [Option<u8>; MAX_MOTOR_ID + 1],
 }
 
 impl FeetechBus {
@@ -227,6 +242,7 @@ impl FeetechBus {
         Ok(Self {
             port,
             servo_error_acc: 0,
+            servo_error_by_id: [None; MAX_MOTOR_ID + 1],
         })
     }
 
@@ -290,6 +306,44 @@ impl FeetechBus {
         std::mem::replace(&mut self.servo_error_acc, 0)
     }
 
+    /// Per-motor counterpart of [`take_servo_error`](Self::take_servo_error), drained on the same
+    /// tick boundary so the two can never disagree about which tick a byte belonged to.
+    pub fn take_servo_error_by_id(&mut self) -> [Option<u8>; MAX_MOTOR_ID + 1] {
+        std::mem::replace(&mut self.servo_error_by_id, [None; MAX_MOTOR_ID + 1])
+    }
+
+    /// Reports every motor whose error byte *changed* since the last tick, updating `prev` as it
+    /// goes. Allocation-free by construction: this runs inside the 400 Hz control loop, so the
+    /// caller supplies the sink rather than receiving a collection.
+    ///
+    /// A motor with `None` in `observed` sent no status packet this tick and is skipped, leaving
+    /// its previous value alone. That branch is the reason this is a function and not four lines
+    /// inline: it never fires on a healthy bus, and it is exactly what happens during the dip this
+    /// instrument exists to time. Scoring a missing reply as "cleared" would split one episode in
+    /// two and report the recovery before it happened.
+    pub fn servo_error_transitions(
+        prev: &mut [u8; MAX_MOTOR_ID + 1],
+        observed: &[Option<u8>; MAX_MOTOR_ID + 1],
+        mut on_change: impl FnMut(usize, u8, u8),
+    ) {
+        for (id, seen) in observed.iter().enumerate() {
+            let Some(byte) = *seen else { continue };
+            if byte != prev[id] {
+                on_change(id, prev[id], byte);
+                prev[id] = byte;
+            }
+        }
+    }
+
+    /// Records one status packet's error byte. OR-ed within the tick because a motor can be
+    /// addressed more than once in a tick, and a byte seen on either transaction is a byte seen.
+    fn note_servo_error(&mut self, id: u8, servo_error: u8) {
+        self.servo_error_acc |= servo_error;
+        if let Some(slot) = self.servo_error_by_id.get_mut(id as usize) {
+            *slot = Some(slot.unwrap_or(0) | servo_error);
+        }
+    }
+
     /// Writes `value` to `reg` on servo `id` and waits for the status-packet ack.
     pub fn write_register(&mut self, id: u8, reg: (u8, u8), value: u32) -> std::io::Result<()> {
         let (addr, size) = reg;
@@ -301,7 +355,7 @@ impl FeetechBus {
         let (_, servo_error, _) = parse_status_packet(&resp).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, "bad Feetech ack")
         })?;
-        self.servo_error_acc |= servo_error;
+        self.note_servo_error(id, servo_error);
         Ok(())
     }
 
@@ -314,7 +368,7 @@ impl FeetechBus {
         let (_, servo_error, data) = parse_status_packet(&resp).ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, "bad Feetech status packet")
         })?;
-        self.servo_error_acc |= servo_error;
+        self.note_servo_error(id, servo_error);
         Ok(decode_unsigned(&data))
     }
 
@@ -386,7 +440,7 @@ impl FeetechBus {
                     format!("SYNC_READ reply out of order: expected motor {id}, got {resp_id}"),
                 ));
             }
-            self.servo_error_acc |= servo_error;
+            self.note_servo_error(id, servo_error);
             values.push(decode_unsigned(&data));
             cursor = end;
         }

@@ -78,9 +78,11 @@ FAULT_TENDON_INHIBITION = 1 << 5
 # cut-outs as bus errors.
 FAULT_SERVO_ERROR = 1 << 6
 
-# Bits of the Feetech status error byte. bit0 is the one this arm raises: on a 5 V supply the
-# servos sit ~0.6 V above their own Min_Voltage_Limit of 4.0 V, and lifting against gravity closes
-# that gap. The bit-to-meaning mapping is from secondary sources and is NOT confirmed against a
+# Bits of the Feetech status error byte. bit0 is the one this arm raises. How much room there is
+# above the servos' own Min_Voltage_Limit of 4.0 V is a property of the supply, not of the arm:
+# 0.6 V on the bundled 5 V 4 A adapter (idle 4.6 V, 2026-09-10) and 0.9 V on a regulated 5 V 6 A+
+# one (idle 4.9 V, 2026-09-14). Lifting against gravity closed the first and does not close the
+# second. The bit-to-meaning mapping is from secondary sources and is NOT confirmed against a
 # primary protocol document; what is measured is that all six raise bit0 together for the length of
 # a supply dip (2026-09-10, 833 ms, while a once-a-second supply read still said 4.5 V).
 SERVO_ERR_VOLTAGE = 1 << 0
@@ -125,10 +127,17 @@ def describe_servo_error(byte: int) -> list[str]:
     publish the byte layout. Unknown bits are reported by index rather than dropped.
 
     The *pattern* carries as much as the bits do, and that part is measured: on this arm an
-    under-voltage dip raises bit0 on all six servos in the same tick, whereas over-heat and
-    over-load are properties of one joint. So "every motor at once" and "one motor alone" are
-    different diagnoses even when the bit is the same, which is why the caller is told which case
-    it is looking at rather than just which bit was set.
+    under-voltage dip raises bit0 on all six servos in the same tick. So "every motor at once" and
+    "one motor alone" are different diagnoses even when the bit is the same, which is why the
+    caller is told which case it is looking at rather than just which bit was set.
+
+    What the single-motor case *is* remains open. This used to say it would be over-heat or
+    over-load, since those belong to one joint; **withdrawn 2026-09-14**, because bit0 appears on
+    one motor alone as well. It does so at roughly 0.17/s on motor 6 with the arm limp, no duty
+    commanded, a 27 C case and a rail sitting at 4.9 V -- a state with nothing to over-heat or
+    over-load, and 0.9 V of room above the trip. Each such episode lasts exactly one 400 Hz tick.
+    So either a servo can see its own rail dip where the shared reading does not, or bit0 is not
+    voltage and the unconfirmed mapping above is wrong. Both are live; neither is measured.
     """
     if not byte:
         return []

@@ -2,7 +2,7 @@
 
 use so101_impedance_ctrl::feetech::{
     build_packet, checksum, decode_sign_magnitude, encode_sign_magnitude, parse_status_packet,
-    BROADCAST_ID, CURRENT_SIGN_BIT, INST_READ, INST_SYNC_READ,
+    FeetechBus, BROADCAST_ID, CURRENT_SIGN_BIT, INST_READ, INST_SYNC_READ, MAX_MOTOR_ID,
 };
 
 #[test]
@@ -253,4 +253,85 @@ fn sync_read_reply_survives_a_stray_byte_between_replies() {
         assert_eq!((data[0] as u16) | ((data[1] as u16) << 8), positions[i]);
         cursor = start + resp_len;
     }
+}
+
+#[test]
+fn servo_error_transitions_reports_each_edge_once() {
+    // The instrument the 2026-09-10 baseline was measured with lived only in an uncommitted build,
+    // so the numbers survived and the thing that produced them did not. This is the committed
+    // version: edge-triggered, per motor, at the loop rate. It reports a change and then stays
+    // quiet, because a servo holding its error byte for 833 ms is one episode and not 333 of them.
+    let mut prev = [0u8; MAX_MOTOR_ID + 1];
+    let mut seen = Vec::new();
+
+    let mut tick = |observed: [Option<u8>; MAX_MOTOR_ID + 1], out: &mut Vec<(usize, u8, u8)>| {
+        FeetechBus::servo_error_transitions(&mut prev, &observed, |id, from, to| {
+            out.push((id, from, to))
+        });
+    };
+
+    let mut all_quiet = [None; MAX_MOTOR_ID + 1];
+    for id in 1..=MAX_MOTOR_ID {
+        all_quiet[id] = Some(0x00);
+    }
+    let mut all_tripped = all_quiet;
+    for id in 1..=MAX_MOTOR_ID {
+        all_tripped[id] = Some(0x01);
+    }
+
+    tick(all_quiet, &mut seen);
+    assert!(seen.is_empty(), "a healthy tick must say nothing");
+
+    tick(all_tripped, &mut seen);
+    assert_eq!(
+        seen.len(),
+        MAX_MOTOR_ID,
+        "the rail took all six down at once"
+    );
+    assert!(seen.iter().all(|&(_, from, to)| from == 0x00 && to == 0x01));
+
+    seen.clear();
+    tick(all_tripped, &mut seen);
+    tick(all_tripped, &mut seen);
+    assert!(
+        seen.is_empty(),
+        "a held byte is one episode, not one per tick"
+    );
+
+    tick(all_quiet, &mut seen);
+    assert_eq!(
+        seen.len(),
+        MAX_MOTOR_ID,
+        "and the recovery is the closing edge"
+    );
+    assert!(seen.iter().all(|&(_, from, to)| from == 0x01 && to == 0x00));
+}
+
+#[test]
+fn a_motor_that_did_not_reply_is_not_a_motor_that_cleared() {
+    // The branch that never fires on a healthy bus, and the only one that matters during the dip
+    // this instrument exists to time: a rail low enough to disturb a servo's replies produces a
+    // read timeout, not a status packet reading zero. Scoring the silence as "cleared" would end
+    // the episode early, restart it on the next reply, and report a recovery that never happened.
+    let mut prev = [0u8; MAX_MOTOR_ID + 1];
+    let mut seen = Vec::new();
+
+    let mut only_six = [None; MAX_MOTOR_ID + 1];
+    only_six[6] = Some(0x01);
+    FeetechBus::servo_error_transitions(&mut prev, &only_six, |id, f, t| seen.push((id, f, t)));
+    assert_eq!(seen, vec![(6, 0x00, 0x01)]);
+
+    // Nobody answers at all: the episode must stay open and nothing must be reported.
+    seen.clear();
+    let silence = [None; MAX_MOTOR_ID + 1];
+    FeetechBus::servo_error_transitions(&mut prev, &silence, |id, f, t| seen.push((id, f, t)));
+    assert!(seen.is_empty(), "silence is not a recovery");
+    assert_eq!(prev[6], 0x01, "and it must not forget the episode is open");
+
+    // Motor 6 answers again, still tripped: still the same episode, still nothing to report.
+    FeetechBus::servo_error_transitions(&mut prev, &only_six, |id, f, t| seen.push((id, f, t)));
+    assert!(
+        seen.is_empty(),
+        "the same byte after a gap is the same episode"
+    );
 }

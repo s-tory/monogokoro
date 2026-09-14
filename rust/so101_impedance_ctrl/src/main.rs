@@ -716,7 +716,12 @@ mod cli_tests {
 }
 
 fn main() {
-    env_logger::init();
+    // `info` by default rather than `env_logger`'s `error`, because everything this daemon says
+    // about its own state -- the config line, which privileged steps it got, the servo-error
+    // transitions below -- is logged at `info` or `warn`. Leaving that to `RUST_LOG` meant a run
+    // could look clean solely because nobody exported it, which is how the 2026-09-10 baseline's
+    // instrument came to exist only in an uncommitted build. `RUST_LOG` still overrides this.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Cli::parse();
 
     assert!(
@@ -959,6 +964,10 @@ fn main() {
         [0.0; shm::NUM_CONTEXT],
         0,
     );
+
+    // Last error byte *observed* from each motor, for the edge detector below. Zeroed rather than
+    // `None` because "no error" is the state a motor is assumed to be in until it says otherwise.
+    let mut prev_servo_error_by_id = [0u8; feetech::MAX_MOTOR_ID + 1];
 
     log::info!("entering control loop at {} Hz", args.loop_hz);
     loop {
@@ -1362,6 +1371,20 @@ fn main() {
         if servo_error != 0 {
             fault_flags |= shm::FAULT_SERVO_ERROR;
         }
+        // Edge-triggered, per motor, at the loop's own rate -- the only instrument here with the
+        // resolution to separate the two populations these bytes contain. The Python sampler reads
+        // shm at 50 Hz against this loop's 400 Hz, so it sees one tick in eight: enough to time an
+        // 833 ms rail collapse, blind to a single-tick blip, and the 2026-09-10 run held 213 of
+        // the latter against 1 of the former. Only transitions are logged, which on that run would
+        // have been about two lines a second.
+        let observed_by_id = bus.take_servo_error_by_id();
+        FeetechBus::servo_error_transitions(
+            &mut prev_servo_error_by_id,
+            &observed_by_id,
+            |id, from, to| {
+                log::warn!("servo_error mono_ns={now_ns} motor={id} {from:#04x} -> {to:#04x}");
+            },
+        );
         let leader_servo_error = leader.as_mut().map_or(0, |l| l.take_servo_error());
         if leader_servo_error != 0 {
             fault_flags |= shm::FAULT_SERVO_ERROR;

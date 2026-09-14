@@ -276,6 +276,20 @@ registers nor the feature matching said that much.
   `--ramp 5`): `--pwm-max 700` makes it **26x worse** and `--ramp 15` **18x worse**. Both push the
   command below the force a lift actually needs, so the arm never reaches the target, pins itself
   against the clamp, and turns a short large current into a long moderate one.
+- **A better supply removed the collapse at the defaults, and not everywhere.** Swapped to an
+  `LTE36ES-S1-301` (5 V 6.2 A, 31 W) on 2026-09-14: idle 4.9 V, so **0.9 V of margin**, 4.8 V while
+  holding against gravity, 4.50 V at worst while a hand pushed the arm around. Counted off the
+  400 Hz error byte, same pose and same gains: at the defaults, **one 833 ms collapse in 329 s
+  became nothing at all over 5 ms in 233 s**; at `--pwm-max 700`, **8 episodes over 100 ms became
+  1**, of 390 ms. **Each condition is one run and the two adapters were not alternated**, so the
+  direction is established and the size is an estimate.
+- **The single-tick population is not the rail, and the supply did not remove it.** One servo
+  raising bit0 for exactly one 400 Hz tick happens on motor 6 at roughly 0.17/s **with the arm
+  limp, no duty commanded, a 27 C case and 0.9 V of headroom** -- a state with nothing to over-heat
+  or over-load. So **"a bit on one motor alone is not the supply, it is heat or load" is withdrawn
+  (2026-09-14)**. Either a servo sees a dip the shared reading cannot, or bit0 is not voltage: the
+  bit-to-name mapping is from secondary sources and has never been checked against a protocol
+  document. Both are open.
   `--serial-timeout-ms 2` is **worse** too (2 ms cuts replies that were going to arrive, and a late
   reply is read as the answer to the next question). **Every number measured here sits on top of
   this.** See [`AGENT_GUIDE.md`](./AGENT_GUIDE.md) for what to power it with.

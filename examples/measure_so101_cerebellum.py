@@ -374,10 +374,21 @@ def _servo_error_episodes(rows: list[dict]) -> list[float]:
     long episodes; the noise floor produces many one-sample ones, so the lengths are reported
     alongside the count and not averaged into it.
 
-    Measured that day for scale: the bundled 5V4A adapter gave one 833 ms episode in 329 s with
-    the defaults, and 6 in 77 s once `--pwm-max` was lowered -- so a change of setup shows up
-    here as a change in count, and the duration stays pinned by how long the rail takes to
-    recover.
+    **This counter is the coarse instrument, and the numbers below are not its own.** It walks the
+    CSV, which `hold` samples at `--interval` (50 Hz by default) against the daemon's 400 Hz loop:
+    it sees one tick in eight. That is ample for a rail collapse of several hundred ms and blind to
+    the single-tick population, which it can neither reliably catch nor time -- a one-tick blip
+    reaches it, if at all, as one sample. For those, read the daemon's own `servo_error` transition
+    lines, which are logged per motor at the loop rate.
+
+    Measured for scale, all from the 400 Hz log rather than from here. Bundled 5V4A adapter,
+    2026-09-10: one 833 ms episode in 329 s at the defaults, and 8 over 100 ms in 77 s once
+    `--pwm-max` was lowered to 700. Regulated 5 V 6 A+ adapter, 2026-09-14, same pose and gains:
+    nothing at all over 5 ms in 233 s at the defaults, and one 390 ms episode still present at
+    `--pwm-max 700`. The single-tick population survived the swap in both conditions and appears
+    with the arm limp as well, so it is not the rail -- see `describe_servo_error`.
+
+    Neither adapter was measured against the other in an alternating order; each is one run.
     """
     episodes: list[float] = []
     start: float | None = None
