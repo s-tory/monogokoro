@@ -126,7 +126,15 @@ first. They came out of this project's own mistakes, but none of them are specif
   byte in every reply — `let (id, _, data)` — so a supply collapsing below the servos' own
   under-voltage limit arrived as a read timeout, and cost three weeks of suspecting bus load,
   serial timeouts and wiring. Re-reading a reply you already have beats asking a new question:
-  it adds no traffic, and it cannot be swallowed by the fault it is measuring. **Or the
+  it adds no traffic, and it cannot be swallowed by the fault it is measuring. **Or it was read
+  and passed over.** That byte was discarded; these were displayed. In one day, 2026-09-14: a
+  clippy warning printed and answered with "clippy done", when CI runs the same lint at
+  `-D warnings` and the push went red; `reasoning_tokens` equal to `completion_tokens` read twice
+  -- the field saying the whole budget went to thinking and none of it to the answer -- before
+  going to look at the hardware for why generation was slow; and a claim that nobody had asked
+  for failed predictions to be written down, made with the note saying exactly that already in
+  context. **A line displayed and not acted on is worth less than one never read, because it
+  leaves behind the impression of having checked.** **Or the
   instrument was too slow to have shown it**: a supply sampled once a second cannot render an
   833 ms dip. Before writing "no anomaly", check that the instrument could have produced one.
   **Or the counterexample never reached the sample**: an instrument fast enough and patient enough
