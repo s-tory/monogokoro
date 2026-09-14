@@ -55,7 +55,7 @@ namesake, _outside_ the reflex arc -- it corrects the loop without ever being in
 The pontine relay has no row in that table, because it is not a rung on this ladder -- it is a
 path. It carries context down from the top of the stack to the cerebellum's mossy fibres, closes no
 loop of its own, and therefore has no rate. What it carries, and what it deliberately does not, is
-[section 5](README_DETAIL_EN.md#5-a-pontine-relay-so-the-cerebellum-can-be-told-what-it-is-holding).
+[section 5](README_DETAILS_EN.md#5-a-pontine-relay-so-the-cerebellum-can-be-told-what-it-is-holding).
 
 The top row is the cheapest thing in this repository and possibly the most load-bearing. Contact
 transients are faster than any loop on the list: a fingertip meeting an object produces its force
@@ -77,7 +77,7 @@ readable -- after contact the commanded position keeps advancing while the achie
 range of force now spreads across far more encoder counts, which is exactly why a load cell has a
 flexure, to turn force into a displacement large enough to measure. The signal was already there;
 the padding gives it a finer ruler. By how much, on this arm, is not measured yet -- and the
-candidate that could eat the whole effect is the static friction described under Known limitations.
+candidate that could eat the whole effect is the static friction described under [Known limitations](#known-limitations).
 
 None of these four layers is a new idea. Impedance control is Hogan, 1985. A granule expansion read
 out linearly and taught by a climbing fibre is Marr, Albus and Ito -- and Albus built a controller
@@ -123,7 +123,7 @@ on what was measured is as long as it is.
                           ╚═════════════════════════╝
 ```
 
-**Each layer is written up in [README_DETAIL_EN.md](README_DETAIL_EN.md)** — how it is built, why, and what did not work.
+**Each layer is written up in [README_DETAILS_EN.md](README_DETAILS_EN.md)** — how it is built, why, and what did not work.
 
 ## Quick start
 
@@ -178,7 +178,7 @@ out to be wrong. They are specific to it and worth re-measuring on another machi
 | cerebellum step       | 307 µs mean idle, **2969 µs max under load** | one step can outlast an entire 2.5 ms control period; the max barely moves with layer size, so it is submission jitter rather than compute                                                                                   |
 | ACT forward pass      | **30 ms** (bf16), 44 ms (fp32)               | on the iGPU, two 480x640 cameras; 16 ms with one, so vision dominates. `n_action_steps` defaults to 100, so a 30 Hz robot infers once every 3.3 s -- 0.9% duty. `examples/load_igpu_with_act.py`                             |
 
-The full A/B measurements are in [README_DETAIL_EN.md](README_DETAIL_EN.md).
+The full A/B measurements are in [README_DETAILS_EN.md](README_DETAILS_EN.md).
 
 <p align="center">
   <img src="media/readme/wrist_stereo.jpg" width="420"
@@ -192,123 +192,19 @@ registers nor the feature matching said that much.
 
 ## Known limitations
 
-- **The pontine context is not verified on hardware, and nothing yet _infers_ it.** The channel is
-  wired end to end -- config to shared memory to mossy fibres, with the demonstration's context
-  recorded as an action column -- but its two constants were measured against the CPU reference
-  rather than an arm, and a policy reproduces whatever the operator labelled until it learns to
-  predict it from the images.
-- **The cerebellum's droop numbers were retaken on 2026-09-08; the 2026-08-28 ones are withdrawn.**
-  The old session reported `shoulder_pan` 3.00 -> 0.00, `elbow_flex` 9.00 -> 0.00 and
-  `shoulder_lift` 12.57 -> 3.00 counts of droop at unchanged K. Do not rely on any of it.
-  `shoulder_pan`'s power stage had shorted, and writing to it pulled the shared rail from 4.6 V to
-  2.4 V for ~820 ms. This page previously claimed the _comparison_ survived because both sides ran
-  under the same fault. That was wrong: the fault began partway through the session, so which side
-  of it each run fell on decides the direction of the effect -- and the CSVs are gone.
-  **The retaken numbers** (rail mean 4.52 V, min 4.50 V; one pose file across all runs; K
-  unchanged; two stereo cameras carried on the wrist): droop of `shoulder_lift` 5.00 -> 1.02 and
-  `elbow_flex` 21.00 -> 1.00 counts. `err = pwm / K` is an **identity** when nothing
-  but a PD law is in the path: it agreed to the decimal for arithmetic reasons, not physical ones.
-  And sd 0.00 only says the arm is stationary, which **stiction produces as readily as balance**.
-  Four runs at identical settings put `shoulder_lift`'s holding duty at 100 / 180 / 200 / 255, every
-  one of them at sd 0.00. **A holding duty is not a value but a band.** Measured by approaching the
-  same target from above and from below, that band is 18.0 counts wide on `shoulder_lift`
-  (duty 360) and 12.9 counts on `elbow_flex` (duty 194) -- **the same order as the holding duty it
-  brackets**. 100/315 is not the band's value; it is the edge reached from above (`--approach-from`,
-  2026-09-09, rail 4.40-4.51 V, case 26-32 C, 25% RH). The ff readout still becomes path-dependent
-  with `--cerebellum-cf-deadband`. And the `--cerebellum-ff-max` clamp being reached on two joints
-  **was not inflated**: on a healthy rail `elbow_flex` still asks for 315 and still hits the 300
-  clamp. **A clamp that binds in normal operation cannot tell normal from abnormal**, so it needs
-  re-siting -- not yet done, because 315 is one edge of one pose's band and the legitimate maximum
-  across poses is unmeasured.
-- **The feedforward decayed instead of settling. Fixed; the fix is unmeasured.** In both learning
-  runs it bled away with a time constant of minutes while the joint sat perfectly still, then
-  snapped back to the clamp once the arm finally slipped. The cause was the rule, not the arm: the
-  decay was gated on the eligibility trace but not on the climbing fibre, so the fixed point was
-  `w = cf / leak` -- weights that need a standing error to hold them up. The residual that leaves is
-  under a PWM count, narrower than the stick band, and inside that band the joint cannot move to
-  report the error at all. Both halves are now gated on a live climbing fibre, and
-  `--cerebellum-cf-deadband` (default 5.0) sets where the reflex counts as silent. **That default was measured on a
-  healthy arm on 2026-09-08 and is too low.** It was derived as "above the leak's residual, below one
-  encoder count times the joint stiffness" -- but position is quantised and the error never reaches
-  zero. `wrist_flex` (K=10) alternates between +/-2 counts, so its feedback duty never drops below
-  20 and never enters a band of 5; the ff hunted between 0 and 126 with a **69-second period**.
-  Raising it to 25 removes the oscillation entirely (0.2 counts over 173 s, and within 4% of the
-  true load) -- but the ff then freezes the moment the error enters the band, so **it stops being a
-  measurement of the load and becomes a function of how far the transient got**. Which way to settle
-  it is undecided. `0` restores the old behaviour. **The stick band is not an artefact of the
-  supply collapsing** -- separated on 2026-09-09: the band appears on a healthy rail (4.44-4.51 V
-  mean, 4.40 V min). Its width is now measured -- approaching
-  one target from above and from below leaves `shoulder_lift` resting 18.0 counts apart (duty 120
-  vs 480) and `elbow_flex` 12.9 counts apart (duty 300 vs 106). **The band is the same order as the
-  holding duty it brackets**, and four runs at identical settings, every one at sd 0.00, put that
-  duty at 100/180/200/255. **Neither `err = pwm/K` holding nor sd 0.00 is evidence of balance**:
-  the first is an identity when only a PD law is in the path, and the second says the arm is
-  stationary, which stiction produces as readily as balance.
-- **Touch stops at how hard, not where or whether it is slipping.** A compliant fingertip turns grip
-  force into encoder counts, and that is the whole of the tactile sense here: one scalar per jaw,
-  available to the reflex at 400 Hz. Where on the finger contact happened, and the micro-vibration
-  that says an object has _begun_ to slip, both need a purpose-built sensor rather than a commodity
-  part -- and what this repository is trying to show is how much of the stack can be built without
-  one. The wrist camera can see that something has slipped, at ~30 Hz; it cannot see it starting.
-- **What it can learn is bounded by its mossy fibres.** They carry pose, velocity, tracking error
-  and current, so it can learn gravity, joint friction and a fixed payload -- but nothing tells it
-  which of two payloads is in the gripper, so it cannot tell them apart. Camera features are the
-  obvious missing bundle.
-- **Demonstrations do not label the layers below the policy.** A torque-off leader is a position
-  sensor and nothing else, so episodes are labelled with the config's default K/D and ACT trained on
-  them learns to reproduce those gains, not to vary them. The cerebellum's weights likewise persist
-  to a file and not into any dataset. The leader gripper's force feedback is the first step toward
-  fixing the first half; deriving stiffness from cross-demonstration variance is the likely next.
-- **Open-loop PWM** is noisier than true torque control -- the STS3215 has no host-streamable torque
-  register, so this is a constraint of the hardware rather than a choice.
-- **The "comms errors" seen while driving are the supply.** Separated on 2026-09-10. Every Feetech
-  status packet carries the servo's own error byte and the daemon was discarding it. Once read,
-  **all six motors raise the voltage bit (bit0) in the same tick, for the same 833 ms** -- not one
-  servo protecting itself, but the shared rail collapsing. `Min_Voltage_Limit` is the factory 40
-  (4.0 V) on every motor and idle `Present_Voltage` is 46 (4.6 V), so **the margin is 0.6 V**. The
-  bundled 5V4A adapter drops from 4.97 V to 4.59 V with nothing but the servos connected (measured
-  at the adapter terminals with a meter). A burst past `--max-blind-ticks` zeroes the duty and the
-  arm falls, which in the duty columns is indistinguishable from a gain that is merely too soft --
-  and was read as exactly that for weeks. **`supply_decivolts` is sampled round-robin once a
-  second, so an 833 ms dip cannot appear in it. The servos are the fastest voltmeter on this
-  machine.** They now surface as the `servo_error` column and `FAULT_SERVO_ERROR`.
-  **Software cannot rescue this** (measured the same day against the defaults `--pwm-max 1000` /
-  `--ramp 5`): `--pwm-max 700` makes it **26x worse** and `--ramp 15` **18x worse**. Both push the
-  command below the force a lift actually needs, so the arm never reaches the target, pins itself
-  against the clamp, and turns a short large current into a long moderate one.
-- **A better supply removed the collapse at the defaults, and not everywhere.** Swapped to an
-  `LTE36ES-S1-301` (5 V 6.2 A, 31 W) on 2026-09-14: idle 4.9 V, so **0.9 V of margin**, 4.8 V while
-  holding against gravity, 4.50 V at worst while a hand pushed the arm around. Counted off the
-  400 Hz error byte, same pose and same gains: at the defaults, **one 833 ms collapse in 329 s
-  became nothing at all over 5 ms in 233 s**; at `--pwm-max 700`, **8 episodes over 100 ms became
-  1**, of 390 ms. **Each condition is one run and the two adapters were not alternated**, so the
-  direction is established and the size is an estimate.
-- **The single-tick population is not the rail, and the supply did not remove it.** One servo
-  raising bit0 for exactly one 400 Hz tick happens on motor 6 at roughly 0.17/s **with the arm
-  limp, no duty commanded, a 27 C case and 0.9 V of headroom** -- a state with nothing to over-heat
-  or over-load. So **"a bit on one motor alone is not the supply, it is heat or load" is withdrawn
-  (2026-09-14)**. Either a servo sees a dip the shared reading cannot, or bit0 is not voltage: the
-  bit-to-name mapping is from secondary sources and has never been checked against a protocol
-  document. Both are open. **It is not independent of the supply, though.** At rest and limp, at
-  matched case temperature: **0.688/s on the bundled adapter (4.6 V) against 0.200/s on the
-  regulated one (4.9 V)**, with motor 5 appearing only on the bundled one. Temperature was measured
-  out rather than assumed out -- the regulated adapter gave 0.165/s at its coldest and 0.200/s warm,
-  so heat moves this by 0.035 and the supply by 0.49. Whatever bit 0 reports, the rail's standing
-  level sets how often it fires.
-  `--serial-timeout-ms 2` is **worse** too (2 ms cuts replies that were going to arrive, and a late
-  reply is read as the answer to the next question). **Every number measured here sits on top of
-  this.** See [`AGENT_GUIDE.md`](./AGENT_GUIDE.md) for what to power it with.
+- [The pontine context is unverified on hardware](README_DETAILS_EN.md#the-pontine-context-is-unverified-on-hardware)
+- [The cerebellum droop numbers were retaken](README_DETAILS_EN.md#the-cerebellum-droop-numbers-were-retaken) -- the 2026-08-28 numbers are withdrawn.
+- [The feedforward decayed instead of settling](README_DETAILS_EN.md#the-feedforward-decayed-instead-of-settling) -- fixed, the fix unmeasured.
+- [Touch has no where and no slip](README_DETAILS_EN.md#touch-has-no-where-and-no-slip)
+- [The mossy fibres bound what can be learned](README_DETAILS_EN.md#the-mossy-fibres-bound-what-can-be-learned) -- the camera-derived features are missing.
+- [Demonstrations do not label the layers below](README_DETAILS_EN.md#demonstrations-do-not-label-the-layers-below)
+- **Open-loop PWM** -- the STS3215 has no host-streamable torque register. Noisier than true torque control, and a hardware constraint rather than a choice.
+- [The comms errors were the supply](README_DETAILS_EN.md#the-comms-errors-were-the-supply)
+- [A better supply did not remove every collapse](README_DETAILS_EN.md#a-better-supply-did-not-remove-every-collapse)
+- [The single-tick bit0 survived the supply swap](README_DETAILS_EN.md#the-single-tick-bit0-survived-the-supply-swap)
 - **The daemon is not part of the Python build.** It is a separate Cargo project, deployed by hand.
-- **Interactive calibration and `setup-motors`** are not implemented for the impedance robot. Run
-  both with the stock `so101_follower` against the same servos, then copy the calibration across --
-  the two robot types write to different directories.
-- **Training on an integrated GPU can take the desktop down, and a cgroup does not prevent it.**
-  GPU memory and system memory are one pool, so a training OOM sends the kernel's OOM killer after
-  the compositor and `dbus-daemon`. `systemd-run -p MemoryMax=` does not bound device allocations --
-  measured 2026-09-11, 2 GiB on the XPU moved the scope's `memory.current` by 0.00 GiB -- so a
-  wrapped run reaches the OOM killer exactly as an unwrapped one. It did that day, and took an
-  editor with it. What works is `torch.xpu.set_per_process_memory_fraction`; see
-  [`SETUP_XPU.md`](SETUP_XPU.md).
+- [Interactive calibration is not implemented](README_DETAILS_EN.md#interactive-calibration-is-not-implemented)
+- [An iGPU training OOM takes the desktop down](README_DETAILS_EN.md#an-igpu-training-oom-takes-the-desktop-down) -- a cgroup does not prevent it.
 
 ## Upstream
 
