@@ -1,4 +1,4 @@
-# ものごころ/MONOGOKORO, Thinks of Things, 物心 — 詳細
+# ものごころ=MONOGOKORO, Thinks of Things, 物心 — 詳細
 
 **日本語** | [English](README_DETAILS_EN.md) | [简体中文](README_DETAILS_CN.md)
 
