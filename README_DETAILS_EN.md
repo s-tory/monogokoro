@@ -290,6 +290,26 @@ them learns to reproduce those gains, not to vary them. The cerebellum's weights
 to a file and not into any dataset. The leader gripper's force feedback is the first step toward
 fixing the first half; deriving stiffness from cross-demonstration variance is the likely next.
 
+### The bundled supply collapses at the defaults
+
+**On the bundled 5 V 4 A adapter the rail collapses at this fork's defaults.** The rate and the
+conditions are under [A better supply did not remove every collapse](#a-better-supply-did-not-remove-every-collapse),
+and how it was separated is under [The comms errors were the supply](#the-comms-errors-were-the-supply).
+What belongs here is only what is worth knowing before the symptom shows up.
+
+- **It is not that the arm will not run.** It runs, and collapses intermittently.
+- **The symptom never mentions voltage.** While the rail is down the servos' replies are
+  disturbed and the host sees a read timeout. From the duty columns alone that is
+  indistinguishable from "K is too soft" -- which is how it was read here.
+- **Whether upstream position control does the same has not been measured.** A stock
+  `so101_follower` writes `Goal_Position` and lets the servo's own PID drive, but the current it
+  takes to lift against gravity is required either way. **"It was never seen before" is not
+  evidence**: the error byte was discarded for three weeks, so upstream collapsing unobserved is
+  not ruled out.
+
+How to choose a supply -- rating, plug, and why load regulation matters more than maximum current
+-- is in [`AGENT_GUIDE.md`](./AGENT_GUIDE.md) §4.5.
+
 ### The comms errors were the supply
 
 **The "comms errors" seen while driving are the supply.** Separated on 2026-09-10. Every Feetech
@@ -316,7 +336,8 @@ holding against gravity, 4.50 V at worst while a hand pushed the arm around. Cou
 400 Hz error byte, same pose and same gains: at the defaults, **one 833 ms collapse in 329 s
 became nothing at all over 5 ms in 233 s**; at `--pwm-max 700`, **8 episodes over 100 ms became
 1**, of 390 ms. **Each condition is one run and the two adapters were not alternated**, so the
-direction is established and the size is an estimate.
+direction is established and the size is an estimate. (The bundled adapter was measured
+**second**, though, so any drift favoured it, and it lost anyway.)
 
 ### The single-tick bit0 survived the supply swap
 
