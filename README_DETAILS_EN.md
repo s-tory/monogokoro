@@ -307,8 +307,34 @@ What belongs here is only what is worth knowing before the symptom shows up.
   evidence**: the error byte was discarded for three weeks, so upstream collapsing unobserved is
   not ruled out.
 
-How to choose a supply -- rating, plug, and why load regulation matters more than maximum current
--- is in [`AGENT_GUIDE.md`](./AGENT_GUIDE.md) §4.5.
+**What to do, and what it buys. Two routes, and only one of them has been measured here.**
+
+_Measured._ A bigger 5 V supply: **regulated 5 V, 6 A or more, 5.5x2.1 mm centre-positive** -- the
+plug the arm already uses, so it is a straight swap. Judge a candidate on its quoted _load
+regulation_ rather than its maximum current ("4 A" is a ceiling, not a promise about what the
+voltage does on the way there); a label will not tell you, so this comes off a datasheet or a
+product page. What the swap bought is under
+[A better supply did not remove every collapse](#a-better-supply-did-not-remove-every-collapse).
+
+_Not measured here._ Run the servos at the voltage they were designed for. The STS3215 is a
+**7.4 V** servo that the standard build runs at 5 V: vendors list it as **6-7.4 V**, and its rated
+torque is quoted at 6 V and 7.4 V, never at 5 V. Running at the bottom of the range costs torque,
+and lost torque is paid for in current -- which is what drags the rail down in the first place. The
+servos' own `Max_Voltage_Limit` reads 80 (8.0 V) on this arm, so 7.4 V is inside what they will
+accept, and it moves the trip point from 0.9 V away to 3.4 V away. Expect the binding constraint to
+move with it: `Max_Temperature_Limit` is 70 C and the loaded shoulder already reached 35 C at 5 V.
+**None of that paragraph is a measurement on this rig** -- no 7.4 V supply has been run here. It is
+the direction the datasheet points, and it travels better than a part number, because a DC-DC
+module takes any input while the brick below is 100 V only.
+
+<p align="center">
+  <img src="media/psu_label_20260914.jpg" width="520"
+       alt="Adapter label: L.T.E. LTE36ES-S1-301, INPUT 100V~ 50/60Hz 0.75A, OUTPUT 5V 6.2A, MAX 31W" />
+</p>
+
+The one measured here, for the record: **`LTE36ES-S1-301`** (Li Tone Electronics), 5 V 6.2 A, 31 W,
+sold by Akizuki as catalogue number 111105 for about 2,300 yen. **Japan only, and not merely on
+availability -- its input is 100 V.**
 
 ### The comms errors were the supply
 
@@ -355,7 +381,7 @@ so heat moves this by 0.035 and the supply by 0.49. Whatever bit 0 reports, the 
 level sets how often it fires.
 `--serial-timeout-ms 2` is **worse** too (2 ms cuts replies that were going to arrive, and a late
 reply is read as the answer to the next question). **Every number measured here sits on top of
-this.** See [`AGENT_GUIDE.md`](./AGENT_GUIDE.md) for what to power it with.
+this.** See [The bundled supply collapses at the defaults](#the-bundled-supply-collapses-at-the-defaults) for what to power it with.
 
 ### Interactive calibration is not implemented
 
