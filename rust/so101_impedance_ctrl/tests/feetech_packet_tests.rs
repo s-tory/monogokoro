@@ -270,14 +270,11 @@ fn servo_error_transitions_reports_each_edge_once() {
         });
     };
 
+    // Slot 0 stays `None`: there is no motor 0, and a reply from one would be a bug elsewhere.
     let mut all_quiet = [None; MAX_MOTOR_ID + 1];
-    for id in 1..=MAX_MOTOR_ID {
-        all_quiet[id] = Some(0x00);
-    }
+    all_quiet[1..=MAX_MOTOR_ID].fill(Some(0x00));
     let mut all_tripped = all_quiet;
-    for id in 1..=MAX_MOTOR_ID {
-        all_tripped[id] = Some(0x01);
-    }
+    all_tripped[1..=MAX_MOTOR_ID].fill(Some(0x01));
 
     tick(all_quiet, &mut seen);
     assert!(seen.is_empty(), "a healthy tick must say nothing");
