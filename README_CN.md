@@ -169,9 +169,10 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
        alt="Two U20CAM-1080P camera boards on a printed bracket at the SO-101 wrist, each held by two standoffs at diagonal corners, with the silicone fingertips behind them" />
 </p>
 
-上表中手腕立体视觉的那两行，可以在这张照片里读出来。镜头是广角的，看一眼就知道。每块摄像头板只用
-对角两颗铜柱固定，也是看一眼就知道 —— 而后者是叠加在视差上的那个常数偏移最有可能的来源。寄存器和
-特征匹配都没说到这一步。
+上表中手腕立体视觉的那两行，可以在这张照片里读出来。摄像头是两块 InnoMaker U20CAM-1080P
+（1080P USB2.0 UVC）。镜头是广角的，看一眼就知道。每块摄像头板只用对角两颗铜柱固定，
+也是看一眼就知道 —— **用的是 M2.6 的六角铜柱，直接自攻进 3D 打印件里**。
+而这正是叠加在视差上的那个常数偏移最有可能的来源。寄存器和特征匹配都没说到这一步。
 
 ## 已知限制
 

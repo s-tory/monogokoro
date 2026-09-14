@@ -181,9 +181,11 @@ A/B 測定の全文は [README_DETAILS.md](README_DETAILS.md) にある。
        alt="Two U20CAM-1080P camera boards on a printed bracket at the SO-101 wrist, each held by two standoffs at diagonal corners, with the silicone fingertips behind them" />
 </p>
 
-上の表の手首ステレオの 2 行は、この写真で読める。レンズが広角なのは見れば分かる。各カメラ基板が
-対角 2 本のスペーサだけで留まっているのも見れば分かり — 後者が、視差に乗った定数オフセットの
-出どころとして一番ありそうなものだ。レジスタもマッチングも、そこまでは言わなかった。
+上の表の手首ステレオの 2 行は、この写真で読める。カメラは InnoMaker U20CAM-1080P
+（1080P USB2.0 UVC）が 2 枚。レンズが広角なのは見れば分かる。各カメラ基板が対角 2 本の
+スペーサだけで留まっているのも見れば分かる ── **M2.6 の六角スタンドオフスペーサを、3D プリント部品へ
+セルフタップで締めたもの**だ。これが、視差に乗った定数オフセットの出どころとして一番ありそうな
+ものになる。レジスタもマッチングも、そこまでは言わなかった。
 
 ## 既知の制限
 

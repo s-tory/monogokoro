@@ -185,10 +185,11 @@ The full A/B measurements are in [README_DETAILS_EN.md](README_DETAILS_EN.md).
        alt="Two U20CAM-1080P camera boards on a printed bracket at the SO-101 wrist, each held by two standoffs at diagonal corners, with the silicone fingertips behind them" />
 </p>
 
-The two wrist-stereo rows above are legible in this photograph. That the lenses are wide is visible.
-That each camera board is held by only two standoffs at diagonal corners is also visible -- and the
-second is the most likely source of the constant offset riding on the disparity. Neither the
-registers nor the feature matching said that much.
+The two wrist-stereo rows above are legible in this photograph. The cameras are two InnoMaker
+U20CAM-1080P boards (1080P USB 2.0 UVC). That the lenses are wide is visible. That each camera
+board is held by only two standoffs at diagonal corners is also visible -- **M2.6 hex standoff spacers,
+self-tapped straight into the printed part** -- and that is the most likely source of the constant
+offset riding on the disparity. Neither the registers nor the feature matching said that much.
 
 ## Known limitations
 
