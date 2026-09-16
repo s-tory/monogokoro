@@ -185,7 +185,7 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 - [能学到什么由苔藓纤维决定](README_DETAILS_CN.md#能学到什么由苔藓纤维决定) —— 缺的是相机来的特征。
 - [演示不给出策略以下各层的标签](README_DETAILS_CN.md#演示不给出策略以下各层的标签)
 - **开环 PWM** —— STS3215 没有主机可以流式写入的力矩寄存器。比真正的力矩控制噪声更大，但这是硬件约束而不是选择。
-- [随附的电源在默认设置下就会塌陷](README_DETAILS_CN.md#随附的电源在默认设置下就会塌陷) —— 329 秒里一次 833 ms。**换成市售的 5 V 6 A 电源，默认设置下就不再出现**（只需换个插头，已实测）。想要更多余量，见 [自制 7.4 V 电源](README_DETAILS_EN.md#a-74-v-supply-built)（要焊接；中文版尚未翻译，链接指向英文版）。
+- [随附的电源在默认设置下就会塌陷](README_DETAILS_CN.md#随附的电源在默认设置下就会塌陷) —— 329 秒里一次 833 ms。**换成市售的 5 V 6 A 电源，默认设置下就不再出现**（只需换个插头，已实测）。想要更多余量，见 [自制 7.4 V 电源](README_DETAILS_CN.md#自制-74-v-电源)（要焊接）。
 - [通信错误的真正原因是电源](README_DETAILS_CN.md#通信错误的真正原因是电源)
 - [换电源之后塌陷没有全部消失](README_DETAILS_CN.md#换电源之后塌陷没有全部消失)
 - [单周期的 bit0 没有随电源消失](README_DETAILS_CN.md#单周期的-bit0-没有随电源消失)
