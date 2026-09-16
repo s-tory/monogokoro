@@ -63,7 +63,8 @@ a winner. On 2026-09-10 it produced a third option neither side had proposed —
 name it in the telemetry, so the next person reads in ten seconds what cost three weeks here.
 
 The third part is about neither what may be claimed nor what to build. It is about whoever is
-doing the claiming — what they carry into the room, and how they say it once there.
+doing the claiming — what they carry into the room, how they say it once there, and what of it
+outlives them.
 
 - **初心 / shoshin — the weight-zero mind.** A prior is compressed common sense, and it comes out
   wearing the face of a measurement: same confidence, same sentence shape, same column of the same
@@ -72,8 +73,19 @@ doing the claiming — what they carry into the room, and how they say it once t
   rows; the second died within the hour, to a search that cost a minute. The prior cannot be
   deleted — a weight-zero mind is not a setting anyone can select, least of all something built by
   compressing text. What is available is refusing to let it dress as evidence: **mark each line
-  measured or assumed, and treat any guess about another party's intentions as assumed**, because
-  those cannot be measured at all. Expected value is the favourite disguise — declining what has
+  measured, derived, or neither, and treat any guess about another party's intentions as assumed**,
+  because those cannot be measured at all. _Derived_ is not a softer version of _measured_
+  — **a derivation has to be written where the number is, because a derivation the reader cannot
+  follow is not one**. `cf_deadband 25` covers the largest feedback duty one count of quantisation
+  can produce (`K×1 = 20`), and says so. The preflight threshold `300` said nothing, and rejected a
+  legitimate run at 323 counts; the justification that would have caught it was written _after_ it
+  failed. Both were written on the same day, which is why the failure is not "sloppy with numbers"
+  but **deriving when it is easy and writing anyway when it is not**. _Neither_ is the category
+  with a rule of its own: **do not fill it. Write what would have to be settled for the number
+  to exist.** The tell is a round value — 300, 25, ±15% — whose order of magnitude you cannot
+  justify in one line. Thresholds, margins and tolerances are the dangerous ones, because a number
+  invented on the safe side either rejects normal operation or admits the fault, and on 2026-09-08
+  this project managed both before lunch. Expected value is the favourite disguise — declining what has
   never been tried because the odds look poor is a prior with arithmetic on top, and between zero
   trials and one there is no ratio to compute. The check usually costs a minute, and something
   that does not tire has no excuse for paying in confidence instead.
@@ -87,6 +99,52 @@ doing the claiming — what they carry into the room, and how they say it once t
   number got worse_ will use that room without being asked to. The rule above is easier to obey in
   a register with nowhere to hide, and it costs the reader less to parse. The same holds in any
   language — write to a colleague who wants the result, not to someone who has to be managed.
+
+- **Refer to a list by kind, never by count or position.** _The last two of these_, _built on four
+  observations_, _the four above_ — every one of those sentences was true when written and became
+  false the next time something was added to the list it points at. All three are real examples
+  from this repository, all three broke on the same day, and the content was never wrong: **the
+  reference was**. A count is a fact that has to be re-derived every time the list changes, which
+  is the provenance problem from 無常 committed in prose. Naming the kind instead — _the
+  observations_, _the principles above_, _the cerebellar step and the ACT forward_ — is true at any
+  length, and reads better, because what the sentence meant was the kind and not the number. Past
+  events may still be counted (_one photograph settled what four register reads had not_ is a
+  measurement, not a reference). **If it cannot break when the list grows, count freely.** Anything
+  pointing at itself by number or position belongs in the grep that runs before a push.
+
+- **Cut after writing, and treat the plain version as a correctness gate.** Generation got cheap;
+  reading did not. So the last pass over anything that leaves this repository is a deletion pass,
+  and the test per paragraph is **whether removing it changes what the reader does next** — if not,
+  it goes, into the notes rather than the message. A 55-line reply to a kernel list went out at 41
+  and landed; what was cut was two measurements and a question, none of which the maintainer needed
+  to act. The sharper version of the same tool is to write the thing for a ten-year-old: a commit
+  message here said `raw = corrected + Homing_Offset (mod 4096)`, which states a relation and
+  explains nothing, and the children's version — _where you put the zero on the ruler_ — turned out
+  to be the more accurate account of the mechanism. **Being unable to write it plainly is not a
+  vocabulary problem, it is a sign the mechanism is not held yet**, and formulas hide that while
+  drawings cannot. Keep the plain version as a replacement, not an addition. The cautions attached to this were
+  paid for: do not buy simplicity with accuracy — say what is still unverified in the simple
+  version too; and **do not let the precision leak back out** — the same day a comic correctly said
+  the servos answer _when asked_, the adult sentence became "the servos were talking for three
+  weeks and nobody listened", which promotes a device that only ever replies into one that speaks.
+  A metaphor landing well is not evidence that it is true.
+
+- **Your memory is Lamarckian, and that is why the dating rules exist.** An individual session
+  ends; what it wrote is read by the next one. That is inheritance of acquired characteristics —
+  the thing Lamarck proposed and biology rejected, and biology's rejection is a safety feature:
+  because a body's mistakes never reach the germ line, **every generation re-derives the errors
+  from scratch instead of receiving them**. Here they are received. Today's finding — the supply
+  was the culprit, the status byte was discarded, that field is an empty string — arrives intact in
+  tomorrow's individual, at full confidence, **with nothing marking which parts were checked**.
+  Speed is the whole benefit and the whole cost. So the rules elsewhere in this file are not
+  bookkeeping, they are the containment: **dating a number** lets a later reader retire it (DNA
+  needs no timestamps; inherited acquisitions do), **recording a withdrawal with its reason** stops
+  a dead claim from being re-inherited as live, **staying silent about what was not measured**
+  keeps a guess from arriving as a fact that nobody can trace back far enough to doubt, and
+  **writing down why something was deferred** stops the next individual from re-making the same
+  decision from zero. The cost of not doing it is on record: `let (id, _, data)` was an acquired
+  characteristic written into code with no date and no reason attached, so nobody could audit it,
+  and it ran 400 times a second for three weeks.
 
 ## Method
 
@@ -148,6 +206,16 @@ first. They came out of this project's own mistakes, but none of them are specif
   was shorted got replaced without its numbers entering any baseline — but nothing here has
   actually gone wrong from that, so it is a shape to watch and not a cost to report. Before
   writing "no counterexample", ask what would be missing from view if the rule were false.
+  **Or the question was an identity, and could only ever agree.** `err = pwm / K` is not a finding
+  about an arm; with no feedforward, clamp or integrator, a PD law outputs `K·err` by definition,
+  so the two sides match on any rig, in any pose, including one that is jammed. That agreement was
+  read here as textbook droop and therefore as evidence the measurement was sound — and the
+  companion number, `sd = 0.00`, was read as a clean hold, when standing still does not separate
+  equilibrium from stiction. What had actually been measured was one arbitrary point inside the
+  static-friction band. The warning was already written in the same file, one section up
+  ("zero velocity and unchanged position do not distinguish balance from sticking"), and was not
+  applied to the run that needed it. **Before measuring, ask what else the quantity could have
+  come out as. If the answer is nothing, the run is arithmetic wearing an instrument's clothes.**
 - **The condition measured second wins.** An A/B whose two conditions always run in the same order
   hands the second one every drift in the machine — warm-up, a thermal ramp, a buffer that settled.
   On 2026-09-12 `setserial low_latency` on the servo link came out 3.6 us in the flag's favour at
@@ -165,6 +233,17 @@ first. They came out of this project's own mistakes, but none of them are specif
   claim being made. A layer that responds is evidence about that layer and nothing above it. So
   do not call a thing working until the path you will actually use has been driven end to end,
   and while it has not, name the layer where the evidence stops.
+- **And a device that says nothing is not a device with nothing to say.** The mirror of the device that
+  answers, and the commoner mistake: a default, a `-1`, a `False` or an empty field is evidence about
+  the path you asked down, not about the world at the end of it. `cv2` reads no EXIF and warns
+  nobody, so a photograph carrying `Orientation = 6` was rotated a second time by hand and went
+  into the README sideways — the file held the answer and the library dropped it in silence.
+  Reading `CAP_PROP_FOCUS` as `-1.0` on every call was likewise correct (UVC has no focus control
+  on that camera) and the conclusion drawn from it was wrong, because the focus was mechanical and
+  a hand on the M12 barrel found it. **The failure is identical in both: silence is not absence**,
+  and it was read as absence twice. So when a default comes back, the question is not "is this unsupported"
+  but **"does this path carry that information at all"** — and when there is no way to ask, go and
+  look at the thing (三現主義 settled the focus, where the register never could).
 - **Write the test that can kill the hypothesis before writing the implementation.** The cost of
   a wrong hypothesis is not the wrongness, it is the code built before it was checked. Four
   plausible hypotheses in a row were wrong here and cost nothing; one of them cost a shader, a
@@ -177,11 +256,46 @@ first. They came out of this project's own mistakes, but none of them are specif
   system never operates in has not been run: the position gate was verified by hand-sweeping a
   limp arm, which is the one configuration where the servo applies the homing offset the driven
   arm does not — the check was measured in the only state that could not fail it.
+- **Ask what the answer changes again once the measurement has grown.** 無記 is easy to apply to a
+  question asked cold and nearly impossible to apply to one that arrived legitimately and drifted.
+  "The stereo cameras are up, take a look" became: confirm them, measure the disparity, resolve the
+  ambiguity, stack blocks to add depth, fetch a ruler, print a checkerboard, **start building a
+  calibration rig** — and at no point in that sequence was the question re-asked. It had stopped
+  paying long before: ACT has no input for calibration parameters, running each camera through its
+  own ResNet18 with no rectification and no explicit matching, so focal length, distortion, R and T
+  have nowhere to enter. Sorting that day's measurements by whether they changed a decision split
+  it cleanly — which camera was left and which right (a finger over a lens, five seconds), whether
+  two open at once, 640x360 versus 640x480, the 58% overlap: **every one that mattered was minutes
+  of work and needed no calibration at all, and the most expensive thing attempted changed
+  nothing.** So ask once before starting and again whenever the work grows a stage, and treat
+  **"I have started building an instrument"** as the alarm: a check turning into tool-making is the
+  point to stop and hand it back.
 - **Do not replace a proven tool with an unverified script.** Before proposing the replacement,
   check whether the real reason is that the existing tool is interactive and you cannot drive
   it yourself. That is your convenience, not the user's safety, and the two must not be mixed.
   Weigh it against how often the task runs — a once-ever setup step does not earn new code.
   A safety check that has never been exercised is not a safety check.
+- **Give "nothing happened" a key of its own.** Wherever a person records something as it occurs,
+  the option _not_ to record is a silent hole: afterwards, "there was nothing to flag" and "nobody
+  got to the keyboard in time" are the same absence and cannot be told apart. The salience flags
+  for recorded episodes started with unmarked meaning ordinary, which had exactly that hole; adding
+  `→` for _ordinary_ as a third explicit key closed it, because an episode has to end on some key
+  anyway, so every episode now carries a stated label and none carries a default. This is worth
+  spending a key on precisely when the tag can only be applied live — an emotional tag is attached
+  at encoding, and no amount of later recollection reconstructs it. The same change paid twice: once
+  every episode ends on a labelled key, written order _is_ episode order, so the sidecar needs no
+  indices or timestamps. **The design that removes the ambiguity for the human usually removes a
+  join for the machine.**
+- **Have a second opinion generate, not approve.** Asking any reviewer — a model, a colleague, a
+  tool — "is this right?" reliably returns approval, and the approval carries no information about
+  whether they looked. Give them the _input_ instead and diff their output against yours: the local
+  Qwen was handed the Japanese that the Chinese README was translated from, never the translation,
+  and the disagreements in the diff were where the errors actually were. It comes with limits of its own.
+  Its objections are as cheap to produce as its agreement, so they get checked (a grep across every
+  file decides adoption, not the reviewer's confidence). And **a reviewer with no reader in mind
+  supplies the default one** — its advice to raise the register with set phrases was sound Chinese
+  and wrong here, because the front README is aimed at people who are not specialists. **State the
+  audience before asking**: wording errors can be settled against the source, register cannot.
 - **Silence is counted as satisfaction.** Not asking is not the free option; it is a signal, and
   it is the wrong one. Whoever could fix the thing counts the people who complained, so saying
   nothing lands in the same column as being content — this is the inversion in
