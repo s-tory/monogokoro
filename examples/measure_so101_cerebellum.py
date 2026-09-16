@@ -63,6 +63,8 @@ import argparse
 import contextlib
 import json
 import math
+import random
+import select
 import signal
 import statistics
 import sys
@@ -89,6 +91,9 @@ from lerobot.robots.so101_impedance_follower.shm_client import (
 _CFG = SO101ImpedanceFollowerConfig(shm_name="so101_impedance")
 DEFAULT_K = dict(zip(MOTOR_NAMES, _CFG.default_k, strict=True))
 DEFAULT_D = dict(zip(MOTOR_NAMES, _CFG.default_d, strict=True))
+# The joint the blind trial names its gains after: the one carrying the most gravity, so it is the
+# one a hand judges first. Every other joint is scaled from it by the shipped ratio.
+LIFT_JOINT = "shoulder_lift"
 
 
 def _gain(value: str):
@@ -297,6 +302,217 @@ def cmd_hold(args) -> None:
         json.dump(summary, f, indent=2)
     _print_summary(summary)
     print(f"\nsamples -> {args.out}")
+
+
+def scaled_gains(lift_k: float) -> tuple[dict, dict]:
+    """Gains for the whole arm, named by what the lift joint gets.
+
+    One number has to move the arm's compliance together, because a hand judges the arm and not a
+    joint. Scaling off the shipped set keeps the ratios that exist for a reason -- a flat K is
+    either too soft at the shoulder or stiff enough at `wrist_roll` to turn its velocity noise into
+    a full-duty limit cycle.
+    """
+    f = lift_k / DEFAULT_K[LIFT_JOINT]
+    return ({m: DEFAULT_K[m] * f for m in MOTOR_NAMES}, {m: DEFAULT_D[m] * f for m in MOTOR_NAMES})
+
+
+def blind_plan(candidates: list[float], repeats: int, seed: int, order: str = "shuffled") -> list[float]:
+    """The trial order: every candidate once, then `repeats` of them again.
+
+    Generated before a single verdict is heard and written out with the results, so the mapping can
+    be checked afterwards rather than trusted.
+
+    `shuffled` is the blind: knowing that the last one was the stiff one makes whatever follows
+    feel softer, whichever gain it actually carries. `descending` gives that effect up on purpose,
+    and buys something back -- walking one direction makes the *boundary* legible ("from here it is
+    too soft"), needs fewer trials, and starts stiff, which matters when the arm has to be lifted
+    out of limp before the first trial. The bias it admits has a known sign, so it can be carried
+    in the record instead of being removed. **Whichever is used belongs next to the verdicts**, and
+    is written to the result file for that reason.
+
+    Back-to-back duplicates are rejected either way. The repeats exist to catch an unstable
+    judgement, and a repeat the judge can *see* coming -- "that felt identical, it must be the same
+    one" -- measures their memory instead. If no arrangement avoids it (two candidates, say), the
+    best available order is returned rather than looping forever.
+    """
+    if order == "descending":
+        # Repeats go at the end, taken from the middle of the range, where the boundary usually
+        # sits and where a wobbling judgement costs the most.
+        head = sorted(candidates, reverse=True)
+        mid = head[len(head) // 2 :] + head[: len(head) // 2]
+        tail = [k for k in mid if k != head[-1]][:repeats] if repeats else []
+        return head + tail
+    plan = list(candidates) + list(candidates[:repeats])
+    rng = random.Random(seed)
+    for _ in range(200):
+        rng.shuffle(plan)
+        if all(a != b for a, b in zip(plan, plan[1:], strict=False)):
+            break
+    return plan
+
+
+def cmd_blind(args) -> None:
+    """Holds one pose while K is switched underneath it, without ever releasing the arm.
+
+    Why this exists rather than a loop of `hold` runs: `hold` walks the target back to wherever the
+    arm was when it started and then releases, which is correct when that place is safe and wrong
+    when it is the pose being measured. Running the trials as separate processes therefore left the
+    arm unheld for the seconds between them -- process teardown, startup, and the next ramp -- and
+    on 2026-09-16 it fell out of a horizontal reach during exactly that gap. Nothing electrical
+    showed it: the servos logged no error byte, because a released arm is not a fault.
+
+    So the sequence lives inside one process, the gains cross-fade instead of stepping, and the
+    release at the end goes to `--rest-pose` (a pose captured with the arm somewhere it can be left
+    limp) rather than to wherever this run happened to begin.
+
+    The trial order is shuffled from `--seed` and written out with the verdicts, so the mapping
+    exists before any verdict is heard and can be checked afterwards. Nothing about which gain is
+    loaded is printed while the run is going: the point of the blind is that "20 is stiff" must not
+    colour the next answer.
+    """
+    pose = _load_pose(args.pose_file)
+    rest = _load_pose(args.rest_pose) if args.rest_pose else None
+
+    _scaled = scaled_gains
+    candidates = [float(x) for x in args.k_candidates.split(",")]
+    plan = blind_plan(candidates, args.repeats, args.seed, args.order)
+
+    trials: list[dict] = []
+    stop = False
+
+    def _sigint(_sig, _frm):
+        nonlocal stop
+        stop = True
+
+    signal.signal(signal.SIGINT, _sigint)
+
+    with SO101ImpedanceChecker(shm_name=args.shm_name) as checker:
+        checker.set_pwm_mode()
+        checker.enable_torque()
+        start = {m: s["present_pos"] for m, s in checker.read_state().items()}
+        drift = max(abs(pose[m] - start[m]) for m in MOTOR_NAMES)
+        # A fixed ramp is a fixed *time*, so the further the arm has to travel the faster it is
+        # driven -- and the speed is what breaks, not the distance. On 2026-09-16 a run starting
+        # 474 ticks away rode on at 79 ticks/s and was fine; the next one started 3105 ticks away,
+        # rode the same 6 s ramp at 517 ticks/s, and oscillated until the arm came down. Capping
+        # the rate turns a long approach into a slow one instead of a violent one.
+        ramp = args.ramp
+        if args.max_approach_rate > 0:
+            ramp = max(ramp, drift / args.max_approach_rate)
+        print(
+            f"resting pose is {drift:.0f} ticks from the stored target; "
+            f"ramping over {ramp:.1f}s ({drift / ramp:.0f} ticks/s)"
+        )
+        if ramp > args.ramp * 1.01:
+            print(
+                f"  (stretched from {args.ramp:.0f}s to stay under --max-approach-rate "
+                f"{args.max_approach_rate:.0f} ticks/s -- the arm is far from the pose; watch it move)"
+            )
+        if rest is None:
+            print("no --rest-pose given: the arm will be released where this run started")
+
+        # The lift onto the pose runs at the shipped gains. Raising a limp arm at the first
+        # trial's K would fail outright whenever that trial is a soft one, and the arm would be
+        # dragged along the table instead of lifted.
+        k, d = dict(DEFAULT_K), dict(DEFAULT_D)
+
+        def _hold_for(seconds: float, target_of, k_from, k_to, blend_s: float) -> None:
+            """Commands the arm for `seconds`, cross-fading the gains over the first `blend_s`."""
+            t0 = time.monotonic()
+            while (t := time.monotonic() - t0) < seconds and not stop:
+                f = min(1.0, t / blend_s) if blend_s > 0 else 1.0
+                kk = {m: k_from[0][m] + (k_to[0][m] - k_from[0][m]) * f for m in MOTOR_NAMES}
+                dd = {m: k_from[1][m] + (k_to[1][m] - k_from[1][m]) * f for m in MOTOR_NAMES}
+                checker.move_to(target_of(t), k=kk, d=dd)
+                time.sleep(args.interval)
+
+        try:
+            # Onto the pose at the first trial's gains.
+            _hold_for(
+                ramp,
+                lambda t: {
+                    m: start[m] + (pose[m] - start[m]) * min(1.0, t / ramp if ramp else 1.0)
+                    for m in MOTOR_NAMES
+                },
+                (k, d),
+                (k, d),
+                0.0,
+            )
+
+            for i, lift_k in enumerate(plan):
+                if stop:
+                    break
+                nxt = _scaled(lift_k)
+                # Cross-fade into this trial's gains while still commanding the pose. A step change
+                # in K on a loaded joint is a step change in duty, which reads as a twitch and
+                # contaminates the very feel being judged.
+                _hold_for(args.blend, lambda _t: dict(pose), (k, d), nxt, args.blend)
+                k, d = nxt
+                print(f"\n--- trial {i + 1} of {len(plan)} is loaded. Push the arm, then send a verdict.")
+                sys.stdout.flush()
+
+                verdict, t0 = None, time.monotonic()
+                while verdict is None and not stop:
+                    checker.move_to(dict(pose), k=k, d=d)
+                    if select.select([sys.stdin], [], [], 0)[0]:
+                        line = sys.stdin.readline()
+                        verdict = line.strip() if line.strip() else "(blank)"
+                    elif time.monotonic() - t0 > args.timeout:
+                        verdict = "(timed out)"
+                    time.sleep(args.interval)
+
+                state = checker.read_state()
+                trials.append(
+                    {
+                        "trial": i + 1,
+                        "lift_k": lift_k,
+                        "verdict": verdict,
+                        "held_s": round(time.monotonic() - t0, 1),
+                        "wall": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+                        "pwm": {m: state[m]["pwm_cmd"] for m in MOTOR_NAMES},
+                        "err": {m: pose[m] - state[m]["present_pos"] for m in MOTOR_NAMES},
+                    }
+                )
+                print(f"    recorded: {verdict}")
+        finally:
+            # The release the separate-process version got wrong. Walk to a pose the arm can be
+            # left in, not to wherever it started, and only then drop the gains.
+            landing = rest if rest is not None else start
+            print("\nlowering to the rest pose...")
+            held = dict(pose)
+            tr = time.monotonic()
+            gap = max(abs(landing[m] - held[m]) for m in MOTOR_NAMES)
+            down = max(args.ramp, gap / args.max_approach_rate) if args.max_approach_rate > 0 else args.ramp
+            while (e := time.monotonic() - tr) < down:
+                f = e / down
+                checker.move_to({m: held[m] + (landing[m] - held[m]) * f for m in MOTOR_NAMES}, k=k, d=d)
+                time.sleep(args.interval)
+            checker.move_to({}, k=0.0, d=0.0)
+
+    out = {
+        "seed": args.seed,
+        "candidates": candidates,
+        "repeats": args.repeats,
+        "order_mode": args.order,
+        "pose_file": args.pose_file,
+        "rest_pose": args.rest_pose,
+        "order": plan,
+        "trials": trials,
+    }
+    with open(args.out, "w") as f:
+        json.dump(out, f, indent=2, ensure_ascii=False)
+    print("\n=== unblinded ===")
+    for t in trials:
+        print(f"  trial {t['trial']}: lift K = {t['lift_k']:<5} -> {t['verdict']}")
+    # A gain that drew two different verdicts is the run telling you the judgement has not settled,
+    # which is worth more than the gain itself: it says how much of the next result is noise.
+    by_k: dict[float, list[str]] = {}
+    for t in trials:
+        by_k.setdefault(t["lift_k"], []).append(t["verdict"])
+    for lift_k, vs in sorted(by_k.items()):
+        if len(vs) > 1 and len(set(vs)) > 1:
+            print(f"  !! K={lift_k} drew different verdicts: {vs} -- the judgement is not stable yet")
+    print(f"\n-> {args.out}")
 
 
 def _summarise(rows: list[dict], args) -> dict:
@@ -545,6 +761,67 @@ def main() -> None:
         "--print-every", type=float, default=10.0, help="Seconds between printed tables; 0 to silence."
     )
     h.set_defaults(func=cmd_hold)
+
+    b = sub.add_parser(
+        "blind",
+        help="Switch K underneath a held pose and collect verdicts, without releasing the arm.",
+    )
+    b.add_argument("--shm-name", default="so101_impedance")
+    b.add_argument("--pose-file", default="pose.json", help="The pose judged in every trial.")
+    b.add_argument(
+        "--rest-pose",
+        default=None,
+        help="Pose to walk to before releasing. Capture it with the arm somewhere it can be left "
+        "limp. Without it the arm is released where the run began, which is the pose under test -- "
+        "that is how an arm was dropped out of a horizontal reach on 2026-09-16.",
+    )
+    b.add_argument(
+        "--k-candidates",
+        default="20,12,8,5,3",
+        help=f"Gains for {LIFT_JOINT}, comma separated; every other joint is scaled from the "
+        "shipped set by the same factor.",
+    )
+    b.add_argument(
+        "--repeats",
+        type=int,
+        default=2,
+        help="How many candidates to show a second time. A gain that draws two different verdicts "
+        "says the judgement has not settled, which bounds how much of the result is noise.",
+    )
+    b.add_argument("--seed", type=int, default=0, help="Shuffles the order; recorded with the result.")
+    b.add_argument(
+        "--order",
+        choices=("shuffled", "descending"),
+        default="shuffled",
+        help="`shuffled` is the blind. `descending` walks stiff to soft, which makes the boundary "
+        "legible and lifts a limp arm safely, at the cost of a known bias: each trial follows a "
+        "stiffer one and so feels softer than it is. Recorded with the verdicts either way.",
+    )
+    b.add_argument(
+        "--ramp", type=float, default=5.0, help="Seconds to ease on at the start and off at the end."
+    )
+    b.add_argument(
+        "--max-approach-rate",
+        type=float,
+        default=100.0,
+        help="Ticks per second the approach may move at; the ramp is stretched past --ramp to stay "
+        "under it. What breaks is the speed, not the distance: a fixed ramp drives a far-away pose "
+        "proportionally faster, and 517 ticks/s oscillated this arm onto the table on 2026-09-16 "
+        "where 79 ticks/s on the same ramp was fine. 0 disables the cap.",
+    )
+    b.add_argument(
+        "--blend",
+        type=float,
+        default=2.0,
+        help="Seconds to cross-fade between one trial's gains and the next. A step change in K on "
+        "a loaded joint is a step change in duty, which is felt as a twitch.",
+    )
+    b.add_argument(
+        "--timeout", type=float, default=300.0, help="Seconds to wait for a verdict before moving on."
+    )
+    b.add_argument("--interval", type=float, default=0.02)
+    b.add_argument("--out", required=True, help="JSON: the order, the verdicts, and the seed.")
+    b.set_defaults(func=cmd_blind)
 
     d = sub.add_parser("compare", help="Baseline vs cerebellum, from two summary JSONs.")
     d.add_argument("baseline")
