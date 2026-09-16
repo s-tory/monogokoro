@@ -41,12 +41,12 @@ different job, and biology gives it to a different structure.
 
 So there are four layers here, and each is where it is for a reason:
 
-|                                         | biology                    | here                                             | rate   |
-| --------------------------------------- | -------------------------- | ------------------------------------------------ | ------ |
-| answers contact with no loop at all     | preflex: muscle and tissue | three silicone finger caps, stacked, on each jaw | --     |
-| fast local loop, brain not involved     | stretch reflex             | Rust daemon, `SCHED_FIFO`, isolated core         | 400 Hz |
-| prediction, learned from its own errors | cerebellum                 | Vulkan compute on the iGPU, own thread           | 200 Hz |
-| slow loop through perception            | visual feedback            | ACT                                              | ~30 Hz |
+|                                         | biology                    | here                                                   | rate   |
+| --------------------------------------- | -------------------------- | ------------------------------------------------------ | ------ |
+| answers contact with no loop at all     | preflex: muscle and tissue | three silicone finger caps per jaw, under a rubber cot | --     |
+| fast local loop, brain not involved     | stretch reflex             | Rust daemon, `SCHED_FIFO`, isolated core               | 400 Hz |
+| prediction, learned from its own errors | cerebellum                 | Vulkan compute on the iGPU, own thread                 | 200 Hz |
+| slow loop through perception            | visual feedback            | ACT                                                    | ~30 Hz |
 
 The ~13x separation between the reflex and ACT is roughly the one biology runs at, and it is the
 reason the control law does not live in Python. The cerebellum sits between them and, like its
@@ -64,11 +64,13 @@ all. Biology's answer is the **preflex** -- the intrinsic mechanical response of
 at zero latency, before any reflex arc has been traversed. Here it is three silicone finger caps
 stacked on each jaw -- the thick anti-chapping kind, ~2 mm wall (ours are Rimikuru finger
 supporters), not the thin office cots sold for counting paper -- and it is why a soft-fingered
-animal can be careless with a fragile object in a way this arm cannot.
+animal can be careless with a fragile object in a way this arm cannot. **Bare silicone split after
+about two weeks** (found 2026-09-16); a **natural-rubber finger cot** with a dotted grip surface
+now goes over the top of it.
 
 <p align="center">
-  <img src="media/readme/gripper_fingertips.jpg" width="360"
-       alt="The SO-101 gripper held in a hand, three silicone finger caps stacked on each jaw, holding an intact potato chip over a bowl of them" />
+  <img src="media/fingertip_rubber_20260916.jpg" width="360"
+       alt="The SO-101 gripper held in a hand, orange natural-rubber finger cots with a dotted grip surface pulled over each jaw, covering the silicone caps underneath" />
 </p>
 
 It also gives the gripper a finer sense of touch, which is less obvious. Grip force was always
