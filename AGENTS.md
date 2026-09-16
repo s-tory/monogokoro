@@ -151,6 +151,19 @@ outlives them.
 The principles above say what not to write and what not to build. These say where to look
 first. They came out of this project's own mistakes, but none of them are specific to it.
 
+They also share a premise, which the user of this repository put in one line on 2026-09-16:
+**there is only the long way round.** Not that shortcuts are forbidden -- that the thing which
+looked like one comes back. What makes it expensive is never the decision to skip a step, because
+that decision is rarely taken: **the step gets skipped without anyone noticing it was there.**
+Three from a single day, none of them a choice anybody made: `let (id, _, data)` dropped a byte the
+servos had been returning all along, and cost three weeks of suspecting the bus; a droop target of
+"~5 counts" was written into a config and never held against anybody's hand, so the gains stayed
+twice as stiff as the hand wanted for as long as the comment stood; and a check for location data
+in some photographs reported clean because the tool it called was not installed, which is a check
+that never ran reported as a check that passed. So the rule is not _take the long way_ -- everyone
+intends to. It is that **the road you are on is only the long way if you can still see where it
+leaves from**, which is what every entry below is for.
+
 - **三現主義 / sangen-shugi — go to the place, look at the thing.** A register is not the
   hardware. It is a report about the hardware, written by whoever last assumed something.
   `wrist_roll` reported `0-4095` of travel because a calibration script assigned that without ever
