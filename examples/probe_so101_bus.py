@@ -60,7 +60,7 @@ as fast as it can. A servo whose power stage is shorted pulls the shared rail do
 the others brown out, and this is what that looks like from the inside.
 
 **`protection`** -- reads the overload-protection EPROM and nothing else: no write, no motion, no
-torque. Separate from the four above, because it answers a different question -- not "which servo
+torque. Separate from the bus modes above, because it answers a different question -- not "which servo
 is breaking the bus" but "what is this servo told to do when it stalls". Worth running before any
 test that deliberately stalls a joint, and after any calibration, since these registers are
 non-volatile and outlive whichever program last wrote them. On this arm (2026-09-03) it found
@@ -479,6 +479,10 @@ def _print_comparison(record: dict, path: str) -> None:
 
 # The overload protection an sts3215 applies to itself, and the values `SOFollower` writes into it
 # (`so_follower.py`, `Max_Torque_Limit` 500 / `Protection_Current` 250 / `Overload_Torque` 25).
+# **Those writes are inside `if motor == "gripper"`, so they land on one motor and no other.**
+# Every other joint keeps whatever its EPROM already held, and that is upstream working as
+# designed, not a configuration that went missing -- printing the expected value against all six
+# read as a fault here on 2026-09-16 and cost a wrong report.
 # These live in EPROM, so they persist across power cycles and outlive whichever program wrote
 # them: an arm that has ever been driven by the position-mode follower still carries them when the
 # PWM daemon takes over. Reading them is how you find out whether the daemon is running against a
@@ -505,6 +509,8 @@ PROTECTION_REGISTERS = (
     ("Status", (65, 1), None),
     ("Present_Temperature", (63, 1), None),
 )
+# `so_follower.py` writes the values above to this motor alone.
+GRIPPER_ID = 6
 # Which of the three `SOFollower` writes have to match before we can say it has run on this servo.
 FOLLOWER_WRITTEN = tuple(name for name, _, expected in PROTECTION_REGISTERS if expected is not None)
 
@@ -522,7 +528,7 @@ def cmd_protection(bus: Bus, args) -> None:
     print(f"{'register':<{width}}" + "".join(f"{f'motor {i}':>10}" for i in MOTOR_IDS))
     for name, _, expected in PROTECTION_REGISTERS:
         row = "".join(f"{'--' if values[i][name] is None else values[i][name]:>10}" for i in MOTOR_IDS)
-        tail = f"   <- SOFollower writes {expected}" if expected is not None else ""
+        tail = f"   <- SOFollower writes {expected}, gripper only" if expected is not None else ""
         print(f"{name:<{width}}{row}{tail}")
 
     print()
@@ -536,7 +542,20 @@ def cmd_protection(bus: Bus, args) -> None:
             for name, _, expected in PROTECTION_REGISTERS
             if expected is not None and got[name] == expected
         ]
-        if len(matched) == len(FOLLOWER_WRITTEN):
+        if motor_id != GRIPPER_ID:
+            # Upstream never writes these here, so the expected values are not a target for this
+            # motor and their absence is not a finding. Their *presence* is: something else wrote.
+            if matched:
+                print(
+                    f"motor {motor_id}: holds the gripper's limits ({', '.join(matched)}) -- "
+                    f"SOFollower does not write those here, so something else did"
+                )
+            else:
+                print(
+                    f"motor {motor_id}: EPROM untouched by SOFollower, which only configures the "
+                    f"gripper -- expected, and says nothing about whether these limits suit this rig"
+                )
+        elif len(matched) == len(FOLLOWER_WRITTEN):
             print(f"motor {motor_id}: carries the SOFollower limits -- overload protection is configured")
         elif matched:
             print(
@@ -569,6 +588,13 @@ def cmd_protection(bus: Bus, args) -> None:
     print("do about an overload. Whether its firmware acts on them while `Operating_Mode` is PWM (2)")
     print("is a separate question that this read cannot answer -- it takes a stall on the bench with")
     print("the current logged.")
+    print()
+    print("Nor does upstream leaving the other joints at the factory values mean those values fit here.")
+    print("`SOFollower` tightens the gripper because the gripper is the joint meant to stall, and it")
+    print("drives everything in POSITION mode, where a joint that cannot reach its target gives up.")
+    print("This daemon runs PWM and has pinned a joint against the clamp, so that premise does not")
+    print("hold, and the supply moved to 7.4 V on 2026-09-16, which buys ~1.5x the current at the")
+    print("same duty. What these limits should be on this rig has not been measured.")
 
 
 def decode_sign_magnitude(value: int, sign_bit: int) -> int:
