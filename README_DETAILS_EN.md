@@ -415,18 +415,17 @@ yours. **Running the arm does not need it**: the other option above, swapping in
 5 V 6 A brick, is a plug change and is measured too. 7.4 V is the one you take _after_ that, and
 it trades an hour at the bench for margin going from 0.9 V to 3.0 V.
 
-```mermaid
-flowchart LR
-  AC["AC adapter<br/>24 V 2.7 A"] --> F1["F1<br/>2 A fast-blow"]
-  F1 --> DC["AE-YDS512F<br/>buck, trimmed to 7.4 V"]
-  DC --> RAIL(("+7.4 V"))
-  RAIL --> CAP["2200 uF / 35 V"]
-  RAIL --> CB["crowbar<br/>TYN625RG<br/>ZD 9.1 V + 20 R + 1 k"]
-  RAIL --> ARM["6 servos"]
-  CB -.->|shorts the rail on overvoltage| GND["GND"]
-  CAP --- GND
-  ARM --- GND
-```
+<p align="center">
+  <img src="media/psu_74v_schematic_20260916.png" width="620"
+       alt="Schematic: 24 V 2.7 A adapter, F1 2 A fast-blow, AE-YDS512F buck trimmed to 7.4 V, then on the +7.4 V rail a crowbar (TYN625RG SCR, anode to rail, cathode to GND; 9.1 V zener and 20 ohm in series from rail to gate; 1 kohm gate to GND), a 2200 uF capacitor and the servo load, all returning to a common GND that the adapter's negative also joins." />
+</p>
+
+The labels are in Japanese: 24 V 2.7 A adapter -> F1 2 A fast-blow (1.5 A continuous) -> buck
+trimmed to 7.4 V -> +7.4 V rail (about 4 A usable) feeding the crowbar, a 2200 uF / 35 V capacitor
+(absorbs regenerated energy) and the servos. The crowbar's "trip about 11.4 V" is **the
+datasheet-`max` calculation**; the measured figure is below (`> 10.24 V`). **The line joining input
+and output ground (bottom left) is not decoration** -- it was missing on
+[the build day](#what-the-build-day-cost).
 
 <p align="center">
   <img src="media/psu_74v_board_20260916.jpg" width="620"

@@ -383,18 +383,14 @@ bit0 が電圧ではない（対応表は二次情報で未確認）のか、ど
 プラグを挿すだけで済み、そちらも測ってある。7.4 V は**そのうえで更に良くするための選択**で、
 手を動かす覚悟と引き換えに、余裕が 0.9 V から 3.0 V になる。
 
-```mermaid
-flowchart LR
-  AC["AC アダプタ<br/>24 V 2.7 A"] --> F1["F1<br/>速断 2 A"]
-  F1 --> DC["AE-YDS512F<br/>降圧、7.4 V に調整"]
-  DC --> RAIL(("+7.4 V"))
-  RAIL --> CAP["2200 µF / 35 V"]
-  RAIL --> CB["クローバー<br/>TYN625RG<br/>ZD 9.1 V + 20 Ω + 1 kΩ"]
-  RAIL --> ARM["サーボ × 6"]
-  CB -.->|過電圧でレールを短絡| GND["GND"]
-  CAP --- GND
-  ARM --- GND
-```
+<p align="center">
+  <img src="media/psu_74v_schematic_20260916.png" width="620"
+       alt="Schematic: 24 V 2.7 A adapter, F1 2 A fast-blow, AE-YDS512F buck trimmed to 7.4 V, then on the +7.4 V rail a crowbar (TYN625RG SCR, anode to rail, cathode to GND; 9.1 V zener and 20 ohm in series from rail to gate; 1 kohm gate to GND), a 2200 uF capacitor and the servo load, all returning to a common GND that the adapter's negative also joins." />
+</p>
+
+図の「トリップ 約11.4V」は**データシートの `max` からの計算値**で、実測は下にある（`> 10.24 V`）。
+コンデンサは 35 V 品。**入力と出力の GND が一本に繋がっている**（左下の線）のは飾りではない ──
+[組み立て当日](#組み立て当日に踏んだこと)にここが抜けていた。
 
 <p align="center">
   <img src="media/psu_74v_board_20260916.jpg" width="620"
