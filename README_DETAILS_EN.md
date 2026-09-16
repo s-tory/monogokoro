@@ -316,16 +316,20 @@ voltage does on the way there); a label will not tell you, so this comes off a d
 product page. What the swap bought is under
 [A better supply did not remove every collapse](#a-better-supply-did-not-remove-every-collapse).
 
-_Not measured here._ Run the servos at the voltage they were designed for. The STS3215 is a
-**7.4 V** servo that the standard build runs at 5 V: vendors list it as **6-7.4 V**, and its rated
-torque is quoted at 6 V and 7.4 V, never at 5 V. Running at the bottom of the range costs torque,
-and lost torque is paid for in current -- which is what drags the rail down in the first place. The
-servos' own `Max_Voltage_Limit` reads 80 (8.0 V) on this arm, so 7.4 V is inside what they will
-accept, and it moves the trip point from 0.9 V away to 3.4 V away. Expect the binding constraint to
-move with it: `Max_Temperature_Limit` is 70 C and the loaded shoulder already reached 35 C at 5 V.
-**None of that paragraph is a measurement on this rig** -- no 7.4 V supply has been run here. It is
-the direction the datasheet points, and it travels better than a part number, because a DC-DC
-module takes any input while the brick below is 100 V only.
+_Measured here, 2026-09-16._ Run the servos at the voltage they were designed for. The STS3215 is
+a **7.4 V** servo that the standard build runs at 5 V: vendors list it as **6-7.4 V**, and its
+rated torque is quoted at 6 V and 7.4 V, never at 5 V. Running at the bottom of the range costs
+torque, and lost torque is paid for in current -- which is what drags the rail down in the first
+place. The servos' own `Max_Voltage_Limit` reads 80 (8.0 V) on this arm, so 7.4 V is inside what
+they will accept. How it was built and what it measured is under
+[A 7.4 V supply, built](#a-74-v-supply-built); the short version is that **the servos read
+7.0-7.1 V** (the wiring drops the rest) and the distance to `Min_Voltage_Limit` 40 (4.0 V) went
+from **0.9 V to 3.0 V**. **The prediction about the binding constraint got the direction right and
+the destination wrong**: this section said to expect `Max_Temperature_Limit` (70 C) to become the
+limit, and what the servos actually raised that day was **`0x20`, overload by the unconfirmed
+mapping** -- with the case no higher than 33 C. The voltage bit `0x01` never appeared. It also
+travels better than a part number, because a DC-DC module takes any input while the brick below is
+100 V only.
 
 <p align="center">
   <img src="media/psu_label_20260914.jpg" width="520"
@@ -382,6 +386,96 @@ level sets how often it fires.
 `--serial-timeout-ms 2` is **worse** too (2 ms cuts replies that were going to arrive, and a late
 reply is read as the answer to the next question). **Every number measured here sits on top of
 this.** See [The bundled supply collapses at the defaults](#the-bundled-supply-collapses-at-the-defaults) for what to power it with.
+
+### A 7.4 V supply, built
+
+**2026-09-16: a supply that makes 7.4 V from a 24 V brick.** This is what turned the paragraph
+above from a datasheet argument into a measurement.
+
+```mermaid
+flowchart LR
+  AC["AC adapter<br/>24 V 2.7 A"] --> F1["F1<br/>2 A fast-blow"]
+  F1 --> DC["AE-YDS512F<br/>buck, trimmed to 7.4 V"]
+  DC --> RAIL(("+7.4 V"))
+  RAIL --> CAP["2200 uF / 35 V"]
+  RAIL --> CB["crowbar<br/>TYN625RG<br/>ZD 9.1 V + 20 R + 1 k"]
+  RAIL --> ARM["6 servos"]
+  CB -.->|shorts the rail on overvoltage| GND["GND"]
+  CAP --- GND
+  ARM --- GND
+```
+
+<p align="center">
+  <img src="media/psu_74v_board_20260916.jpg" width="620"
+       alt="On the left, the AE-YDS512F step-down module on its green PCB with the output trimmer. On the right, a hand-built perfboard carrying the crowbar: a TYN625RG in TO-220, a zener and two resistors, a 2200uF electrolytic, a glass cartridge fuse in clips, and a pin header for the servo rail." />
+</p>
+<p align="center">
+  <img src="media/psu_74v_adapter_20260916.jpg" width="520"
+       alt="Adapter label: AD-A240P270, INPUT AC100-240V 50/60Hz, OUTPUT DC24V 2.7A, plug size 5.5-2.1 centre positive" />
+</p>
+
+**The 24 V input is not a choice.** `AE-YDS512F` will not start below 18 V, so 12 V is out. It puts
+out 3.3-12.5 V adjustable at 5 A (6 A peak) and carries its own overcurrent protection.
+
+**What the crowbar is for.** Going to 7.4 V settles the undervoltage problem and raises a new one
+on the other side: if the buck stage fails short, 24 V arrives at the servos. The crowbar watches
+for exactly that. A servo's own `Max_Voltage_Limit` of 80 (8.0 V) is **where it protects itself,
+not where it breaks**, so the band between 8.0 V and the trip point can be left to the servo.
+
+**The trip point is measured: `> 10.24 V`** (2026-09-16, no load, input steady at 24.5 V). It held
+at 10.24 V and fired just above. **The upper side is not measured** -- once it fires, the buck
+module's overcurrent protection hiccups and the rail oscillates, so only the value it falls to can
+be read. One-sided, but it gives the distance that matters:
+
+|                                            | volts       |
+| ------------------------------------------ | ----------- |
+| servo self-protection, `Max_Voltage_Limit` | 8.0 V       |
+| operating point                            | 7.4 V       |
+| crowbar (measured)                         | `> 10.24 V` |
+
+From the datasheets the same point computes to 10.2 V at `typ` (`IGT` 15 mA / `VGT` 0.8 V) and
+11.4 V at `max` (40 mA / 1.3 V). **The measurement sits essentially on the typ figure and nowhere
+near max.**
+
+**And it was actually fired.** Confirming that a protection circuit does not misfire does not
+distinguish it from one miswired so it can never fire at all. **A protection circuit that has never
+operated is not a protection circuit.**
+
+#### What the build day cost
+
+**With input and output grounds unjoined, the DC-DC hiccups at about 1 Hz.** The output comes up
+slowly, something ticks, and the voltage wobbles. The tick is not the SCR -- **a thyristor latches
+silently** -- it is the inductor or a ceramic on the DC-DC, at the period of its protection retry.
+
+**Both measurements that split it used no instrument beyond a meter and a finger.**
+
+- **Read the input** -- steady at 24.5 V, which ruled out the supply side (brick, UVLO oscillation)
+  and left the output-side protection. Thirty seconds with a multimeter.
+- **Touch the SCR** -- cold. A conducting SCR carries the short and gets hot. **That killed the
+  "zener in backwards" hypothesis outright**, which had a whole wiring argument built on top of it.
+
+**The mechanism is not resolved.** Ground was the cause (joining it silenced the tick), but whether
+the current-sense reference moved and the protection misfired, or the feedback return floated and
+the module drove duty up until the protection fired **correctly**, is not separated. **The next
+move is the same either way**, so it was left open.
+
+#### First numbers off the arm at 7.4 V
+
+|                                       |                          |
+| ------------------------------------- | ------------------------ |
+| `Present_Voltage`, six motors at rest | **70-71** (7.0-7.1 V)    |
+| distance to `Min_Voltage_Limit`       | **3.0 V** (0.9 V at 5 V) |
+| case temperature                      | 24-33 C (limit 70)       |
+| `servo_error` over a 120 s hold       | **none**                 |
+
+**The 7.0-7.1 V the servos read is 0.3-0.4 V below the 7.4 V at the supply output.** Wiring and
+connector drop is the obvious reading and it is **not measured** -- metering the output terminals
+with the servos connected would place it (not done). At 5 V the brick terminals read 4.59 V and the
+servos read 4.6 V, so on the same wiring that drop has no explanation yet.
+
+**No `servo_error` over a static hold is not evidence that collapses are gone.** Collapses appear
+at high current and this condition draws little. The same day, oscillating the arm raised `0x20` on
+two motors for 1.9 s -- **not the voltage bit `0x01`**.
 
 ### Interactive calibration is not implemented
 
