@@ -383,6 +383,15 @@ regulated one (4.9 V)**, with motor 5 appearing only on the bundled one. Tempera
 out rather than assumed out -- the regulated adapter gave 0.165/s at its coldest and 0.200/s warm,
 so heat moves this by 0.035 and the supply by 0.49. Whatever bit 0 reports, the rail's standing
 level sets how often it fires.
+
+**On 2026-09-16, at 7.4 V, 78 minutes of daemon uptime produced none** (03:16:53-04:35:48 UTC,
+`Present_Voltage` 70-71). At 0.200/s that is roughly 800 events that did not happen.
+**It is not a comparison** -- the 0.200 above was taken limp and unloaded with the case
+temperature matched, while those 78 minutes mix driving, holding and limp, and **the proportion
+was not recorded.** It came out of a log kept for other work, not a run designed for this.
+**It does agree with the trend** (higher rail, fewer events). **Settling it is cheap and has not
+been done**: leave the arm limp at a matched case temperature and count -- the same procedure as
+the two runs above, once, at 7.4 V. Until that exists, this section's heading stays as it is.
 `--serial-timeout-ms 2` is **worse** too (2 ms cuts replies that were going to arrive, and a late
 reply is read as the answer to the next question). **Every number measured here sits on top of
 this.** See [The bundled supply collapses at the defaults](#the-bundled-supply-collapses-at-the-defaults) for what to power it with.
@@ -391,6 +400,14 @@ this.** See [The bundled supply collapses at the defaults](#the-bundled-supply-c
 
 **2026-09-16: a supply that makes 7.4 V from a 24 V brick.** This is what turned the paragraph
 above from a datasheet argument into a measurement.
+
+**7.4 V looks like an odd number because it was not chosen as a voltage.** The datasheet says
+**`2S, 7.4V`** -- the nominal voltage of two lithium cells in series (3.7 V x 2). Read that way the
+whole ladder lines up: **8.4 V** fully charged (4.2 V x 2), **7.4 V** nominal, **6.0 V** near the
+discharge floor. **The vendor's "6-7.4 V" is not a recommended range of voltages, it is the usable
+range of a 2S pack.** Which puts 5 V not at the bottom of the range but outside it. (It also
+explains the factory `Max_Voltage_Limit` of 80 -- 8.0 V, below a full pack's 8.4 V. That is a
+setting, writable, not the hardware's limit.)
 
 **Said up front: this route needs a soldering iron.** The goal here is layers below the policy
 built from hardware anyone can buy, and every part below is mail-order -- but the assembly is
