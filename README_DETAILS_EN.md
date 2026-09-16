@@ -392,6 +392,12 @@ this.** See [The bundled supply collapses at the defaults](#the-bundled-supply-c
 **2026-09-16: a supply that makes 7.4 V from a 24 V brick.** This is what turned the paragraph
 above from a datasheet argument into a measurement.
 
+**Said up front: this route needs a soldering iron.** The goal here is layers below the policy
+built from hardware anyone can buy, and every part below is mail-order -- but the assembly is
+yours. **Running the arm does not need it**: the other option above, swapping in an off-the-shelf
+5 V 6 A brick, is a plug change and is measured too. 7.4 V is the one you take _after_ that, and
+it trades an hour at the bench for margin going from 0.9 V to 3.0 V.
+
 ```mermaid
 flowchart LR
   AC["AC adapter<br/>24 V 2.7 A"] --> F1["F1<br/>2 A fast-blow"]
