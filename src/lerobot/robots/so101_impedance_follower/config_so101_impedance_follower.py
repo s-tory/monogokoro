@@ -74,21 +74,44 @@ class SO101ImpedanceFollowerConfig:
     # class does (at the `.pos` <-> raw-tick boundary). Tune these values in PWM-per-raw-tick
     # units, not PWM-per-degree.
     #
-    # These K values are measured, not chosen. Holding the arm outstretched (near worst case for
-    # gravity) at K=1 makes the daemon's reported PWM read out directly as the duty each joint
-    # needs to hold itself, since pwm = 1 * err: 17 / 87 / 61 / ~0 / ~0 / 0 counts for pan / lift /
-    # elbow / wrist_flex / wrist_roll / gripper. A pure PD law always droops under a constant load
-    # by `err = holding_duty / K`, so K follows from the droop you will accept -- these target ~5
-    # counts (0.4 deg) and are floored at a value that still gives each joint positioning
-    # authority. Re-measure per arm: the numbers are specific to this unit's friction and wiring.
-    default_k: tuple[float, ...] = (10.0, 20.0, 15.0, 10.0, 8.0, 5.0)
+    # These K values follow a hand, not a formula. The formula came first and was wrong about the
+    # part that matters.
+    #
+    # The measurement it starts from is still the same one: holding the arm outstretched (near
+    # worst case for gravity) at K=1 makes the reported PWM read out directly as the duty each
+    # joint needs to hold itself, since pwm = 1 * err. On 2026-09-16, on a 7.4 V rail, that is
+    # 42 / 56.5 / 55 / 1 / 1 / 0 counts for pan / lift / elbow / wrist_flex / wrist_roll / gripper.
+    # (At 5 V the same pose read 17 / 87 / 61 / ~0 / ~0 / 0, on the previous shoulder_lift servo
+    # and with no stereo cameras on the wrist. Three conditions differ; do not difference them.)
+    #
+    # A pure PD law droops under a constant load by `err = holding_duty / K`, so K follows from the
+    # droop you will accept -- and this file used to accept ~5 counts (0.4 deg), which is where the
+    # old values came from. **That target was never checked against anyone's hand.** When it was,
+    # blind, on 2026-09-16 -- the judge pushing the arm and saying only stiff / right / too soft,
+    # with gains switched underneath a held pose so nothing gave the value away -- K=20 came back
+    # かたい twice, K=12 ちょっと硬い twice, and K=7 and K=8 both こんなもんかなー. The droop that
+    # a hand actually accepts here is ~7 counts (0.62 deg), not 5.
+    #
+    # So: lift K=8, every other joint scaled from the old set by the same 0.4. The ratios are kept
+    # because they were never the thing under test -- and there is a live objection to them: the
+    # same judge said **先端ほど固すぎる**, tip joints feel stiffer than the shoulder. That is
+    # expected if the ratios are wrong, because the old ones were derived from each joint's
+    # *gravity* load, while a hand feels the reaction to its own push, which is much the same at
+    # every joint. Sweeping the ratio (rather than one scalar over all of them) is the open work.
+    #
+    # Conditions these were taken under, since none of them are the arm alone: 7.4 V rail, this
+    # unit's friction and wiring, stereo cameras + bracket on the wrist, natural-rubber finger cots
+    # on the gripper. Re-measure per arm, and re-measure after a supply change -- the duty a joint
+    # needs scales with 1/V, so these numbers are wrong by half at 5 V.
+    default_k: tuple[float, ...] = (4.0, 8.0, 6.0, 4.0, 3.2, 2.0)
 
     # D is bounded from above by velocity *noise*, not by stability. Position is quantised to whole
     # counts, so the filtered finite difference has a noise floor of about
     # `1 / (vel_filter_window * dt)` -- ~50 counts/s at the daemon's defaults -- which D turns
     # straight into PWM chatter. Keeping D near K/40 holds that under ~2% duty while still damping
-    # a real 100 counts/s motion with a meaningful command.
-    default_d: tuple[float, ...] = (0.3, 0.5, 0.4, 0.3, 0.2, 0.15)
+    # a real 100 counts/s motion with a meaningful command. Scaled by the same 0.4 as K on
+    # 2026-09-16 so that D/K stays at K/40 -- the bound above is a ratio, not an absolute.
+    default_d: tuple[float, ...] = (0.12, 0.2, 0.16, 0.12, 0.08, 0.06)
 
     # Defense-in-depth clamps applied in `send_action`, independent of (but should be kept
     # consistent with) whatever bound the Rust daemon itself enforces via `--pwm-max`. `d_max` is
