@@ -122,13 +122,24 @@ class SO101ImpedanceFollowerConfig:
     # wrist_roll, same day, cerebellum on: K=0 was already かたい and did not come back (left 323 and
     # 191 counts off), so the floor on this joint is static friction and no K goes below it. 1 and 2
     # felt like that floor and returned; 3.2 was かたすぎ and 5 うごかない. So wrist_roll is 1, the
-    # lowest that returns. The gripper is still the old value scaled by 0.4.
+    # lowest that returns.
+    #
+    # The gripper, same day, judged by working the jaw open and shut by hand (the cerebellum does not
+    # drive it): K=0 かたい and did not come back, twice; 1 was "a little stiff but about right" and
+    # returned, twice, word for word; 2 かたい; 4 かた！. So the gripper is 1. That is the feel of
+    # back-driving the jaw, which stands in for grip force (K times how far short of its target the
+    # jaw is stopped) but is not a measurement of it. Steps below 1 were not tried; the judge's view
+    # was that they would not be told apart.
+    #
+    # shoulder_lift was swept alone the same day and the verdicts did not follow K (12 called about
+    # right, 8 and 3 stiff, repeats split) while the feedforward varied from -89 to -293 at
+    # |err| <= 2.5. That run measured the cerebellum's state, not K, so lift stays at 8.
     #
     # Conditions these were taken under, since none of them are the arm alone: 7.4 V rail, this
     # unit's friction and wiring, stereo cameras + bracket on the wrist, natural-rubber finger cots
     # on the gripper. Re-measure per arm, and re-measure after a supply change -- the duty a joint
     # needs scales with 1/V, so these numbers are wrong by half at 5 V.
-    default_k: tuple[float, ...] = (3.0, 8.0, 3.0, 1.3, 1.0, 2.0)
+    default_k: tuple[float, ...] = (3.0, 8.0, 3.0, 1.3, 1.0, 1.0)
 
     # D is bounded from above by velocity *noise*, not by stability. Position is quantised to whole
     # counts, so the filtered finite difference has a noise floor of about
@@ -136,9 +147,8 @@ class SO101ImpedanceFollowerConfig:
     # straight into PWM chatter. Keeping D near K/40 holds that under ~2% duty while still damping
     # a real 100 counts/s motion with a meaningful command. Scaled by the same 0.4 as K on
     # 2026-09-16 so that D/K stays at K/40 -- the bound above is a ratio, not an absolute. wrist_flex
-    # shoulder_pan, elbow_flex and wrist_roll followed their K on 2026-09-17 at the D/K each already
-    # had.
-    default_d: tuple[float, ...] = (0.09, 0.2, 0.08, 0.039, 0.025, 0.06)
+    # Every joint but shoulder_lift followed its K on 2026-09-17 at the D/K it already had.
+    default_d: tuple[float, ...] = (0.09, 0.2, 0.08, 0.039, 0.025, 0.03)
 
     # Defense-in-depth clamps applied in `send_action`, independent of (but should be kept
     # consistent with) whatever bound the Rust daemon itself enforces via `--pwm-max`. `d_max` is
