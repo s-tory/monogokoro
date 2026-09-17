@@ -474,10 +474,12 @@ def cmd_blind(args) -> None:
         start = {m: s["present_pos"] for m, s in checker.read_state().items()}
         drift = travel_distance(start, pose, travel)
         # A fixed ramp is a fixed *time*, so the further the arm has to travel the faster it is
-        # driven -- and the speed is what breaks, not the distance. On 2026-09-16 a run starting
-        # 474 ticks away rode on at 79 ticks/s and was fine; the next one started 3105 ticks away,
-        # rode the same 6 s ramp at 517 ticks/s, and oscillated until the arm came down. Capping
-        # the rate turns a long approach into a slow one instead of a violent one.
+        # driven. On 2026-09-16 a run starting 474 ticks away rode on at 79 ticks/s and was fine; the
+        # next one started 3105 ticks away, rode the same 6 s ramp at 517 ticks/s, and oscillated
+        # until the arm came down, and that was put down to speed. It was probably not: 3105 is past
+        # half a turn, and on 2026-09-17 the same oscillation came back at 100 ticks/s and went away
+        # only when the ramp stopped interpolating across the encoder seam (see `interpolate`). The
+        # 2026-09-16 start pose was not kept, so this is unverified. The cap stays: it costs nothing.
         ramp = args.ramp
         if args.max_approach_rate > 0:
             ramp = max(ramp, drift / args.max_approach_rate)
@@ -900,9 +902,7 @@ def main() -> None:
         type=float,
         default=100.0,
         help="Ticks per second the approach may move at; the ramp is stretched past --ramp to stay "
-        "under it. What breaks is the speed, not the distance: a fixed ramp drives a far-away pose "
-        "proportionally faster, and 517 ticks/s oscillated this arm onto the table on 2026-09-16 "
-        "where 79 ticks/s on the same ramp was fine. 0 disables the cap.",
+        "under it: a fixed ramp drives a far-away pose proportionally faster. 0 disables the cap.",
     )
     b.add_argument(
         "--blend",

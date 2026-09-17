@@ -28,12 +28,13 @@ cargo build --release
 ```
 
 Building needs `glslc` on `PATH` (`sudo apt install glslc`) to compile the cerebellum's compute
-shaders. Running needs only a Vulkan ICD (`mesa-vulkan-drivers`), and only if you actually enable
-`--cerebellum-backend gpu`.
+shaders. Running needs a Vulkan ICD (`mesa-vulkan-drivers`) whenever `--cerebellum-backend gpu` is
+on -- which the systemd unit turns on.
 
-> **Every build wipes the `setcap` capability**, because `cargo` writes a fresh binary and file
-> capabilities live on the inode. Re-run the `setcap` line from [Run](#run) after _every_ build --
-> otherwise the daemon starts fine but silently falls back to non-RT scheduling.
+> **If you run the binary by hand, every build wipes the `setcap` capability**, because `cargo`
+> writes a fresh binary and file capabilities live on the inode. Re-run the `setcap` line from
+> [Run](#run) after _every_ build -- otherwise the daemon starts fine but silently falls back to
+> non-RT scheduling. The systemd unit does not have this problem.
 
 ## Run
 
@@ -318,17 +319,18 @@ losing the follower's stops the robot.
 Gains are per joint because the load is. `shoulder_lift` and `elbow_flex` hold the arm's weight;
 `wrist_roll` holds nothing.
 
-Measure rather than guess: **hold the arm at its most gravity-loaded pose with `--k 1`**. Then
-`pwm == err`, so the `pwm` column reads out directly as the duty each joint needs to hold itself.
-On this arm, outstretched: 17 / 87 / 61 / ~0 / ~0 / 0 counts for pan / lift / elbow / wrist_flex /
-wrist_roll / gripper.
+To see what each joint carries, **hold the arm at its most gravity-loaded pose with `--k 1`**: the
+`pwm` column then reads roughly as the duty each joint needs to hold itself (a lower bound -- a
+joint at rest cannot tell balance from static friction). On this arm, outstretched, on the 7.4 V
+supply: 42 / 56.5 / 55 / 1 / 1 / 0 for pan / lift / elbow / wrist_flex / wrist_roll / gripper.
 
-A PD law droops under a constant load by `err = holding_duty / K`, so K follows from the droop you
-accept -- and more generally `K_new = K * err / err_wanted` from any hold test. Targeting ~5 counts
-(0.4 deg) gives the shipped `SO101ImpedanceFollowerConfig.default_k`. Note the flip side: K also
-sets where PWM saturates, at `pwm_max / K` counts -- K=20 is full duty at 4.4 deg, which is the
-compliance range you actually feel. Wanting both a small droop _and_ a wide compliance range means
-adding gravity feedforward, not raising K.
+A PD law droops under a constant load by `err = holding_duty / K`, which is how the gains used to be
+chosen: pick a droop (~5 counts), divide. **The shipped `SO101ImpedanceFollowerConfig.default_k` is
+no longer derived that way**, because that droop target had never been held against anyone's hand.
+The shipped set was chosen blind by hand on 2026-09-16/17, on the 7.4 V supply, with the cerebellum
+running; the reasoning and the verdicts are in the config's comments. K also sets where PWM
+saturates, at `pwm_max / K` counts -- lift's K=8 is full duty at 125 counts, 11 deg. Wanting both a
+small droop _and_ a wide compliance range is what the cerebellum's gravity feedforward is for.
 
 D is bounded from above by velocity noise, not by stability. Position is quantised to whole counts,
 so the filtered finite difference has a noise floor near `1 / (vel_filter_window * dt)` -- ~50
