@@ -351,7 +351,7 @@ pwm = K*(x_t - x) + D*(v_t - v)  +  ff(sensory state)
       reflex, 400 Hz, isolated core   cerebellum, Vulkan compute
 ```
 
-Off by default (`--cerebellum-backend off`). Turning it on is safe with the arm already holding a
+The binary defaults to off (`--cerebellum-backend off`); the systemd unit turns it on, because the shipped gains assume it (wrist_flex's K=1.3 does not return against gravity without it, measured 2026-09-17). Turning it on is safe with the arm already holding a
 position: the learned weights start at zero, so an untrained network contributes precisely nothing.
 
 ### Architecture

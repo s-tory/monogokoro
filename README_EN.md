@@ -151,13 +151,12 @@ Step 3 is the first thing that needs the Python environment; building it is
 Then teleoperate or record with `--robot.type=so101_follower_impedance`; both fill in per-joint K/D
 from the robot's config automatically.
 
-The cerebellum is opt-in. Add to the unit's `ExecStart=` and `sudo systemctl daemon-reload` (a full path -- `~` is not expanded there; needs `glslc` to build, a Vulkan ICD to run, and a
-housekeeping core that is **not** `--cpu-core`):
-
-```bash
-  --cerebellum-backend gpu --cerebellum-cpu-core 1 \
-  --cerebellum-weights /home/<you>/.local/share/so101/cerebellum.bin
-```
+The cerebellum is on by default (it is in the unit's `ExecStart=`). It needs `glslc` to build, a
+Vulkan ICD to run, and a housekeeping core that is **not** `--cpu-core` (core 1 in the unit). Create
+`~/.local/share/so101/` for its weights yourself. **The shipped gains assume it is running**:
+wrist_flex's K=1.3 was chosen blind with the cerebellum on, and with it off a wrist pushed upward
+stays there (measured 2026-09-17). To run without it, delete the `--cerebellum-*` lines from the
+unit and raise wrist_flex's K to 2.0.
 
 - Setting up the isolated core: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
 - Tuning gains, cerebellum bring-up, protocol notes: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)

@@ -135,13 +135,11 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 之后用 `--robot.type=so101_follower_impedance` 去做遥操作或录制即可。两者都会从机器人配置里自动填入
 每个关节的 K/D。
 
-小脑是可选加入的。把下面这些加进单元的 `ExecStart=`，再执行 `sudo systemctl daemon-reload`（要写完整路径 —— 那里不会展开 `~`；构建需要 `glslc`，运行需要 Vulkan ICD，另外还需要一个
-**与 `--cpu-core` 不同的**杂务核心）。
-
-```bash
-  --cerebellum-backend gpu --cerebellum-cpu-core 1 \
-  --cerebellum-weights /home/<you>/.local/share/so101/cerebellum.bin
-```
+小脑默认开启（写在单元的 `ExecStart=` 里）。构建需要 `glslc`，运行需要 Vulkan ICD，还需要一个
+**与 `--cpu-core` 不同的**杂务核心（单元里用的是核心 1）。权重的保存目录 `~/.local/share/so101/`
+要自己建好。**出厂增益是以小脑在运行为前提的**：手腕（wrist_flex）的 K=1.3 是在小脑开启的盲测中定下的，
+小脑关闭时，被往上推的手腕不会回来（2026-09-17 实测）。如果要关掉小脑，就把 `--cerebellum-*` 那几行
+从单元里删掉，并把 wrist_flex 的 K 提到 2.0。
 
 - 隔离核心的配置：[`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
 - 增益调整、小脑上电、协议注意事项：[`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)

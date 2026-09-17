@@ -147,13 +147,11 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 あとは `--robot.type=so101_follower_impedance` で遠隔操作なり記録なりを行う。どちらもロボットの設定から
 関節ごとの K/D を自動で埋める。
 
-小脳はオプトイン。ユニットの `ExecStart=` に以下を足して `sudo systemctl daemon-reload` する（`~` は展開されないのでフルパスで。ビルドに `glslc`、実行に Vulkan ICD、そして **`--cpu-core` とは
-別の**ハウスキーピング用コアが必要）。
-
-```bash
-  --cerebellum-backend gpu --cerebellum-cpu-core 1 \
-  --cerebellum-weights /home/<you>/.local/share/so101/cerebellum.bin
-```
+小脳は既定でオン（ユニットの `ExecStart=` に入っている）。ビルドに `glslc`、実行に Vulkan ICD と
+**`--cpu-core` とは別の**ハウスキーピング用コア（ユニットではコア 1）が要る。重みの保存先
+`~/.local/share/so101/` は自分で作る。**既定のゲインは小脳が動いている前提**: 手首（wrist_flex）の
+K=1.3 は小脳オンの盲検で決めた値で、小脳オフだと上向きに押された手首が戻らない（2026-09-17 測定）。
+小脳を切るなら、ユニットから `--cerebellum-*` の行を消し、wrist_flex の K を 2.0 に上げる。
 
 - 隔離コアのセットアップ: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)
 - ゲイン調整、小脳の立ち上げ、プロトコルの注意点: [`rust/so101_impedance_ctrl/README.md`](rust/so101_impedance_ctrl/README.md)

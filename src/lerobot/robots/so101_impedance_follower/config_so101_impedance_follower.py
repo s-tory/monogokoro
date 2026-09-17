@@ -99,19 +99,30 @@ class SO101ImpedanceFollowerConfig:
     # *gravity* load, while a hand feels the reaction to its own push, which is much the same at
     # every joint. Sweeping the ratio (rather than one scalar over all of them) is the open work.
     #
+    # wrist_flex has been swept, alone, on 2026-09-17 (blind, the others at the values below). With
+    # the cerebellum off, K=4 came back かたい three times out of three, and K=1.3 felt right but did
+    # not return against gravity after a push (twice, and 1.6 twice the same); only 2.0 returned. K=0
+    # was named as static friction, blind, twice. With the cerebellum on (GPU, learning, weights
+    # from zero), every K from 1.0 to 2.0 returned, and 1.3 was the one called right, twice. So
+    # wrist_flex is 1.3 **and that value assumes the cerebellum is running**: without it the wrist
+    # stays wherever it is pushed upward. The derivation this sweep was testing -- K proportional to
+    # the square of the distance from the joint to the fingertip, which put wrist_flex at 2.0 -- got
+    # the direction and missed the level. The other joints' ratios are still unswept.
+    #
     # Conditions these were taken under, since none of them are the arm alone: 7.4 V rail, this
     # unit's friction and wiring, stereo cameras + bracket on the wrist, natural-rubber finger cots
     # on the gripper. Re-measure per arm, and re-measure after a supply change -- the duty a joint
     # needs scales with 1/V, so these numbers are wrong by half at 5 V.
-    default_k: tuple[float, ...] = (4.0, 8.0, 6.0, 4.0, 3.2, 2.0)
+    default_k: tuple[float, ...] = (4.0, 8.0, 6.0, 1.3, 3.2, 2.0)
 
     # D is bounded from above by velocity *noise*, not by stability. Position is quantised to whole
     # counts, so the filtered finite difference has a noise floor of about
     # `1 / (vel_filter_window * dt)` -- ~50 counts/s at the daemon's defaults -- which D turns
     # straight into PWM chatter. Keeping D near K/40 holds that under ~2% duty while still damping
     # a real 100 counts/s motion with a meaningful command. Scaled by the same 0.4 as K on
-    # 2026-09-16 so that D/K stays at K/40 -- the bound above is a ratio, not an absolute.
-    default_d: tuple[float, ...] = (0.12, 0.2, 0.16, 0.12, 0.08, 0.06)
+    # 2026-09-16 so that D/K stays at K/40 -- the bound above is a ratio, not an absolute. wrist_flex
+    # followed its K to 1.3 on 2026-09-17 at the D/K it already had (0.12 / 4).
+    default_d: tuple[float, ...] = (0.12, 0.2, 0.16, 0.039, 0.08, 0.06)
 
     # Defense-in-depth clamps applied in `send_action`, independent of (but should be kept
     # consistent with) whatever bound the Rust daemon itself enforces via `--pwm-max`. `d_max` is
