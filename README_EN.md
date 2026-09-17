@@ -69,7 +69,7 @@ about two weeks** (found 2026-09-16); a **natural-rubber finger cot** with a dot
 now goes over the top of it.
 
 <p align="center">
-  <img src="media/fingertip_rubber_20260916.jpg" width="360"
+  <img src="media/readme/fingertip_rubber_20260916.jpg" width="360"
        alt="The SO-101 gripper held in a hand, orange natural-rubber finger cots with a dotted grip surface pulled over each jaw, covering the silicone caps underneath" />
 </p>
 

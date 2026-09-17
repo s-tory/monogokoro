@@ -68,7 +68,7 @@
 **天然ゴムの指サック**（滑り止めのドット付き）を被せてカバーしている。
 
 <p align="center">
-  <img src="media/fingertip_rubber_20260916.jpg" width="360"
+  <img src="media/readme/fingertip_rubber_20260916.jpg" width="360"
        alt="The SO-101 gripper held in a hand, orange natural-rubber finger cots with a dotted grip surface pulled over each jaw, covering the silicone caps underneath" />
 </p>
 

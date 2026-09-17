@@ -60,7 +60,7 @@
 **天然橡胶指套**（表面带防滑颗粒）来保护它。
 
 <p align="center">
-  <img src="media/fingertip_rubber_20260916.jpg" width="360"
+  <img src="media/readme/fingertip_rubber_20260916.jpg" width="360"
        alt="The SO-101 gripper held in a hand, orange natural-rubber finger cots with a dotted grip surface pulled over each jaw, covering the silicone caps underneath" />
 </p>
 

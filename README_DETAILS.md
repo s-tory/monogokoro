@@ -308,7 +308,7 @@ _測ってある（2026-09-16）。_ サーボを設計電圧で回す。STS3215
 は過負荷）** で、ケースは最高 33℃ にしか達していない。電圧ビット `0x01` が立ったのは、電源を切った瞬間の 1 回（6 モータ同時）だけ。
 
 <p align="center">
-  <img src="media/psu_label_20260914.jpg" width="520"
+  <img src="media/readme/psu_label_20260914.jpg" width="520"
        alt="Adapter label: L.T.E. LTE36ES-S1-301, INPUT 100V~ 50/60Hz 0.75A, OUTPUT 5V 6.2A, MAX 31W" />
 </p>
 
@@ -393,7 +393,7 @@ setcap が外れていた）。RT の有無で単発が 0.21 回/秒のまま変
 手を動かす覚悟と引き換えに、余裕が 0.9 V から 3.0 V になる。
 
 <p align="center">
-  <img src="media/psu_74v_schematic_20260916.png" width="620"
+  <img src="media/readme/psu_74v_schematic_20260916.png" width="620"
        alt="Schematic: 24 V 2.7 A adapter, F1 2 A fast-blow, AE-YDS512F buck trimmed to 7.4 V, then on the +7.4 V rail a crowbar (TYN625RG SCR, anode to rail, cathode to GND; 9.1 V zener and 20 ohm in series from rail to gate; 1 kohm gate to GND), a 2200 uF capacitor and the servo load, all returning to a common GND that the adapter's negative also joins." />
 </p>
 
@@ -402,11 +402,11 @@ setcap が外れていた）。RT の有無で単発が 0.21 回/秒のまま変
 [組み立て当日](#組み立て当日に踏んだこと)にここが抜けていた。
 
 <p align="center">
-  <img src="media/psu_74v_board_20260916.jpg" width="620"
+  <img src="media/readme/psu_74v_board_20260916.jpg" width="620"
        alt="On the left, the AE-YDS512F step-down module on its green PCB with the output trimmer. On the right, a hand-built perfboard carrying the crowbar: a TYN625RG in TO-220, a zener and two resistors, a 2200uF electrolytic, a glass cartridge fuse in clips, and a pin header for the servo rail." />
 </p>
 <p align="center">
-  <img src="media/psu_74v_adapter_20260916.jpg" width="520"
+  <img src="media/readme/psu_74v_adapter_20260916.jpg" width="520"
        alt="Adapter label: AD-A240P270, INPUT AC100-240V 50/60Hz, OUTPUT DC24V 2.7A, plug size 5.5-2.1 centre positive" />
 </p>
 
