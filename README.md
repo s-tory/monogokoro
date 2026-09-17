@@ -127,15 +127,16 @@ Arc 140V で実際にいくらかかるのか、なぜ制御ティックの内�
 ## クイックスタート
 
 ```bash
-# 1. ビルドして、必要な特権 capability を 1 つだけ付与する。setcap は再ビルドのたびに失われる。
+# 1. ビルドして、デーモンを systemd ユニットとして一度だけ入れる。
+#    ユニットが RT の権限を渡すので、再ビルドしても RT は失われない（setcap は失われていた）。
+#    先に so101-impedance.service の User= とパスを自分の環境に書き換えること。
 cd rust/so101_impedance_ctrl && cargo build --release
-sudo setcap cap_sys_nice+ep ./target/release/so101_impedance_ctrl
+sudo install -m 0644 so101-impedance.service /etc/systemd/system/ && sudo systemctl daemon-reload
 
 # 2. デーモンを起動する。Python がアタッチする前に動いている必要がある。
-#    RUST_LOG=info を外すと起動ログが一切出ない。小脳の backend や supply の初回読みは
-#    そこにしか出ないので、確認するつもりなら必須。
-RUST_LOG=info ./target/release/so101_impedance_ctrl \
-  --port /dev/ttyACM0 --shm-name so101_impedance --cpu-core 3 --priority 99
+#    起動時に自動では立ち上がらない ── アームを見ていられるときに手で起動する。
+sudo systemctl start so101-impedance
+journalctl -u so101-impedance -f   # "acquired SCHED_FIFO priority 99" が出ていれば RT で動いている
 
 # 3. テレメトリを確認する。アームはトルクオフで、手で動かして安全な状態になっている。
 python examples/check_so101_impedance.py --shm-name so101_impedance
@@ -146,12 +147,12 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 あとは `--robot.type=so101_follower_impedance` で遠隔操作なり記録なりを行う。どちらもロボットの設定から
 関節ごとの K/D を自動で埋める。
 
-小脳はオプトイン。手順 2 に以下を足す (ビルドに `glslc`、実行に Vulkan ICD、そして **`--cpu-core` とは
-別の**ハウスキーピング用コアが必要)。
+小脳はオプトイン。ユニットの `ExecStart=` に以下を足して `sudo systemctl daemon-reload` する（`~` は展開されないのでフルパスで。ビルドに `glslc`、実行に Vulkan ICD、そして **`--cpu-core` とは
+別の**ハウスキーピング用コアが必要）。
 
 ```bash
   --cerebellum-backend gpu --cerebellum-cpu-core 1 \
-  --cerebellum-weights ~/.local/share/so101/cerebellum.bin
+  --cerebellum-weights /home/<you>/.local/share/so101/cerebellum.bin
 ```
 
 - 隔離コアのセットアップ: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)

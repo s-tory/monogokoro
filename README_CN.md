@@ -115,15 +115,16 @@ dSPACE 或 DSP 板卡、为了跑学习的像样的计算机。这四样今天�
 ## 快速开始
 
 ```bash
-# 1. 构建，并只授予一个必要的特权 capability。setcap 每次重新构建都会丢失。
+# 1. 构建，并把守护进程装成 systemd 单元（只需一次）。实时权限由单元授予，
+#    所以重新构建也不会丢失（setcap 会丢）。
+#    先把 so101-impedance.service 里的 User= 和路径改成你自己机器上的。
 cd rust/so101_impedance_ctrl && cargo build --release
-sudo setcap cap_sys_nice+ep ./target/release/so101_impedance_ctrl
+sudo install -m 0644 so101-impedance.service /etc/systemd/system/ && sudo systemctl daemon-reload
 
 # 2. 启动守护进程。它必须在 Python 挂上来之前就在运行。
-#    不加 RUST_LOG=info 就什么日志都不会打印。小脑实际取到的 backend 和首次电压读数
-#    只在那里出现。
-RUST_LOG=info ./target/release/so101_impedance_ctrl \
-  --port /dev/ttyACM0 --shm-name so101_impedance --cpu-core 3 --priority 99
+#    它不会开机自启 —— 在你能看着机械臂的时候手动启动。
+sudo systemctl start so101-impedance
+journalctl -u so101-impedance -f   # 出现 "acquired SCHED_FIFO priority 99" 就说明拿到了实时调度
 
 # 3. 确认遥测。此时机械臂力矩关闭，处于可以用手搬动的安全状态。
 python examples/check_so101_impedance.py --shm-name so101_impedance
@@ -134,12 +135,12 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 之后用 `--robot.type=so101_follower_impedance` 去做遥操作或录制即可。两者都会从机器人配置里自动填入
 每个关节的 K/D。
 
-小脑是可选加入的。在步骤 2 里加上下面这些（构建需要 `glslc`，运行需要 Vulkan ICD，另外还需要一个
+小脑是可选加入的。把下面这些加进单元的 `ExecStart=`，再执行 `sudo systemctl daemon-reload`（要写完整路径 —— 那里不会展开 `~`；构建需要 `glslc`，运行需要 Vulkan ICD，另外还需要一个
 **与 `--cpu-core` 不同的**杂务核心）。
 
 ```bash
   --cerebellum-backend gpu --cerebellum-cpu-core 1 \
-  --cerebellum-weights ~/.local/share/so101/cerebellum.bin
+  --cerebellum-weights /home/<you>/.local/share/so101/cerebellum.bin
 ```
 
 - 隔离核心的配置：[`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)

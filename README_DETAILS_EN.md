@@ -394,6 +394,9 @@ Zero puts the rate below 0.005/s at 95% (3/603) -- **at least 33x fewer than on 
 cases were warmer than the coldest 5 V run (27 C), and warmth only pushed the rate up there, so
 temperature does not explain it. **This is the limp arm; single ticks under drive are not
 measured.** (One malformed packet from motor 5 right after start was the only comms error.)
+**One condition differs: this run was not realtime, and both 5 V runs were `SCHED_FIFO`** (a
+rebuild had dropped the setcap). An earlier measurement found single ticks at 0.21/s with and
+without realtime alike, so it is unlikely to explain the zero, but it was not matched.
 
 **The 2026-09-16 "none in 78 minutes" had the wrong window.** Power was cut at 04:29:02 and
 nothing crossed the bus after that, so no single tick could have shown. The observable span is

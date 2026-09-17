@@ -22,7 +22,7 @@
 # bottom before adding one.
 
 [Unit]
-Description=SO-101 impedance control daemon (1 kHz, isolated core)
+Description=SO-101 impedance control daemon (realtime, isolated core)
 Documentation=file:///home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/README.md
 Documentation=file:///home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/PREEMPT_RT.md
 

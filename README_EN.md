@@ -130,15 +130,16 @@ on what was measured is as long as it is.
 ## Quick start
 
 ```bash
-# 1. Build and grant the one privileged capability. setcap is lost on every rebuild.
+# 1. Build, and install the daemon as a systemd unit, once. The unit grants
+#    realtime itself, so a rebuild no longer loses it (setcap did).
+#    Edit User= and the paths in so101-impedance.service for your machine first.
 cd rust/so101_impedance_ctrl && cargo build --release
-sudo setcap cap_sys_nice+ep ./target/release/so101_impedance_ctrl
+sudo install -m 0644 so101-impedance.service /etc/systemd/system/ && sudo systemctl daemon-reload
 
 # 2. Start the daemon. It must be running before any Python attaches.
-#    Without RUST_LOG=info it prints nothing at all. The cerebellum backend it
-#    actually got, and the first supply reading, are only ever reported there.
-RUST_LOG=info ./target/release/so101_impedance_ctrl \
-  --port /dev/ttyACM0 --shm-name so101_impedance --cpu-core 3 --priority 99
+#    It never starts at boot -- start it when you are there to watch the arm.
+sudo systemctl start so101-impedance
+journalctl -u so101-impedance -f   # "acquired SCHED_FIFO priority 99" means it got realtime
 
 # 3. Confirm telemetry, with the arm torque-limp and safe to move by hand.
 python examples/check_so101_impedance.py --shm-name so101_impedance
@@ -150,12 +151,12 @@ Step 3 is the first thing that needs the Python environment; building it is
 Then teleoperate or record with `--robot.type=so101_follower_impedance`; both fill in per-joint K/D
 from the robot's config automatically.
 
-The cerebellum is opt-in. Add to step 2 (needs `glslc` to build, a Vulkan ICD to run, and a
+The cerebellum is opt-in. Add to the unit's `ExecStart=` and `sudo systemctl daemon-reload` (a full path -- `~` is not expanded there; needs `glslc` to build, a Vulkan ICD to run, and a
 housekeeping core that is **not** `--cpu-core`):
 
 ```bash
   --cerebellum-backend gpu --cerebellum-cpu-core 1 \
-  --cerebellum-weights ~/.local/share/so101/cerebellum.bin
+  --cerebellum-weights /home/<you>/.local/share/so101/cerebellum.bin
 ```
 
 - Setting up the isolated core: [`rust/so101_impedance_ctrl/PREEMPT_RT.md`](rust/so101_impedance_ctrl/PREEMPT_RT.md)

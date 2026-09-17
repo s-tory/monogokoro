@@ -37,7 +37,18 @@ shaders. Running needs only a Vulkan ICD (`mesa-vulkan-drivers`), and only if yo
 
 ## Run
 
-**Grant the capability once, then run without `sudo`:**
+**Preferred: the systemd unit** ([`so101-impedance.service`](so101-impedance.service); edit `User=`
+and the paths first). It grants `CAP_SYS_NICE` through `AmbientCapabilities`, so a rebuild cannot
+silently drop realtime the way it drops `setcap` -- which is what happened here from 2026-09-14 to
+2026-09-17, unnoticed. It has no `[Install]` target, so it never starts at boot.
+
+```bash
+sudo install -m 0644 so101-impedance.service /etc/systemd/system/ && sudo systemctl daemon-reload
+sudo systemctl start so101-impedance       # stop: sudo systemctl stop so101-impedance
+journalctl -u so101-impedance -f           # want: acquired SCHED_FIFO priority 99
+```
+
+**By hand**, grant the capability once, then run without `sudo`:
 
 ```bash
 sudo setcap cap_sys_nice+ep ./target/release/so101_impedance_ctrl
