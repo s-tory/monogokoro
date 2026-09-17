@@ -327,7 +327,7 @@ they will accept. How it was built and what it measured is under
 from **0.9 V to 3.0 V**. **The prediction about the binding constraint got the direction right and
 the destination wrong**: this section said to expect `Max_Temperature_Limit` (70 C) to become the
 limit, and what the servos actually raised that day was **`0x20`, overload by the unconfirmed
-mapping** -- with the case no higher than 33 C. The voltage bit `0x01` never appeared. It also
+mapping** -- with the case no higher than 33 C. The voltage bit `0x01` appeared once, on all six motors, at the moment the power was switched off. It also
 travels better than a part number, because a DC-DC module takes any input while the brick below is
 100 V only.
 
@@ -357,6 +357,9 @@ machine.** They now surface as the `servo_error` column and `FAULT_SERVO_ERROR`.
 `--ramp 5`): `--pwm-max 700` makes it **26x worse** and `--ramp 15` **18x worse**. Both push the
 command below the force a lift actually needs, so the arm never reaches the target, pins itself
 against the clamp, and turns a short large current into a long moderate one.
+`--serial-timeout-ms 2` is **worse** too (2 ms cuts replies that were going to arrive, and a late
+reply is read as the answer to the next question). **Every number measured here sits on top of
+this.** See [The bundled supply collapses at the defaults](#the-bundled-supply-collapses-at-the-defaults) for what to power it with.
 
 ### A better supply did not remove every collapse
 
@@ -369,9 +372,9 @@ became nothing at all over 5 ms in 233 s**; at `--pwm-max 700`, **8 episodes ove
 direction is established and the size is an estimate. (The bundled adapter was measured
 **second**, though, so any drift favoured it, and it lost anyway.)
 
-### The single-tick bit0 survived the supply swap
+### The single-tick bit0 survived the 5 V swap and went at 7.4 V
 
-**The single-tick population is not the rail, and the supply did not remove it.** One servo
+**The single-tick population is not the rail, and the 5 V swap did not remove it.** One servo
 raising bit0 for exactly one 400 Hz tick happens on motor 6 at roughly 0.17/s **with the arm
 limp, no duty commanded, a 27 C case and 0.9 V of headroom** -- a state with nothing to over-heat
 or over-load. So **"a bit on one motor alone is not the supply, it is heat or load" is withdrawn
@@ -384,17 +387,19 @@ out rather than assumed out -- the regulated adapter gave 0.165/s at its coldest
 so heat moves this by 0.035 and the supply by 0.49. Whatever bit 0 reports, the rail's standing
 level sets how often it fires.
 
-**On 2026-09-16, at 7.4 V, 78 minutes of daemon uptime produced none** (03:16:53-04:35:48 UTC,
-`Present_Voltage` 70-71). At the 5 V 6 A idle rate (0.165-0.200/s) that is roughly 780-950 events over 4735 s that did not happen.
-**It is not a comparison** -- the 0.200 above was taken limp and unloaded with the case
-temperature matched, while those 78 minutes mix driving, holding and limp, and **the proportion
-was not recorded.** It came out of a log kept for other work, not a run designed for this.
-**It does agree with the trend** (higher rail, fewer events). **Settling it is cheap and has not
-been done**: leave the arm limp at a matched case temperature and count -- the same procedure as
-the two runs above, once, at 7.4 V. Until that exists, this section's heading stays as it is.
-`--serial-timeout-ms 2` is **worse** too (2 ms cuts replies that were going to arrive, and a late
-reply is read as the answer to the next question). **Every number measured here sits on top of
-this.** See [The bundled supply collapses at the defaults](#the-bundled-supply-collapses-at-the-defaults) for what to power it with.
+**On 2026-09-17 the same procedure, once, at 7.4 V, gave none.** The daemon alone (no client,
+no duty commanded), the arm folded and limp, **603 s (about 240k ticks)**, `Present_Voltage`
+70-72, case 29-33 C. At the 5 V 6 A rate of 0.165-0.200/s that would have been 100-120 events.
+Zero puts the rate below 0.005/s at 95% (3/603) -- **at least 33x fewer than on 5 V 6 A.** The
+cases were warmer than the coldest 5 V run (27 C), and warmth only pushed the rate up there, so
+temperature does not explain it. **This is the limp arm; single ticks under drive are not
+measured.** (One malformed packet from motor 5 right after start was the only comms error.)
+
+**The 2026-09-16 "none in 78 minutes" had the wrong window.** Power was cut at 04:29:02 and
+nothing crossed the bus after that, so no single tick could have shown. The observable span is
+03:16:53-04:29:02, **4329 s**, which makes roughly 710-870 expected (this section said "roughly
+800", then "780-950 over 4735 s"). Driving, holding and limp are mixed in it with the proportion
+unrecorded, so it only supports the run above.
 
 ### A 7.4 V supply, built
 

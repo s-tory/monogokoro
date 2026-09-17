@@ -205,7 +205,7 @@ offset riding on the disparity. Neither the registers nor the feature matching s
 - [The bundled supply collapses at the defaults](README_DETAILS_EN.md#the-bundled-supply-collapses-at-the-defaults) -- one 833 ms collapse every 329 s. **Swapping in an off-the-shelf 5 V 6 A brick clears it at the defaults** (a plug change, measured).
 - [The comms errors were the supply](README_DETAILS_EN.md#the-comms-errors-were-the-supply)
 - [A better supply did not remove every collapse](README_DETAILS_EN.md#a-better-supply-did-not-remove-every-collapse)
-- [The single-tick bit0 survived the supply swap](README_DETAILS_EN.md#the-single-tick-bit0-survived-the-supply-swap)
+- [The single-tick bit0 survived the 5 V swap and went at 7.4 V](README_DETAILS_EN.md#the-single-tick-bit0-survived-the-5-v-swap-and-went-at-74-v) -- limp, none in 603 s.
 - [A 7.4 V supply, built](README_DETAILS_EN.md#a-74-v-supply-built) -- for more margin still. Needs a soldering iron.
 - **The daemon is not part of the Python build.** It is a separate Cargo project, deployed by hand.
 - [Interactive calibration is not implemented](README_DETAILS_EN.md#interactive-calibration-is-not-implemented)

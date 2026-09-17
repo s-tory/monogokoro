@@ -188,7 +188,7 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 - [随附的电源在默认设置下就会塌陷](README_DETAILS_CN.md#随附的电源在默认设置下就会塌陷) —— 329 秒里一次 833 ms。**换成市售的 5 V 6 A 电源，默认设置下就不再出现**（只需换个插头，已实测）。
 - [通信错误的真正原因是电源](README_DETAILS_CN.md#通信错误的真正原因是电源)
 - [换电源之后塌陷没有全部消失](README_DETAILS_CN.md#换电源之后塌陷没有全部消失)
-- [单周期的 bit0 没有随电源消失](README_DETAILS_CN.md#单周期的-bit0-没有随电源消失)
+- [单周期的 bit0 换 5 V 电源后还在，到 7.4 V 消失了](README_DETAILS_CN.md#单周期的-bit0-换-5-v-电源后还在到-74-v-消失了) —— 手臂放松时，603 秒里 0 次。
 - [自制 7.4 V 电源](README_DETAILS_CN.md#自制-74-v-电源) —— 想要更多余量的话。要焊接。
 - **守护进程不包含在 Python 的构建里。** 它是独立的 Cargo 项目，需要手动部署。
 - [交互式标定尚未实现](README_DETAILS_CN.md#交互式标定尚未实现)
