@@ -304,16 +304,26 @@ def cmd_hold(args) -> None:
     print(f"\nsamples -> {args.out}")
 
 
-def scaled_gains(lift_k: float) -> tuple[dict, dict]:
-    """Gains for the whole arm, named by what the lift joint gets.
+def scaled_gains(k_value: float, joint: str | None = None) -> tuple[dict, dict]:
+    """Gains for the whole arm, named by one number.
 
-    One number has to move the arm's compliance together, because a hand judges the arm and not a
-    joint. Scaling off the shipped set keeps the ratios that exist for a reason -- a flat K is
-    either too soft at the shoulder or stiff enough at `wrist_roll` to turn its velocity noise into
-    a full-duty limit cycle.
+    With no `joint`, the number is what the lift joint gets and every other joint moves by the same
+    factor: that sweeps the arm's overall compliance and keeps the ratios fixed. A flat K is either
+    too soft at the shoulder or stiff enough at `wrist_roll` to turn its velocity noise into a
+    full-duty limit cycle.
+
+    With a `joint`, only that joint's K is set and the rest stay at the shipped values. That sweeps
+    the *ratio*, which the scaled mode cannot: on 2026-09-16 the judge of the scaled sweep said the
+    joints nearer the tip felt stiffer than the shoulder, and a single factor has no way to answer
+    that. D follows K on the swept joint only, keeping that joint's own D/K.
     """
-    f = lift_k / DEFAULT_K[LIFT_JOINT]
-    return ({m: DEFAULT_K[m] * f for m in MOTOR_NAMES}, {m: DEFAULT_D[m] * f for m in MOTOR_NAMES})
+    if joint is None:
+        f = k_value / DEFAULT_K[LIFT_JOINT]
+        return ({m: DEFAULT_K[m] * f for m in MOTOR_NAMES}, {m: DEFAULT_D[m] * f for m in MOTOR_NAMES})
+    k, d = dict(DEFAULT_K), dict(DEFAULT_D)
+    k[joint] = k_value
+    d[joint] = DEFAULT_D[joint] * k_value / DEFAULT_K[joint]
+    return k, d
 
 
 def blind_plan(candidates: list[float], repeats: int, seed: int, order: str = "shuffled") -> list[float]:
@@ -373,7 +383,11 @@ def cmd_blind(args) -> None:
     pose = _load_pose(args.pose_file)
     rest = _load_pose(args.rest_pose) if args.rest_pose else None
 
-    _scaled = scaled_gains
+    def _scaled(k_value: float) -> tuple[dict, dict]:
+        return scaled_gains(k_value, args.joint)
+
+    swept = args.joint or f"{LIFT_JOINT} (others scaled with it)"
+    print(f"sweeping K on: {swept}")
     candidates = [float(x) for x in args.k_candidates.split(",")]
     plan = blind_plan(candidates, args.repeats, args.seed, args.order)
 
@@ -439,10 +453,10 @@ def cmd_blind(args) -> None:
                 0.0,
             )
 
-            for i, lift_k in enumerate(plan):
+            for i, k_value in enumerate(plan):
                 if stop:
                     break
-                nxt = _scaled(lift_k)
+                nxt = _scaled(k_value)
                 # Cross-fade into this trial's gains while still commanding the pose. A step change
                 # in K on a loaded joint is a step change in duty, which reads as a twitch and
                 # contaminates the very feel being judged.
@@ -465,7 +479,7 @@ def cmd_blind(args) -> None:
                 trials.append(
                     {
                         "trial": i + 1,
-                        "lift_k": lift_k,
+                        "k": k_value,
                         "verdict": verdict,
                         "held_s": round(time.monotonic() - t0, 1),
                         "wall": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
@@ -491,6 +505,9 @@ def cmd_blind(args) -> None:
 
     out = {
         "seed": args.seed,
+        "joint": swept,
+        "k_all": "joint only, others at the shipped values" if args.joint else "scaled together",
+        "shipped_k": DEFAULT_K,
         "candidates": candidates,
         "repeats": args.repeats,
         "order_mode": args.order,
@@ -503,15 +520,15 @@ def cmd_blind(args) -> None:
         json.dump(out, f, indent=2, ensure_ascii=False)
     print("\n=== unblinded ===")
     for t in trials:
-        print(f"  trial {t['trial']}: lift K = {t['lift_k']:<5} -> {t['verdict']}")
+        print(f"  trial {t['trial']}: {args.joint or LIFT_JOINT} K = {t['k']:<5} -> {t['verdict']}")
     # A gain that drew two different verdicts is the run telling you the judgement has not settled,
     # which is worth more than the gain itself: it says how much of the next result is noise.
     by_k: dict[float, list[str]] = {}
     for t in trials:
-        by_k.setdefault(t["lift_k"], []).append(t["verdict"])
-    for lift_k, vs in sorted(by_k.items()):
+        by_k.setdefault(t["k"], []).append(t["verdict"])
+    for k_value, vs in sorted(by_k.items()):
         if len(vs) > 1 and len(set(vs)) > 1:
-            print(f"  !! K={lift_k} drew different verdicts: {vs} -- the judgement is not stable yet")
+            print(f"  !! K={k_value} drew different verdicts: {vs} -- the judgement is not stable yet")
     print(f"\n-> {args.out}")
 
 
@@ -778,8 +795,17 @@ def main() -> None:
     b.add_argument(
         "--k-candidates",
         default="20,12,8,5,3",
-        help=f"Gains for {LIFT_JOINT}, comma separated; every other joint is scaled from the "
-        "shipped set by the same factor.",
+        help=f"Gains, comma separated. Without --joint they are for {LIFT_JOINT} and every other "
+        "joint is scaled from the shipped set by the same factor; with --joint they are for that "
+        "joint alone.",
+    )
+    b.add_argument(
+        "--joint",
+        choices=MOTOR_NAMES,
+        default=None,
+        help="Sweep this joint's K alone, leaving the others at the shipped values. Push that "
+        "joint's segment, and say which joint is being judged before the run -- the blind is on "
+        "the value, not on the joint.",
     )
     b.add_argument(
         "--repeats",

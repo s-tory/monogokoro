@@ -71,6 +71,30 @@ def test_damping_scales_with_the_spring():
         assert d[motor] / k[motor] == pytest.approx(measure.DEFAULT_D[motor] / measure.DEFAULT_K[motor])
 
 
+def test_a_single_joint_moves_alone():
+    # The ratio sweep. If a neighbour moves with it, the verdict is about two joints and the ratio
+    # read off it is wrong in a way no one pushing the arm would notice.
+    k, d = measure.scaled_gains(0.84, joint="wrist_roll")
+    assert k["wrist_roll"] == 0.84
+    for motor in measure.MOTOR_NAMES:
+        if motor != "wrist_roll":
+            assert k[motor] == measure.DEFAULT_K[motor]
+            assert d[motor] == measure.DEFAULT_D[motor]
+
+
+def test_a_single_joint_keeps_its_own_damping_ratio():
+    k, d = measure.scaled_gains(2.0, joint="wrist_flex")
+    j = "wrist_flex"
+    assert d[j] / k[j] == pytest.approx(measure.DEFAULT_D[j] / measure.DEFAULT_K[j])
+
+
+def test_a_single_joint_at_its_shipped_value_is_the_shipped_arm():
+    for motor in measure.MOTOR_NAMES:
+        k, d = measure.scaled_gains(measure.DEFAULT_K[motor], joint=motor)
+        assert k == measure.DEFAULT_K
+        assert d == pytest.approx(measure.DEFAULT_D)
+
+
 def test_the_plan_holds_every_candidate_plus_the_repeats():
     plan = measure.blind_plan(CANDIDATES, 2, seed=0)
     assert len(plan) == len(CANDIDATES) + 2
