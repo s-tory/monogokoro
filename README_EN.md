@@ -150,7 +150,7 @@ Step 3 is the first thing that needs the Python environment; building it is
 
 Then teleoperate or record with `--robot.type=so101_follower_impedance`; both fill in per-joint K/D
 from the robot's config automatically. **Those defaults were chosen, blind, on the 7.4 V supply**
-(7.0-7.1 V as the servos read it) -- all but wrist_roll and the gripper, which are still the old set scaled down. Duty is a fraction of the supply, so at 5 V the same K pushes
+(7.0-7.1 V as the servos read it) -- all but the gripper, which is still the old value scaled down. Duty is a fraction of the supply, so at 5 V the same K pushes
 about two thirds as hard, and the feel and the hold should both change; nobody has re-chosen them
 at 5 V.
 
