@@ -17,8 +17,8 @@ use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_startup_config, apply_tendon_inhibition, finite_difference_velocity,
     first_outside_travel, impedance_pwm, input_is_fresh, log_supply_and_temperature,
     poll_and_apply_commands, read_homing_offsets, read_position_frames,
-    read_supply_and_temperature, read_travel_envelopes, release_all, wrapped_delta, MovingAverage,
-    PositionFrame, PositionGate, TravelEnvelope,
+    read_supply_and_temperature, read_travel_envelopes, release_all, soft_limit_position,
+    wrapped_delta, MovingAverage, PositionFrame, PositionGate, TravelEnvelope,
 };
 use so101_impedance_ctrl::feetech::{self, FeetechBus};
 use so101_impedance_ctrl::leader::LeaderGripper;
@@ -197,8 +197,12 @@ struct Cli {
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     invert_pwm: bool,
 
-    /// Soft position limits in raw encoder ticks. PWM that would drive a joint further past these
-    /// is zeroed; motion back toward the middle is always allowed.
+    /// Soft position limits in encoder ticks, judged in the corrected frame (raw minus
+    /// `Homing_Offset`) whenever the joint's offset and frame are known -- the frame in which no
+    /// joint's travel crosses the 4095/0 seam. Until 2026-09-17 they were judged on the raw count,
+    /// which under PWM puts the seam in mid-travel on every joint of this arm, and they held
+    /// shoulder_lift and elbow_flex at raw 100 while a ramp pulled them on. PWM that would drive a
+    /// joint further past these is zeroed; motion back toward the middle is always allowed.
     #[arg(long, default_value_t = 100.0)]
     pos_min: f32,
 
@@ -839,7 +843,7 @@ fn main() {
     .expect("failed to open SO101 serial port");
 
     apply_startup_config(&mut bus, &MOTOR_IDS);
-    let homing_offsets = read_homing_offsets(&mut bus, &MOTOR_IDS);
+    let mut homing_offsets = read_homing_offsets(&mut bus, &MOTOR_IDS);
     // Both halves of the travel check are state the daemon has to keep current for the whole run:
     // the client rewrites the calibration and switches the operating mode after this point, and
     // either one silently invalidates what was read here. See the command channel in the loop.
@@ -992,33 +996,37 @@ fn main() {
                         );
                     }
                     pos_frames[i] = frame;
-                } else if cmd.kind == shm::CommandKind::SetCalibration as u32 && args.travel_gate {
+                } else if cmd.kind == shm::CommandKind::SetCalibration as u32 {
                     // payload = [homing_offset, range_min, range_max, _], the same values the
-                    // command just wrote into the servo's EPROM.
-                    travel[i] = TravelEnvelope::new(
-                        cmd.payload[1],
-                        cmd.payload[2],
-                        cmd.payload[0],
-                        args.travel_margin,
-                    );
-                    match travel[i] {
-                        Some(env) => {
-                            let (rlo, rhi) = env.band(PositionFrame::Raw);
-                            log::info!(
-                                "motor {}: client calibration -- rejecting positions outside \
-                                 {:.0}-{:.0} in position mode / {rlo:.0}-{rhi:.0} in PWM",
-                                cmd.motor_id,
-                                env.min,
-                                env.max
-                            );
-                        }
-                        None => log::info!(
-                            "motor {}: client calibration travel {:.0}-{:.0} spans the circle -- \
-                             no position envelope",
-                            cmd.motor_id,
+                    // command just wrote into the servo's EPROM. The soft limits read the offset
+                    // whether or not the travel gate is on.
+                    homing_offsets[i] = Some(cmd.payload[0]);
+                    if args.travel_gate {
+                        travel[i] = TravelEnvelope::new(
                             cmd.payload[1],
-                            cmd.payload[2]
-                        ),
+                            cmd.payload[2],
+                            cmd.payload[0],
+                            args.travel_margin,
+                        );
+                        match travel[i] {
+                            Some(env) => {
+                                let (rlo, rhi) = env.band(PositionFrame::Raw);
+                                log::info!(
+                                    "motor {}: client calibration -- rejecting positions outside \
+                                     {:.0}-{:.0} in position mode / {rlo:.0}-{rhi:.0} in PWM",
+                                    cmd.motor_id,
+                                    env.min,
+                                    env.max
+                                );
+                            }
+                            None => log::info!(
+                                "motor {}: client calibration travel {:.0}-{:.0} spans the circle -- \
+                                 no position envelope",
+                                cmd.motor_id,
+                                cmd.payload[1],
+                                cmd.payload[2]
+                            ),
+                        }
                     }
                 }
             }
@@ -1180,9 +1188,12 @@ fn main() {
         prev_pos = present_pos;
 
         let mut past_limits = false;
+        let limit_pos: [f32; NUM_MOTORS] = std::array::from_fn(|i| {
+            soft_limit_position(present_pos[i], homing_offsets[i], pos_frames[i])
+        });
         for i in 0..NUM_MOTORS {
-            if present_pos[i] > args.pos_min && present_pos[i] < args.pos_max {
-                last_in_range[i] = Some(present_pos[i]);
+            if limit_pos[i] > args.pos_min && limit_pos[i] < args.pos_max {
+                last_in_range[i] = Some(limit_pos[i]);
                 if let Some(n) = pos_limit_latch[i].recover() {
                     log::info!(
                         "motor {} is back inside its limits after {n} tick(s)",
@@ -1201,8 +1212,8 @@ fn main() {
                             MOTOR_IDS[i],
                             args.pos_min,
                             args.pos_max,
-                            present_pos[i],
-                            wrapped_delta(back, present_pos[i]),
+                            limit_pos[i],
+                            wrapped_delta(back, limit_pos[i]),
                         ),
                         None => log::error!(
                             "motor {} is outside [{}, {}] at {:.0} and has not been seen inside them \
@@ -1212,7 +1223,7 @@ fn main() {
                             MOTOR_IDS[i],
                             args.pos_min,
                             args.pos_max,
-                            present_pos[i],
+                            limit_pos[i],
                         ),
                     }
                 }
@@ -1288,7 +1299,7 @@ fn main() {
                 }
                 apply_soft_limits(
                     folded,
-                    present_pos[i],
+                    limit_pos[i],
                     args.pos_min,
                     args.pos_max,
                     last_in_range[i],

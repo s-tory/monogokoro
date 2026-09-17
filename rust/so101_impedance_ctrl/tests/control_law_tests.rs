@@ -3,8 +3,8 @@
 
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_tendon_inhibition, finite_difference_velocity, first_implausible_step,
-    first_outside_travel, impedance_pwm, input_is_fresh, MovingAverage, PositionFrame,
-    PositionGate, TravelEnvelope, TravelVerdict,
+    first_outside_travel, impedance_pwm, input_is_fresh, soft_limit_position, MovingAverage,
+    PositionFrame, PositionGate, TravelEnvelope, TravelVerdict,
 };
 
 /// One tick's worth of budget at the shipped defaults: 20000 counts/s at 400 Hz.
@@ -669,4 +669,46 @@ fn a_missing_threshold_or_gain_disables_the_term() {
             "threshold={threshold} gain={gain} must disable the term"
         );
     }
+}
+
+/// The morning of 2026-09-17. Under PWM, shoulder_lift (Homing_Offset -1294) passes raw 100 in the
+/// middle of its travel -- the offset exists to push the seam *out* of the corrected frame, which is
+/// what pulls it *into* the raw one. Judged raw, the soft limits held the joint there while the
+/// ramp pulled it on, and the arm shook. Judged where the travel is one interval, 100 is 1394.
+#[test]
+fn soft_limits_are_judged_where_the_travel_does_not_wrap() {
+    let lift = Some(-1294.0);
+    assert_eq!(
+        soft_limit_position(100.0, lift, Some(PositionFrame::Raw)),
+        1394.0
+    );
+    let pos = soft_limit_position(100.0, lift, Some(PositionFrame::Raw));
+    assert_eq!(
+        apply_soft_limits(500.0, pos, 100.0, 3995.0, Some(1390.0)),
+        500.0
+    );
+    assert_eq!(
+        apply_soft_limits(-500.0, pos, 100.0, 3995.0, Some(1390.0)),
+        -500.0
+    );
+}
+
+/// Position mode already reports the corrected count, so it is taken as it is.
+#[test]
+fn a_corrected_reading_is_not_corrected_twice() {
+    assert_eq!(
+        soft_limit_position(1394.0, Some(-1294.0), Some(PositionFrame::Corrected)),
+        1394.0
+    );
+}
+
+/// With no offset or no known frame there is nothing to correct with, and the old raw rule stands
+/// rather than a guess.
+#[test]
+fn without_an_offset_or_a_frame_the_raw_rule_stands() {
+    assert_eq!(
+        soft_limit_position(100.0, None, Some(PositionFrame::Raw)),
+        100.0
+    );
+    assert_eq!(soft_limit_position(100.0, Some(-1294.0), None), 100.0);
 }

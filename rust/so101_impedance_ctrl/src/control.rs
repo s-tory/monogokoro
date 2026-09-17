@@ -287,6 +287,28 @@ pub fn apply_tendon_inhibition(pwm: f32, current_avg: f32, threshold: f32, gain:
     magnitude * pwm.signum()
 }
 
+/// Where `present_pos` sits for the purpose of `--pos-min` / `--pos-max`.
+///
+/// Those limits guard the encoder seam, and they only mean that in a frame where no joint's travel
+/// crosses it -- which is the corrected frame, because putting the seam outside the travel is what
+/// `Homing_Offset` is for. Under PWM the servo reports raw counts, and there every joint of this arm
+/// has the seam *inside* its travel (see [`TravelEnvelope::band`]). Judged raw, the limits stopped
+/// shoulder_lift and elbow_flex in mid-travel on 2026-09-17 while a ramp pulled them on, and the arm
+/// shook. So a raw reading is corrected first when the offset is known; with no offset or no known
+/// frame the reading is used as it is, which is the rule this replaced.
+pub fn soft_limit_position(
+    present_pos: f32,
+    homing_offset: Option<f32>,
+    frame: Option<PositionFrame>,
+) -> f32 {
+    match (frame, homing_offset) {
+        (Some(PositionFrame::Raw), Some(offset)) => {
+            (present_pos - offset).rem_euclid(ENCODER_RESOLUTION)
+        }
+        _ => present_pos,
+    }
+}
+
 pub fn apply_soft_limits(
     pwm: f32,
     present_pos: f32,
