@@ -148,3 +148,67 @@ def test_descending_ignores_the_seed():
     a = measure.blind_plan(CANDIDATES, 2, 0, "descending")
     b = measure.blind_plan(CANDIDATES, 2, 999, "descending")
     assert a == b
+
+
+# The arm's calibration on 2026-09-17, and the two poses that drove shoulder_lift and elbow_flex into
+# their folded stops at full duty: interpolating raw counts in a straight line from REST to REACH
+# walks both joints through the part of the circle that is outside their travel.
+TRAVEL = {
+    "shoulder_pan": (1737, 810, 3328),
+    "shoulder_lift": (-1294, 917, 3313),
+    "elbow_flex": (1449, 757, 2936),
+    "wrist_flex": (-1802, 762, 3153),
+    "wrist_roll": (1937, 70, 3946),
+    "gripper": (1880, 1969, 3558),
+}
+REST = {
+    "shoulder_pan": 3822.0,
+    "shoulder_lift": 3775.0,
+    "elbow_flex": 290.0,
+    "wrist_flex": 1024.0,
+    "wrist_roll": 2973.0,
+    "gripper": 3922.0,
+}
+REACH = {
+    "shoulder_pan": 3822.0,
+    "shoulder_lift": 842.5,
+    "elbow_flex": 3378.0,
+    "wrist_flex": 159.0,
+    "wrist_roll": 2973.0,
+    "gripper": 3927.0,
+}
+
+
+def _in_travel(motor, raw, margin=5):
+    offset, low, high = TRAVEL[motor]
+    corrected = (raw - offset) % 4096
+    return low - margin <= corrected <= high + margin
+
+
+def test_the_ramp_never_leaves_the_travel():
+    for i in range(101):
+        target = measure.interpolate(REST, REACH, i / 100, TRAVEL)
+        for motor, raw in target.items():
+            assert _in_travel(motor, raw), (i, motor, raw)
+
+
+def test_the_ramp_ends_where_it_was_asked_to():
+    assert measure.interpolate(REST, REACH, 0.0, TRAVEL) == pytest.approx(REST)
+    assert measure.interpolate(REST, REACH, 1.0, TRAVEL) == pytest.approx(REACH)
+
+
+def test_a_straight_line_in_raw_counts_would_have_left_it():
+    # The bug this replaces, kept as a check that the fixture actually exercises it.
+    halfway = {m: REST[m] + (REACH[m] - REST[m]) * 0.5 for m in REST}
+    assert not _in_travel("shoulder_lift", halfway["shoulder_lift"])
+    assert not _in_travel("elbow_flex", halfway["elbow_flex"])
+
+
+def test_the_distance_is_measured_along_the_travel():
+    # 3775 -> 842.5 is 1163 counts through the encoder wrap, not 2933 the long way round.
+    assert measure.travel_distance(REST, REACH, TRAVEL) == pytest.approx(1163.0 + 0.5, abs=1)
+
+
+def test_the_error_is_measured_along_the_travel():
+    # Present just past the wrap, target just before it: 20 counts apart, not 4076.
+    assert measure.along_error("shoulder_lift", 4090.0, 10.0, TRAVEL) == pytest.approx(-16.0)

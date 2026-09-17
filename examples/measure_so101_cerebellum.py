@@ -83,6 +83,7 @@ from lerobot.robots.so101_impedance_follower.shm_client import (
     describe_fault_flags,
     describe_servo_error,
 )
+from lerobot.utils.constants import HF_LEROBOT_CALIBRATION
 
 # The shipped per-joint gains, not a scalar. A single K/D is either too soft for the shoulder or
 # needlessly stiff everywhere else -- and an over-large D on a joint that holds nothing (wrist_roll)
@@ -125,6 +126,71 @@ def _as_dict(g):
 # So the frame is neither inferred nor assumed. `capture` puts the servos into the mode the control
 # loop runs in and writes down which one that was; `hold` refuses a file that does not say.
 POSE_FRAME = "pwm_raw"
+
+
+# Where a pose's counts sit on the joint, as opposed to on the encoder.
+#
+# Under PWM the daemon works in raw encoder counts, and a joint's travel can straddle the 4095/0
+# wrap in that frame: shoulder_lift here runs 3519 -> 4095 -> 0 -> 2219. A ramp that interpolates
+# raw counts in a straight line therefore walks the target the long way round, through the part of
+# the circle the joint cannot reach. On 2026-09-17 that drove shoulder_lift and elbow_flex into
+# their folded stops at full duty for as long as the target stayed within half a turn (the servos
+# raised 0x20), and then -- because the daemon takes the *shorter* way to any target -- the error
+# flipped sign and the arm was thrown the other way. That was the "oscillation" of that morning, and
+# very likely of the 3105-count approach on 2026-09-16 that was put down to speed.
+#
+# `Homing_Offset` exists precisely to move the travel off the wrap: `raw - offset` (mod 4096) is
+# the position-mode count, in which the travel is one unbroken interval. So ramps interpolate
+# there and convert back. The offsets are read from the calibration file rather than assumed; a
+# run without one is refused, because the failure it prevents is silent until the arm hits a stop.
+Travel = dict[str, tuple[float, float, float]]
+_ENCODER = 4096.0
+
+
+def load_travel(robot_id: str) -> Travel:
+    path = HF_LEROBOT_CALIBRATION / "robots" / "so101_follower_impedance" / f"{robot_id}.json"
+    if not path.is_file():
+        raise SystemExit(
+            f"no calibration at {path}: ramps need each joint's Homing_Offset to know which way "
+            "round the encoder its travel runs. Pass --robot-id for the arm being driven."
+        )
+    with open(path) as f:
+        calib = json.load(f)
+    travel = {
+        m: (float(calib[m]["homing_offset"]), float(calib[m]["range_min"]), float(calib[m]["range_max"]))
+        for m in MOTOR_NAMES
+    }
+    print(f"travel from {path}: " + ", ".join(f"{m} offset {int(v[0])}" for m, v in travel.items()))
+    return travel
+
+
+def _along(motor: str, raw: float, travel: Travel) -> float:
+    return (raw - travel[motor][0]) % _ENCODER
+
+
+def interpolate(a: dict, b: dict, frac: float, travel: Travel) -> dict[str, float]:
+    """The target `frac` of the way from `a` to `b`, moving along each joint's travel."""
+    out = {}
+    for m in MOTOR_NAMES:
+        ca, cb = _along(m, a[m], travel), _along(m, b[m], travel)
+        out[m] = (ca + (cb - ca) * frac + travel[m][0]) % _ENCODER
+    return out
+
+
+def along_error(motor: str, target: float, present: float, travel: Travel) -> float:
+    """`target - present` measured along the travel, so a pose across the wrap does not read ~4096."""
+    return _along(motor, target, travel) - _along(motor, present, travel)
+
+
+def travel_distance(a: dict, b: dict, travel: Travel) -> float:
+    """The largest distance any joint has to cover between `a` and `b`, along its travel."""
+    return max(abs(_along(m, b[m], travel) - _along(m, a[m], travel)) for m in MOTOR_NAMES)
+
+
+ROBOT_ID_HELP = (
+    "Calibration to read Homing_Offset from, under the so101_follower_impedance calibration "
+    "directory. Ramps move along each joint's travel, which only the offset locates."
+)
 
 
 def _load_pose(path: str) -> dict[str, float]:
@@ -180,6 +246,7 @@ def cmd_hold(args) -> None:
     # end of a run (see the `finally` below) means two consecutive runs both start from the resting
     # pose, so the second approach has to happen inside one process.
     approach = _load_pose(args.approach_from) if args.approach_from else None
+    travel = load_travel(args.robot_id)
 
     k, d = _as_dict(args.k), _as_dict(args.d)
     rows, stop = [], False
@@ -198,7 +265,7 @@ def cmd_hold(args) -> None:
         checker.enable_torque()
 
         start = {m: s["present_pos"] for m, s in checker.read_state().items()}
-        drift = max(abs(pose[m] - start[m]) for m in MOTOR_NAMES)
+        drift = travel_distance(start, pose, travel)
         print(f"resting pose is {drift:.0f} ticks from the stored target; ramping over {args.ramp:.0f}s")
         print(checker.describe_cerebellum())
 
@@ -217,7 +284,7 @@ def cmd_hold(args) -> None:
 
                 # Ramp in, then hold. A step onto a compliant arm saturates PWM; a ramp does not.
                 def _lerp(a, b, frac):
-                    return {m: a[m] + (b[m] - a[m]) * frac for m in MOTOR_NAMES}
+                    return interpolate(a, b, frac, travel)
 
                 if approach is None:
                     frac = min(1.0, t / args.ramp) if args.ramp > 0 else 1.0
@@ -265,7 +332,7 @@ def cmd_hold(args) -> None:
                     s = state[m]
                     row[f"{m}.target"] = target[m]
                     row[f"{m}.pos"] = s["present_pos"]
-                    row[f"{m}.err"] = target[m] - s["present_pos"]
+                    row[f"{m}.err"] = along_error(m, target[m], s["present_pos"], travel)
                     row[f"{m}.vel"] = s["present_vel"]
                     row[f"{m}.pwm"] = s["pwm_cmd"]
                     row[f"{m}.ff"] = s["ff_pwm"]
@@ -284,7 +351,7 @@ def cmd_hold(args) -> None:
             tr = time.monotonic()
             while (e := time.monotonic() - tr) < args.ramp:
                 frac = e / args.ramp
-                checker.move_to({m: held[m] + (start[m] - held[m]) * frac for m in MOTOR_NAMES}, k=k, d=d)
+                checker.move_to(interpolate(held, start, frac, travel), k=k, d=d)
                 time.sleep(args.interval)
             checker.move_to({}, k=0.0, d=0.0)
 
@@ -382,6 +449,7 @@ def cmd_blind(args) -> None:
     """
     pose = _load_pose(args.pose_file)
     rest = _load_pose(args.rest_pose) if args.rest_pose else None
+    travel = load_travel(args.robot_id)
 
     def _scaled(k_value: float) -> tuple[dict, dict]:
         return scaled_gains(k_value, args.joint)
@@ -404,7 +472,7 @@ def cmd_blind(args) -> None:
         checker.set_pwm_mode()
         checker.enable_torque()
         start = {m: s["present_pos"] for m, s in checker.read_state().items()}
-        drift = max(abs(pose[m] - start[m]) for m in MOTOR_NAMES)
+        drift = travel_distance(start, pose, travel)
         # A fixed ramp is a fixed *time*, so the further the arm has to travel the faster it is
         # driven -- and the speed is what breaks, not the distance. On 2026-09-16 a run starting
         # 474 ticks away rode on at 79 ticks/s and was fine; the next one started 3105 ticks away,
@@ -444,10 +512,7 @@ def cmd_blind(args) -> None:
             # Onto the pose at the first trial's gains.
             _hold_for(
                 ramp,
-                lambda t: {
-                    m: start[m] + (pose[m] - start[m]) * min(1.0, t / ramp if ramp else 1.0)
-                    for m in MOTOR_NAMES
-                },
+                lambda t: interpolate(start, pose, min(1.0, t / ramp if ramp else 1.0), travel),
                 (k, d),
                 (k, d),
                 0.0,
@@ -484,7 +549,9 @@ def cmd_blind(args) -> None:
                         "held_s": round(time.monotonic() - t0, 1),
                         "wall": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
                         "pwm": {m: state[m]["pwm_cmd"] for m in MOTOR_NAMES},
-                        "err": {m: pose[m] - state[m]["present_pos"] for m in MOTOR_NAMES},
+                        "err": {
+                            m: along_error(m, pose[m], state[m]["present_pos"], travel) for m in MOTOR_NAMES
+                        },
                     }
                 )
                 print(f"    recorded: {verdict}")
@@ -495,11 +562,11 @@ def cmd_blind(args) -> None:
             print("\nlowering to the rest pose...")
             held = dict(pose)
             tr = time.monotonic()
-            gap = max(abs(landing[m] - held[m]) for m in MOTOR_NAMES)
+            gap = travel_distance(held, landing, travel)
             down = max(args.ramp, gap / args.max_approach_rate) if args.max_approach_rate > 0 else args.ramp
             while (e := time.monotonic() - tr) < down:
                 f = e / down
-                checker.move_to({m: held[m] + (landing[m] - held[m]) * f for m in MOTOR_NAMES}, k=k, d=d)
+                checker.move_to(interpolate(held, landing, f, travel), k=k, d=d)
                 time.sleep(args.interval)
             checker.move_to({}, k=0.0, d=0.0)
 
@@ -757,6 +824,7 @@ def main() -> None:
     h.add_argument("--label", required=True)
     h.add_argument("--out", required=True)
     h.add_argument("--calibration", default=None)
+    h.add_argument("--robot-id", default="my_awesome_follower_arm", help=ROBOT_ID_HELP)
     h.add_argument(
         "--k",
         type=_gain,
@@ -784,6 +852,7 @@ def main() -> None:
         help="Switch K underneath a held pose and collect verdicts, without releasing the arm.",
     )
     b.add_argument("--shm-name", default="so101_impedance")
+    b.add_argument("--robot-id", default="my_awesome_follower_arm", help=ROBOT_ID_HELP)
     b.add_argument("--pose-file", default="pose.json", help="The pose judged in every trial.")
     b.add_argument(
         "--rest-pose",
