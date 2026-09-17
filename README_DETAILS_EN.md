@@ -259,8 +259,10 @@ zero. `wrist_flex` (K=10) alternates between +/-2 counts, so its feedback duty n
 20 and never enters a band of 5; the ff hunted between 0 and 126 with a **69-second period**.
 Raising it to 25 removes the oscillation entirely (0.2 counts over 173 s, and within 4% of the
 true load) -- but the ff then freezes the moment the error enters the band, so **it stops being a
-measurement of the load and becomes a function of how far the transient got**. Which way to settle
-it is undecided. `0` restores the old behaviour. **The stick band is not an artefact of the
+measurement of the load and becomes a function of how far the transient got**. The binary's default is
+still 5. **The systemd unit starts it at 8 since 2026-09-17** -- the same "one count times joint
+stiffness" derivation, now that the largest shipped K is shoulder_lift's 8. Whether 8 removes the
+oscillation has not been measured. `0` restores the old behaviour. **The stick band is not an artefact of the
 supply collapsing** -- separated on 2026-09-09: the band appears on a healthy rail (4.44-4.51 V
 mean, 4.40 V min). Its width, and the fact that it is the same order as the
 holding duty it brackets, are measured under
