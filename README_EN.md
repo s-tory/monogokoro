@@ -149,7 +149,10 @@ Step 3 is the first thing that needs the Python environment; building it is
 [`SETUP_XPU.md`](SETUP_XPU.md). The daemon in steps 1-2 is Rust and runs without it.
 
 Then teleoperate or record with `--robot.type=so101_follower_impedance`; both fill in per-joint K/D
-from the robot's config automatically.
+from the robot's config automatically. **Those defaults were chosen, blind, on the 7.4 V supply**
+(7.0-7.1 V as the servos read it). Duty is a fraction of the supply, so at 5 V the same K pushes
+about two thirds as hard, and the feel and the hold should both change; nobody has re-chosen them
+at 5 V.
 
 The cerebellum is on by default (it is in the unit's `ExecStart=`). It needs `glslc` to build, a
 Vulkan ICD to run, and a housekeeping core that is **not** `--cpu-core` (core 1 in the unit). Create
