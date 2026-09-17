@@ -112,14 +112,19 @@ class SO101ImpedanceFollowerConfig:
     # shoulder_pan was swept the same way, cerebellum on, the same day. The derivation put it at 12.8
     # -- the shipped 4 too *soft* -- and the hand said the opposite: 8, 12 and 16 were all かたい,
     # 4 was ちょっとかたい four times out of four, 2 leaned soft (two of four called it soft), and 3
-    # was called right twice. So pan is 3, and the r-squared rule is dead for pan. elbow_flex and
-    # wrist_roll are still unswept.
+    # was called right twice. So pan is 3, and the r-squared rule is dead for pan.
+    #
+    # elbow_flex, same day, cerebellum on, discriminated worst of the three: 6 and even 9 drew only
+    # ちょっとかたい, and 2 and 3 each drew one "about right" and one verdict on either side. The
+    # feedforward was not settled across trials (duty -55 to -283 at |err| <= 3), which may be what
+    # blurred it. 3 is the pick: the only value never called soft or plain stiff. wrist_roll and the
+    # gripper are still the old set scaled by 0.4.
     #
     # Conditions these were taken under, since none of them are the arm alone: 7.4 V rail, this
     # unit's friction and wiring, stereo cameras + bracket on the wrist, natural-rubber finger cots
     # on the gripper. Re-measure per arm, and re-measure after a supply change -- the duty a joint
     # needs scales with 1/V, so these numbers are wrong by half at 5 V.
-    default_k: tuple[float, ...] = (3.0, 8.0, 6.0, 1.3, 3.2, 2.0)
+    default_k: tuple[float, ...] = (3.0, 8.0, 3.0, 1.3, 3.2, 2.0)
 
     # D is bounded from above by velocity *noise*, not by stability. Position is quantised to whole
     # counts, so the filtered finite difference has a noise floor of about
@@ -127,8 +132,8 @@ class SO101ImpedanceFollowerConfig:
     # straight into PWM chatter. Keeping D near K/40 holds that under ~2% duty while still damping
     # a real 100 counts/s motion with a meaningful command. Scaled by the same 0.4 as K on
     # 2026-09-16 so that D/K stays at K/40 -- the bound above is a ratio, not an absolute. wrist_flex
-    # and shoulder_pan followed their K (to 1.3 and 3) on 2026-09-17 at the D/K each already had.
-    default_d: tuple[float, ...] = (0.09, 0.2, 0.16, 0.039, 0.08, 0.06)
+    # shoulder_pan and elbow_flex followed their K on 2026-09-17 at the D/K each already had.
+    default_d: tuple[float, ...] = (0.09, 0.2, 0.08, 0.039, 0.08, 0.06)
 
     # Defense-in-depth clamps applied in `send_action`, independent of (but should be kept
     # consistent with) whatever bound the Rust daemon itself enforces via `--pwm-max`. `d_max` is
