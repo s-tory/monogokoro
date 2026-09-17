@@ -202,10 +202,11 @@ offset riding on the disparity. Neither the registers nor the feature matching s
 - [The mossy fibres bound what can be learned](README_DETAILS_EN.md#the-mossy-fibres-bound-what-can-be-learned) -- the camera-derived features are missing.
 - [Demonstrations do not label the layers below](README_DETAILS_EN.md#demonstrations-do-not-label-the-layers-below)
 - **Open-loop PWM** -- the STS3215 has no host-streamable torque register. Noisier than true torque control, and a hardware constraint rather than a choice.
-- [The bundled supply collapses at the defaults](README_DETAILS_EN.md#the-bundled-supply-collapses-at-the-defaults) -- one 833 ms collapse every 329 s. **Swapping in an off-the-shelf 5 V 6 A brick clears it at the defaults** (a plug change, measured). For more margin, [a 7.4 V supply, built](README_DETAILS_EN.md#a-74-v-supply-built) (needs a soldering iron).
+- [The bundled supply collapses at the defaults](README_DETAILS_EN.md#the-bundled-supply-collapses-at-the-defaults) -- one 833 ms collapse every 329 s. **Swapping in an off-the-shelf 5 V 6 A brick clears it at the defaults** (a plug change, measured).
 - [The comms errors were the supply](README_DETAILS_EN.md#the-comms-errors-were-the-supply)
 - [A better supply did not remove every collapse](README_DETAILS_EN.md#a-better-supply-did-not-remove-every-collapse)
 - [The single-tick bit0 survived the supply swap](README_DETAILS_EN.md#the-single-tick-bit0-survived-the-supply-swap)
+- [A 7.4 V supply, built](README_DETAILS_EN.md#a-74-v-supply-built) -- for more margin still. Needs a soldering iron.
 - **The daemon is not part of the Python build.** It is a separate Cargo project, deployed by hand.
 - [Interactive calibration is not implemented](README_DETAILS_EN.md#interactive-calibration-is-not-implemented)
 - [An iGPU training OOM takes the desktop down](README_DETAILS_EN.md#an-igpu-training-oom-takes-the-desktop-down) -- a cgroup does not prevent it.

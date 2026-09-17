@@ -385,7 +385,7 @@ so heat moves this by 0.035 and the supply by 0.49. Whatever bit 0 reports, the 
 level sets how often it fires.
 
 **On 2026-09-16, at 7.4 V, 78 minutes of daemon uptime produced none** (03:16:53-04:35:48 UTC,
-`Present_Voltage` 70-71). At 0.200/s that is roughly 800 events that did not happen.
+`Present_Voltage` 70-71). At the 5 V 6 A idle rate (0.165-0.200/s) that is roughly 780-950 events over 4735 s that did not happen.
 **It is not a comparison** -- the 0.200 above was taken limp and unloaded with the case
 temperature matched, while those 78 minutes mix driving, holding and limp, and **the proportion
 was not recorded.** It came out of a log kept for other work, not a run designed for this.
