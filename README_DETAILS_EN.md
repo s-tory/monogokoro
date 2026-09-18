@@ -522,8 +522,20 @@ move is the same either way**, so it was left open.
 
 **The 7.0-7.1 V the servos read is 0.3-0.4 V below the 7.4 V at the supply output.** Wiring and
 connector drop is the obvious reading and it is **not measured** -- metering the output terminals
-with the servos connected would place it (not done). At 5 V the brick terminals read 4.59 V and the
-servos read 4.6 V, so on the same wiring that drop has no explanation yet.
+with the servos connected would place it (not done). **This used to add "at 5 V the brick terminals read 4.59 V and the
+servos read 4.6 V, so on the same wiring that drop has no explanation". Withdrawn 2026-09-18**,
+for three reasons:
+
+- **Nothing records 4.59 and 4.6 being read at the same moment.** 4.59 was a meter on the brick
+  terminals, 4.6 was an idle `Present_Voltage`. Two separate measurements were set side by side
+  and read as "almost no drop"
+- **4.59 belongs to the bundled adapter, which was replaced** on 2026-09-14 by a 6.2 A one
+- **The figure for that replacement is further up this page**: 4.9 V idle. The withdrawn sentence
+  reached past a newer number in the same document to fetch the older one
+
+**So whether the 0.3-0.4 V at 7.4 V has an explanation is not something that can be said yet.**
+Saying it needs the brick terminals and the servo side read on the same supply at the same
+moment, which has not been done.
 
 **No `servo_error` over a static hold is not evidence that collapses are gone.** Collapses appear
 at high current and this condition draws little. The same day, oscillating the arm raised `0x20` on
