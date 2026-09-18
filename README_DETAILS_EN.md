@@ -522,14 +522,15 @@ move is the same either way**, so it was left open.
 | case temperature                      | 24-33 C (limit 70)       |
 | `servo_error` over a 120 s hold       | **none**                 |
 
-**The 7.0-7.1 V the servos read is 0.3-0.4 V below the 7.4 V at the supply output.** Wiring and
-connector drop is the obvious reading and it is **not measured** -- metering the output terminals
-with the servos connected would place it (not done). **Connecting six servos costs about 0.3 V** -- terminals 5.18 V (meter, 2026-09-18) against
-4.9 V at the servos (`Present_Voltage`, 2026-09-14). Different days, different instruments, and
-that register is quantised to 0.1 V, hence "about". **Where the drop happens -- wiring, or the
-adapter's own droop under load -- is not separated.** It does not explain the 0.3-0.4 V at 7.4 V
-either: different rail, different current. (This used to say there was almost no drop at 5 V,
-which used the replaced adapter's figure. Withdrawn 2026-09-18.)
+**The 7.0-7.1 V the servos read is 0.3-0.4 V below the 7.4 V at the supply output.** At 5 V it had
+the same shape: connecting six servos cost **about 0.3 V** -- terminals 5.18 V (meter, 2026-09-18)
+against 4.9 V at the servos (`Present_Voltage`, 2026-09-14). Different days, different instruments,
+and that register is quantised to 0.1 V, hence "about".
+
+**Neither is placed.** Wiring and connector drop is the obvious reading, but separating it from the
+adapter's own droop under load means **metering the output terminals and the servo side at the same
+moment with the servos connected** -- one meter touch, not done. (This used to say there was almost
+no drop at 5 V, which used the replaced adapter's figure. Withdrawn 2026-09-18.)
 
 **No `servo_error` over a static hold is not evidence that collapses are gone.** Collapses appear
 at high current and this condition draws little. The same day, oscillating the arm raised `0x20` on
