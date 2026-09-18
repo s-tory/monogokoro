@@ -113,9 +113,9 @@ class SO101ImpedanceFollower(Robot):
         """The daemon's own view of the loop, recorded because none of it can be recovered later.
 
         `pwm_cmd - ff_pwm` is the feedback share of the duty, which is the quantity the climbing
-        fibre is derived from. Keeping both columns lets a frame's salience be judged after the
-        fact -- which frames the cerebellum could not predict -- instead of that judgement having
-        to be right before the first episode is recorded.
+        fibre is derived from. Keeping both columns lets it be judged after the fact which frames
+        were worth having -- the ones the cerebellum could not predict -- instead of that
+        judgement having to be right before the first episode is recorded.
 
         The rail voltage travels with the current for the reason `shm.rs` gives for publishing it:
         a current taken without a concurrent rail reading cannot be told apart from a stiff

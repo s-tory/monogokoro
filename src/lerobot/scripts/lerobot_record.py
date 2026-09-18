@@ -156,6 +156,7 @@ from lerobot.utils.cycle_timer import CycleTimer
 from lerobot.utils.feature_utils import build_dataset_frame, combine_feature_dicts
 from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.utils.keyboard_input import init_keyboard_listener
+from lerobot.utils.salience import UNLABELLED, align_salience, append_salience
 from lerobot.utils.utils import (
     init_logging,
     log_say,
@@ -526,6 +527,9 @@ def record(
         robot.connect()
 
         listener, events = init_keyboard_listener()
+        # Line N of the salience sidecar is episode N, so a dataset that already holds
+        # episodes has to be caught up before the first append.
+        align_salience(dataset.root, dataset.num_episodes)
 
         if not cfg.dataset.streaming_encoding:
             logging.info(
@@ -590,12 +594,20 @@ def record(
                     log_say("Re-record episode", cfg.play_sounds)
                     events["rerecord_episode"] = False
                     events["exit_early"] = False
+                    events["salience"] = None
                     dataset.clear_episode_buffer()
                     timer.log_episode_summary("discarded episode")
                     timer.restart()
                     continue
 
                 dataset.save_episode()
+                # Tagged next to the save rather than at the key press: the tag describes an
+                # episode that was *kept*, and a re-record takes the `continue` above, so no
+                # discarded episode can leave a line behind. `UNLABELLED` is what an episode
+                # that ended on the clock gets -- nobody judged it, and saying "ordinary"
+                # for it would be inventing the judgement.
+                append_salience(dataset.root, events["salience"] or UNLABELLED)
+                events["salience"] = None
                 recorded_episodes += 1
                 # Only after the episode is kept: a re-record takes the `continue` above and must
                 # stay on the context whose object is already staged.

@@ -67,8 +67,8 @@ current read without a concurrent rail reading cannot be told apart from a stiff
 
 The two duty columns are the loop's own account of itself: `ff_pwm` is the cerebellum's share and
 `pwm_cmd` the total, so their difference is the feedback share -- the quantity the climbing fibre is
-derived from. Recording both is what lets a frame's salience (which frames the cerebellum could not
-predict) be judged after the fact rather than having to be decided before the first episode. The
+derived from. Recording both is what lets which frames were worth having (the ones the cerebellum could
+not predict) be judged after the fact rather than having to be decided before the first episode. The
 case temperature is deliberately absent; it belongs to whichever servo the health poll last read, so
 recording it truthfully would mean recording that round-robin id as a column too.
 

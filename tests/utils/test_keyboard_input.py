@@ -29,6 +29,7 @@ import sys
 import pytest
 
 import lerobot.utils.keyboard_input as ki
+from lerobot.utils import salience
 from lerobot.utils.keyboard_input import (
     TerminalKeyListener,
     apply_recording_control,
@@ -226,3 +227,41 @@ def test_create_key_listener_none_without_tty(monkeypatch):
     monkeypatch.setattr(ki, "pynput_can_capture", lambda: False)
     _set_tty(monkeypatch, is_tty=False)
     assert create_key_listener(lambda name: None) is None
+
+
+# --- Salience keys ----------------------------------------------------------
+@pytest.mark.parametrize(
+    ("key", "tag"),
+    [
+        ("g", salience.GOOD),
+        ("b", salience.NEAR_MISS),
+        ("right", salience.ORDINARY),
+        ("n", salience.ORDINARY),
+        ("esc", salience.QUIT),
+        ("q", salience.QUIT),
+    ],
+)
+def test_every_key_that_ends_an_episode_states_a_tag(monkeypatch, key, tag):
+    """No episode-ending key leaves the tag unset.
+
+    That absence is the hole the third key exists to close: with it, "nothing to flag"
+    and "nobody reached the keyboard" look identical in the sidecar afterwards.
+    """
+    monkeypatch.setattr(ki, "pynput_can_capture", lambda: False)
+    _set_tty(monkeypatch, is_tty=True)
+    monkeypatch.setattr(TerminalKeyListener, "start", lambda self: None)
+    listener, events = init_keyboard_listener()
+    listener._on_key(key)
+    assert events["salience"] == tag
+    assert events["exit_early"] is True
+
+
+def test_rerecord_claims_no_tag(monkeypatch):
+    """A re-recorded episode is discarded, so it must not leave a tag behind."""
+    monkeypatch.setattr(ki, "pynput_can_capture", lambda: False)
+    _set_tty(monkeypatch, is_tty=True)
+    monkeypatch.setattr(TerminalKeyListener, "start", lambda self: None)
+    listener, events = init_keyboard_listener()
+    listener._on_key("r")
+    assert events["salience"] is None
+    assert events["rerecord_episode"] is True

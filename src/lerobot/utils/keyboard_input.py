@@ -49,6 +49,7 @@ from functools import cache
 from typing import TYPE_CHECKING
 
 from .import_utils import _pynput_available
+from .salience import GOOD, NEAR_MISS, ORDINARY, QUIT
 
 logger = logging.getLogger(__name__)
 
@@ -415,12 +416,13 @@ def init_keyboard_listener():
     Returns:
         A tuple ``(listener, events)`` where ``listener`` exposes ``.stop()`` or is
         ``None``, and ``events`` is the dict of flags (``exit_early``,
-        ``rerecord_episode``, ``stop_recording``) set by key presses.
+        ``rerecord_episode``, ``stop_recording``, ``salience``) set by key presses.
     """
     events = {
         "exit_early": False,
         "rerecord_episode": False,
         "stop_recording": False,
+        "salience": None,
     }
 
     # Accept the single-byte letter equivalents n/r/q alongside the arrow/Esc keys: the
@@ -428,13 +430,28 @@ def init_keyboard_listener():
     # over laggy SSH/VNC links. Case-insensitive so Shift+letter still works.
     def on_key(name: str) -> None:
         key = name.lower()
+        # Every key that ends an episode also states its salience, so no saved episode
+        # carries a default -- see lerobot.utils.salience for why that matters.
         if key in ("right", "n"):
+            events["salience"] = ORDINARY
+            apply_recording_control("right", events)
+        elif key == "g":
+            print("g pressed. It worked. Ending the episode...")
+            events["salience"] = GOOD
+            apply_recording_control("right", events)
+        elif key == "b":
+            print("b pressed. That was close. Ending the episode...")
+            events["salience"] = NEAR_MISS
             apply_recording_control("right", events)
         elif key in ("left", "r"):
             apply_recording_control("left", events)
         elif key in ("esc", "q"):
+            events["salience"] = QUIT
             apply_recording_control("esc", events)
         # other keys (incl. up/down) are intentionally ignored
 
-    listener = create_key_listener(on_key, controls_help="Right/Left/Esc, or n=next, r=re-record, q=quit")
+    listener = create_key_listener(
+        on_key,
+        controls_help="g=it worked, b=that was close, n/Right=ordinary, r=re-record, q=quit",
+    )
     return listener, events

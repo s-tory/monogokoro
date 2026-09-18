@@ -220,20 +220,42 @@ Deliberate, high-quality execution beats fast sloppy runs. Optimize for speed on
 
 Same grasp, approach vector, and timing. Coherent strategies are much easier to learn than wildly varying movements.
 
-### 5.5 Start small, then extend (the golden rule)
+### 5.5 End every episode on a key that says how it went
+
+An episode ends on one of three keys, and which one is a judgement only the operator can
+make, only while it is happening:
+
+| key          | meaning                           |
+| ------------ | --------------------------------- |
+| `g`          | it worked                         |
+| `b`          | that was close                    |
+| `n` or Right | ordinary, nothing to say about it |
+
+`r` re-records the episode (no tag is kept for a discarded one) and `q` stops the session.
+
+_Ordinary_ has a key of its own on purpose. If it did not, "there was nothing to flag" and
+"nobody reached the keyboard in time" would be the same absence in the file afterwards, and
+no amount of reviewing the video separates them -- what is being recorded is your judgement
+at that moment, not a property of the frames.
+
+The tags land in `salience.txt` beside the dataset, one line per episode in recording order.
+An episode that runs out the clock with no key pressed is written `?`, which states that
+nobody judged it. How training should use the tags is not settled yet.
+
+### 5.6 Start small, then extend (the golden rule)
 
 - **First 50 episodes = constrained version** of the task: one object, fixed position, fixed camera setup, one operator.
 - Train a quick ACT model. See what fails.
 - **Then add diversity** along one axis at a time: more positions → more lighting → more objects → more operators.
 - Don't try to collect the "perfect dataset" on day one. Iterate.
 
-### 5.6 Policy choice for beginners
+### 5.7 Policy choice for beginners
 
 - **Laptop / first time / want results fast → ACT.** Works surprisingly well, trains fast even on a laptop GPU.
 - **Bigger GPU / language-conditioned / multi-task → SmolVLA.** Unfreezing the vision encoder (see §7) is a big win here.
 - Defer π0 / π0.5 / Wall-X / X-VLA until you have a proven ACT baseline and a 20+ GB GPU.
 
-### 5.7 Recommended defaults for your first task
+### 5.8 Recommended defaults for your first task
 
 | Setting          | Value                                                                                                                                                 |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -244,7 +266,7 @@ Same grasp, approach vector, and timing. Coherent strategies are much easier to 
 | Cameras          | **2 cameras recommended**: 1 fixed front + 1 wrist. Multi-view often outperforms single-view. A single fixed camera also works to keep things simple. |
 | Task description | Short, specific, action-phrased sentence                                                                                                              |
 
-### 5.8 Troubleshooting signal
+### 5.9 Troubleshooting signal
 
 - Policy fails at one specific stage → record 10–20 more episodes **targeting that stage**.
 - Policy flaps / oscillates → likely inconsistent demos, or need more training; re-record worst episodes (use **←** to redo).
