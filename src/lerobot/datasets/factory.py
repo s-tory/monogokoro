@@ -24,6 +24,7 @@ from lerobot.configs.rewards import RewardModelConfig
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.transforms import ImageTransforms
 from lerobot.utils.constants import ACTION, IMAGENET_STATS, OBS_IMAGE, OBS_PREFIX, OBS_STATE, REWARD
+from lerobot.utils.salience import episodes_with_tags
 
 from .dataset_metadata import LeRobotDatasetMetadata
 from .lerobot_dataset import LeRobotDataset
@@ -128,9 +129,12 @@ def make_dataset(cfg: TrainPipelineConfig) -> LeRobotDataset | MultiLeRobotDatas
             repo_type=cfg.dataset.repo_type,
         )
         delta_timestamps = resolve_delta_timestamps(cfg.trainable_config, ds_meta, cfg.rename_map)
-        episodes = resolve_episode_indices(
-            cfg.dataset.episodes, ds_meta.total_episodes, cfg.dataset.exclude_episodes
-        )
+        exclude_episodes = list(cfg.dataset.exclude_episodes or [])
+        if cfg.dataset.drop_salience:
+            exclude_episodes += episodes_with_tags(
+                ds_meta.root, cfg.dataset.drop_salience, ds_meta.total_episodes
+            )
+        episodes = resolve_episode_indices(cfg.dataset.episodes, ds_meta.total_episodes, exclude_episodes)
         if cfg.dataset.streaming and ds_meta.storage_format != DEFAULT_STORAGE_FORMAT:
             raise ValueError(
                 f"dataset.streaming=True is not supported for storage_format="

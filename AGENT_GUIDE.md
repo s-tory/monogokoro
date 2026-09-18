@@ -241,9 +241,19 @@ what behaviour cloning is worst at; a give-up ends somewhere you do not want the
 arrive.
 
 Nothing here throws an episode away. Use Left only for a take that is not about the task
-at all -- the phone rang, the wrong object was staged. Discarding cannot be undone, and a
-tagged episode can still be dropped at training time; nothing reads the tags yet, so that
-filter is owed before the first training run.
+at all -- the phone rang, the wrong object was staged. Discarding cannot be undone, while
+a tagged episode can still be dropped at training time:
+
+```bash
+lerobot-train --dataset.drop_salience='["x","?"]'   # quotes required, see below
+```
+
+There is no default -- which tags help or hurt has not been measured here, so nothing is
+dropped unless you ask. Two things raise instead of quietly doing nothing, because a
+filter that silently matches nothing looks exactly like a dataset with nothing to filter:
+a tag no key can produce (`X` for `x`), and a `salience.txt` that is not exactly as long
+as the dataset (line N is episode N only while the two match). The quotes matter for the
+same reason -- unquoted, `[x,?]` parses `?` into garbage rather than failing.
 
 `r` or Left re-records the episode (no tag is kept for a discarded one); `q` or Esc stops the
 session. Both arrow keys keep working -- the letters exist because arrow escape sequences get

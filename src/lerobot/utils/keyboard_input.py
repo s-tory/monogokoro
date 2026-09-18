@@ -49,7 +49,7 @@ from functools import cache
 from typing import TYPE_CHECKING
 
 from .import_utils import _pynput_available
-from .salience import GAVE_UP, GOOD, NEAR_MISS, ORDINARY, QUIT
+from .salience import GAVE_UP, GOOD, KEY_LEGEND, NEAR_MISS, ORDINARY, QUIT
 
 logger = logging.getLogger(__name__)
 
@@ -454,10 +454,5 @@ def init_keyboard_listener():
             apply_recording_control("esc", events)
         # other keys (incl. up/down) are intentionally ignored
 
-    listener = create_key_listener(
-        on_key,
-        controls_help=(
-            "g=it worked, b=that was close, x=gave up, n/Right=ordinary, r/Left=re-record, q/Esc=quit"
-        ),
-    )
+    listener = create_key_listener(on_key, controls_help=KEY_LEGEND)
     return listener, events

@@ -156,7 +156,7 @@ from lerobot.utils.cycle_timer import CycleTimer
 from lerobot.utils.feature_utils import build_dataset_frame, combine_feature_dicts
 from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.utils.keyboard_input import init_keyboard_listener
-from lerobot.utils.salience import UNLABELLED, align_salience, append_salience
+from lerobot.utils.salience import KEY_LEGEND, UNLABELLED, align_salience, append_salience
 from lerobot.utils.utils import (
     init_logging,
     log_say,
@@ -546,6 +546,9 @@ def record(
             while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
                 episode_index = dataset.num_episodes
                 log_say(f"Recording episode {episode_index}", cfg.play_sounds)
+                # Repeated every episode, not just at startup: the operator reads this with
+                # their hands on the leader arm, fifty episodes after the listener said it once.
+                logging.info("End this episode on: %s", KEY_LEGEND)
                 for step in context_steps:
                     # The operator has to stage a different object per context, so this has to be
                     # said out loud before the episode starts, not written to a log they are not

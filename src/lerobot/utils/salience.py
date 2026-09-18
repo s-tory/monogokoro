@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Sequence
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -68,9 +69,20 @@ ORDINARY = "→"  # nothing to say about it (right arrow, the "just go on" key)
 QUIT = "q"  # the session was stopped during this episode
 UNLABELLED = "?"  # ended on the clock, or recorded before tags existed
 
+#: The one-line legend, defined here so the listener's startup hint and the per-episode
+#: reminder cannot drift apart. They did once: a commit listed only the letter spellings
+#: and dropped Left and Esc from the text the operator actually reads.
+KEY_LEGEND = "g=it worked, b=that was close, x=gave up, n/Right=ordinary, r/Left=re-record, q/Esc=quit"
+
 #: Tags a key press can produce. ``UNLABELLED`` is not here: it is never chosen, only
 #: written when nothing was chosen.
 KEYED_TAGS = (GOOD, NEAR_MISS, GAVE_UP, ORDINARY, QUIT)
+
+#: Everything that can appear in the file, and so everything ``drop_salience`` may name.
+#: One list, because two would drift: adding a key and updating only ``KEYED_TAGS`` would
+#: make the new tag an error to ask for -- rejected after the operator already pressed it,
+#: which is the direction of mistake that costs episodes rather than a retyped flag.
+ALL_TAGS = (*KEYED_TAGS, UNLABELLED)
 
 
 def salience_path(root: str | Path) -> Path:
@@ -135,3 +147,32 @@ def align_salience(root: str | Path, num_episodes: int) -> None:
             len(existing),
             num_episodes,
         )
+
+
+def episodes_with_tags(root: str | Path, tags: Sequence[str], num_episodes: int) -> list[int]:
+    """Return the indices of the episodes whose tag is one of ``tags``.
+
+    Raises rather than returning a partial answer in the two cases where a wrong answer
+    would be indistinguishable from a right one:
+
+    * the sidecar does not have exactly one tag per episode -- line N is episode N only
+      while the file is as long as the dataset, so a short or long file drops the wrong
+      episodes, and the caller sees a filter that appears to have worked;
+    * a tag was asked for that no key can produce -- a typo like ``X`` for ``x`` would
+      match nothing and quietly keep every episode it was meant to remove.
+
+    Both are the same failure: a filter that silently does nothing looks exactly like a
+    dataset that had nothing to filter.
+    """
+    recorded = read_salience(root)
+    if len(recorded) != num_episodes:
+        raise ValueError(
+            f"{salience_path(root)} holds {len(recorded)} tags but the dataset has "
+            f"{num_episodes} episodes. Line N means episode N only when the two match, so "
+            f"filtering by tag would drop the wrong episodes. Fix the file by hand."
+        )
+    unknown = sorted(set(tags) - set(ALL_TAGS))
+    if unknown:
+        raise ValueError(f"Unknown salience tag(s) {unknown}. Known tags: {sorted(ALL_TAGS)}.")
+    wanted = set(tags)
+    return [index for index, tag in enumerate(recorded) if tag in wanted]

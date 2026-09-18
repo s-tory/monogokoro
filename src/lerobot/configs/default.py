@@ -42,6 +42,16 @@ class DatasetConfig:
     episodes: list[int] | None = None
     # Episode indices to drop (e.g. corrupt or heterogeneous ones). Applied on top of `episodes`.
     exclude_episodes: list[int] | None = None
+    # Salience tags to drop, read from the dataset's `salience.txt`. One tag per episode,
+    # written by the operator as each episode ended (see lerobot.utils.salience):
+    #   "g" it worked   "b" that was close, and they brought it back
+    #   "x" they gave up, the task was not done   "→" ordinary
+    #   "q" the session was stopped during it     "?" nobody judged it (ran out the clock)
+    # e.g. `--dataset.drop_salience='["x","?"]'` -- the quotes are required, because
+    # unquoted `[x,?]` parses "?" into garbage instead of failing.
+    # There is no default: which tags help or hurt training has not been measured here, so
+    # choosing for you would be inventing the answer. Added on top of `exclude_episodes`.
+    drop_salience: list[str] | None = None
     image_transforms: ImageTransformsConfig = field(default_factory=ImageTransformsConfig)
     revision: str | None = None
     use_imagenet_stats: bool = True
