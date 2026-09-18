@@ -154,7 +154,8 @@ joint reports the whole circle and is not checked. **The misreport itself is sti
 and this bounds its consequences rather than removing it.
 
 This used to add "which is also the honest answer for `wrist_roll`". It was not: measured
-2026-09-03, that joint reaches 113-3981 (340 deg) and is stopped both ways by a printed corner. It
+2026-09-03 on this arm, that joint reaches 113-3981 (340 deg) and is stopped both ways by a printed
+corner. The stop is not on every SO-101, so the envelope is this unit's, not the model's. It
 reported the whole circle because `lerobot-calibrate` assigned `0-4095` without ever sweeping it,
 which is now fixed -- so the next calibration gives it a real envelope like any other joint.
 

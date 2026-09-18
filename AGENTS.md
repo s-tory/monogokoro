@@ -167,8 +167,9 @@ leaves from**, which is what every entry below is for.
 - **三現主義 / sangen-shugi — go to the place, look at the thing.** A register is not the
   hardware. It is a report about the hardware, written by whoever last assumed something.
   `wrist_roll` reported `0-4095` of travel because a calibration script assigned that without ever
-  sweeping the joint; the arm reaches 340 deg and is stopped by two printed parts touching. One
-  photograph settled what four register reads had not. And it did not only correct a number, it
+  sweeping the joint; the arm reaches 340 deg and is stopped by two printed parts touching -- on
+  this unit, and that stop is not on every SO-101. One photograph settled what four register reads
+  had not. And it did not only correct a number, it
   changed what could be loaded: that stop is a printed corner, so driving a saturated duty into it
   would have deformed the very thing defining the measurement, and the test had to move to a joint
   whose stop is not the instrument. Before choosing what to push against, look at it — and keep
