@@ -524,29 +524,12 @@ move is the same either way**, so it was left open.
 
 **The 7.0-7.1 V the servos read is 0.3-0.4 V below the 7.4 V at the supply output.** Wiring and
 connector drop is the obvious reading and it is **not measured** -- metering the output terminals
-with the servos connected would place it (not done). **This used to add "at 5 V the brick terminals read 4.59 V and the
-servos read 4.6 V, so on the same wiring that drop has no explanation". Withdrawn 2026-09-18**,
-for three reasons:
-
-- **Nothing records 4.59 and 4.6 being read at the same moment.** 4.59 was a meter on the brick
-  terminals, 4.6 was an idle `Present_Voltage`. Two separate measurements were set side by side
-  and read as "almost no drop"
-- **4.59 belongs to the bundled adapter, which was replaced** on 2026-09-14 by a 6.2 A one
-- **The figure for that replacement is further up this page**: 4.9 V idle. The withdrawn sentence
-  reached past a newer number in the same document to fetch the older one
-
-**What can be said is the total. Connecting six servos costs about 0.3 V** -- the 5 V 6.2 A
-adapter reads **5.18 V at its terminals unloaded**, and the servos read **4.9 V idle with
-everything connected**. "About" is the precision available: 5.18 V is a meter on 2026-09-18, 4.9 V
-is the servos' own `Present_Voltage` on 2026-09-14, **different days and different instruments**,
-and `Present_Voltage` is quantised to 0.1 V.
-
-**Where those 0.3 V go is not separated.** Wiring and connectors, or the adapter's own droop under
-load. Loading a supply never raises its terminal voltage, so the wiring side is **at most** that.
-
-**This does not explain the 0.3-0.4 V at 7.4 V.** Different rail, different current, not directly
-comparable. Comparing them needs the terminals and the servo side read at the same moment **with
-the servos connected** -- one meter touch, not done.
+with the servos connected would place it (not done). **Connecting six servos costs about 0.3 V** -- terminals 5.18 V (meter, 2026-09-18) against
+4.9 V at the servos (`Present_Voltage`, 2026-09-14). Different days, different instruments, and
+that register is quantised to 0.1 V, hence "about". **Where the drop happens -- wiring, or the
+adapter's own droop under load -- is not separated.** It does not explain the 0.3-0.4 V at 7.4 V
+either: different rail, different current. (This used to say there was almost no drop at 5 V,
+which used the replaced adapter's figure. Withdrawn 2026-09-18.)
 
 **No `servo_error` over a static hold is not evidence that collapses are gone.** Collapses appear
 at high current and this condition draws little. The same day, oscillating the arm raised `0x20` on
