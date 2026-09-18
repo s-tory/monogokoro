@@ -452,6 +452,6 @@ def init_keyboard_listener():
 
     listener = create_key_listener(
         on_key,
-        controls_help="g=it worked, b=that was close, n/Right=ordinary, r=re-record, q=quit",
+        controls_help="g=it worked, b=that was close, n/Right=ordinary, r/Left=re-record, q/Esc=quit",
     )
     return listener, events

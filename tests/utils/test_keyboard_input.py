@@ -256,12 +256,18 @@ def test_every_key_that_ends_an_episode_states_a_tag(monkeypatch, key, tag):
     assert events["exit_early"] is True
 
 
-def test_rerecord_claims_no_tag(monkeypatch):
-    """A re-recorded episode is discarded, so it must not leave a tag behind."""
+@pytest.mark.parametrize("key", ["r", "left"])
+def test_rerecord_claims_no_tag(monkeypatch, key):
+    """A re-recorded episode is discarded, so it must not leave a tag behind.
+
+    Both spellings are covered because the arrow is the original key and the letter was
+    added for laggy links: a change that quietly drops either one is a change the
+    operator finds out about with their hands on the leader arm.
+    """
     monkeypatch.setattr(ki, "pynput_can_capture", lambda: False)
     _set_tty(monkeypatch, is_tty=True)
     monkeypatch.setattr(TerminalKeyListener, "start", lambda self: None)
     listener, events = init_keyboard_listener()
-    listener._on_key("r")
+    listener._on_key(key)
     assert events["salience"] is None
     assert events["rerecord_episode"] is True

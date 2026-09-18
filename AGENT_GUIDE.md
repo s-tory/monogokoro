@@ -231,7 +231,9 @@ make, only while it is happening:
 | `b`          | that was close                    |
 | `n` or Right | ordinary, nothing to say about it |
 
-`r` re-records the episode (no tag is kept for a discarded one) and `q` stops the session.
+`r` or Left re-records the episode (no tag is kept for a discarded one); `q` or Esc stops the
+session. Both arrow keys keep working -- the letters exist because arrow escape sequences get
+split or swallowed over a laggy SSH/VNC link.
 
 _Ordinary_ has a key of its own on purpose. If it did not, "there was nothing to flag" and
 "nobody reached the keyboard in time" would be the same absence in the file afterwards, and
