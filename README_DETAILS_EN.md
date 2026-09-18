@@ -387,7 +387,9 @@ this.** See [The bundled supply collapses at the defaults](#the-bundled-supply-c
 
 **A better supply removed the collapse at the defaults, and not everywhere.** Swapped to an
 `LTE36ES-S1-301` (5 V 6.2 A, 31 W) on 2026-09-14: idle 4.9 V, so **0.9 V of margin**, 4.8 V while
-holding against gravity, 4.50 V at worst while a hand pushed the arm around. Counted off the
+holding against gravity, 4.50 V at worst while a hand pushed the arm around. **Its terminals read
+5.18 V unloaded** (meter, measured 2026-09-18) -- the figure that sits beside the bundled adapter's
+4.97 V under the same condition. Counted off the
 400 Hz error byte, same pose and same gains: at the defaults, **one 833 ms collapse in 329 s
 became nothing at all over 5 ms in 233 s**; at `--pwm-max 700`, **8 episodes over 100 ms became
 1**, of 390 ms. **Each condition is one run and the two adapters were not alternated**, so the
@@ -533,9 +535,15 @@ for three reasons:
 - **The figure for that replacement is further up this page**: 4.9 V idle. The withdrawn sentence
   reached past a newer number in the same document to fetch the older one
 
-**So whether the 0.3-0.4 V at 7.4 V has an explanation is not something that can be said yet.**
-Saying it needs the brick terminals and the servo side read on the same supply at the same
-moment, which has not been done.
+**What can be said is a bound.** The 5 V 6.2 A adapter reads **5.18 V at its terminals unloaded**
+and the servos read **4.9 V idle with everything connected**. The conditions differ, so the two do
+not subtract: 0.28 V mixes the wiring drop with the adapter's own droop under load. But loading a
+supply never raises its terminal voltage, so **the wiring and connectors drop at most 0.28 V**
+(`terminals under load - 4.9 <= 5.18 - 4.9`).
+
+**This does not explain the 0.3-0.4 V at 7.4 V.** Different rail, different current, not directly
+comparable. Comparing them needs the terminals and the servo side read at the same moment **with
+the servos connected** -- one meter touch, not done.
 
 **No `servo_error` over a static hold is not evidence that collapses are gone.** Collapses appear
 at high current and this condition draws little. The same day, oscillating the arm raised `0x20` on
