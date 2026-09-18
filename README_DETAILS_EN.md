@@ -268,6 +268,26 @@ mean, 4.40 V min). Its width, and the fact that it is the same order as the
 holding duty it brackets, are measured under
 [The cerebellum droop numbers were retaken](#the-cerebellum-droop-numbers-were-retaken).
 
+### The silicone fingertips split after two weeks
+
+**Bare silicone finger cots tore after about two weeks of use** (found 2026-09-16). The splits are
+on the gripping face -- two on the left cot, one larger one on the right.
+
+**Stretched on tight, a cot tears gradually. Put it on a little loose.** That is from handling
+them, not from an A/B on how tightly they are fitted.
+
+<p align="center">
+  <img src="media/readme/fingertip_silicone_split_20260916.jpg" width="420"
+       alt="Two skin-coloured silicone finger cots on the printed SO-101 jaws, each split open on its gripping face -- two ragged oval tears on the left cot, one larger tear on the right" />
+</p>
+
+A **natural-rubber finger cot** with a dotted grip surface now goes over the top. Whether the rubber
+lasts longer is not known yet: it went on 2026-09-16, and not enough time has passed to compare.
+
+**Material lifetime was not an axis anything here was measured against.** The deadband, the
+stiffness and the way contact comes back were all measured with these fingertips on, and the
+fingertips become a different object in two weeks. One more reason a constant needs a date.
+
 ### Touch has no where and no slip
 
 **Touch stops at how hard, not where or whether it is slipping.** A compliant fingertip turns grip

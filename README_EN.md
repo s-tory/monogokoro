@@ -64,9 +64,9 @@ all. Biology's answer is the **preflex** -- the intrinsic mechanical response of
 at zero latency, before any reflex arc has been traversed. Here it is three silicone finger caps
 stacked on each jaw -- the thick anti-chapping kind, ~2 mm wall (ours are Rimikuru finger
 supporters), not the thin office cots sold for counting paper -- and it is why a soft-fingered
-animal can be careless with a fragile object in a way a hard-fingered gripper cannot. **Bare silicone split after
-about two weeks** (found 2026-09-16); a **natural-rubber finger cot** with a dotted grip surface
-now goes over the top of it.
+animal can be careless with a fragile object in a way a hard-fingered gripper cannot. A **natural-rubber finger cot** with a dotted grip surface now goes
+over the top of it -- why, and how to fit it, is in
+[the silicone fingertips split after two weeks](README_DETAILS_EN.md#the-silicone-fingertips-split-after-two-weeks).
 
 <p align="center">
   <img src="media/readme/gripper_chip_20260918.jpg" width="520"
@@ -201,6 +201,7 @@ offset riding on the disparity. Neither the registers nor the feature matching s
 - [The pontine context is unverified on hardware](README_DETAILS_EN.md#the-pontine-context-is-unverified-on-hardware)
 - [The cerebellum droop numbers were retaken](README_DETAILS_EN.md#the-cerebellum-droop-numbers-were-retaken) -- the 2026-08-28 numbers are withdrawn.
 - [The feedforward decayed instead of settling](README_DETAILS_EN.md#the-feedforward-decayed-instead-of-settling) -- fixed, the fix unmeasured.
+- [The silicone fingertips split after two weeks](README_DETAILS_EN.md#the-silicone-fingertips-split-after-two-weeks) -- whether the rubber lasts is unmeasured.
 - [Touch has no where and no slip](README_DETAILS_EN.md#touch-has-no-where-and-no-slip)
 - [The mossy fibres bound what can be learned](README_DETAILS_EN.md#the-mossy-fibres-bound-what-can-be-learned) -- the camera-derived features are missing.
 - [Demonstrations do not label the layers below](README_DETAILS_EN.md#demonstrations-do-not-label-the-layers-below)
