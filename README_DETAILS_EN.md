@@ -529,8 +529,7 @@ and that register is quantised to 0.1 V, hence "about".
 
 **Neither is placed.** Wiring and connector drop is the obvious reading, but separating it from the
 adapter's own droop under load means **metering the output terminals and the servo side at the same
-moment with the servos connected** -- one meter touch, not done. (This used to say there was almost
-no drop at 5 V, which used the replaced adapter's figure. Withdrawn 2026-09-18.)
+moment with the servos connected** -- one meter touch, not done.
 
 **No `servo_error` over a static hold is not evidence that collapses are gone.** Collapses appear
 at high current and this condition draws little. The same day, oscillating the arm raised `0x20` on
