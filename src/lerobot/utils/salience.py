@@ -25,6 +25,17 @@ because *ordinary* has a key of its own. With "unmarked means ordinary", "there 
 nothing to flag" and "nobody reached the keyboard in time" are the same absence in the
 file and cannot be told apart afterwards.
 
+``GAVE_UP`` is named after what the operator did, not after how the episode turned out.
+Every other key reports their own state at the moment they press it, and "did I stop
+trying" is something they know for certain right then; "did this fail" is a verdict about
+the outcome, and it invites deliberation the recording has no time for.
+
+It is kept apart from ``NEAR_MISS`` because the two are opposites as training data. A near
+miss leaves behind the trajectory back from a state the demonstrations otherwise never
+visit, which is the thing behaviour cloning is worst at; a give-up ends somewhere nobody
+wants the policy to arrive. Neither is discarded here -- discarding cannot be undone, and
+the tag lets that choice be made later, against a measurement instead of a guess.
+
 Two further tags cover the cases where no judgement was given. They are kept distinct
 from ``ORDINARY`` for exactly that reason -- folding them into it would be inventing a
 judgement nobody made:
@@ -51,14 +62,15 @@ logger = logging.getLogger(__name__)
 SALIENCE_FILENAME = "salience.txt"
 
 GOOD = "g"  # it worked
-NEAR_MISS = "b"  # that was close
+NEAR_MISS = "b"  # that was close -- it went wrong and the operator brought it back
+GAVE_UP = "x"  # the operator stopped trying; the episode ends with the task not done
 ORDINARY = "→"  # nothing to say about it (right arrow, the "just go on" key)
 QUIT = "q"  # the session was stopped during this episode
 UNLABELLED = "?"  # ended on the clock, or recorded before tags existed
 
 #: Tags a key press can produce. ``UNLABELLED`` is not here: it is never chosen, only
 #: written when nothing was chosen.
-KEYED_TAGS = (GOOD, NEAR_MISS, ORDINARY, QUIT)
+KEYED_TAGS = (GOOD, NEAR_MISS, GAVE_UP, ORDINARY, QUIT)
 
 
 def salience_path(root: str | Path) -> Path:

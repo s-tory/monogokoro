@@ -235,6 +235,7 @@ def test_create_key_listener_none_without_tty(monkeypatch):
     [
         ("g", salience.GOOD),
         ("b", salience.NEAR_MISS),
+        ("x", salience.GAVE_UP),
         ("right", salience.ORDINARY),
         ("n", salience.ORDINARY),
         ("esc", salience.QUIT),

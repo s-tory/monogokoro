@@ -222,14 +222,28 @@ Same grasp, approach vector, and timing. Coherent strategies are much easier to 
 
 ### 5.5 End every episode on a key that says how it went
 
-An episode ends on one of three keys, and which one is a judgement only the operator can
-make, only while it is happening:
+An episode ends on a key that says how it went, and which one is a judgement only the
+operator can make, only while it is happening:
 
-| key          | meaning                           |
-| ------------ | --------------------------------- |
-| `g`          | it worked                         |
-| `b`          | that was close                    |
-| `n` or Right | ordinary, nothing to say about it |
+| key          | meaning                                                 |
+| ------------ | ------------------------------------------------------- |
+| `g`          | it worked                                               |
+| `b`          | that was close -- it went wrong and you brought it back |
+| `x`          | you gave up: the episode ends with the task not done    |
+| `n` or Right | ordinary, nothing to say about it                       |
+
+`x` is named after what you did, not after how it turned out. Every other key reports your
+own state at the moment you press it, and "did I stop trying" is something you know for
+certain right then; "did this fail" is a verdict on the outcome, and the arm is still in
+your hands. Keep `x` and `b` apart -- as training data they are opposites. A near miss
+leaves behind the way _back_ from a state the clean demonstrations never visit, which is
+what behaviour cloning is worst at; a give-up ends somewhere you do not want the policy to
+arrive.
+
+Nothing here throws an episode away. Use Left only for a take that is not about the task
+at all -- the phone rang, the wrong object was staged. Discarding cannot be undone, and a
+tagged episode can still be dropped at training time; nothing reads the tags yet, so that
+filter is owed before the first training run.
 
 `r` or Left re-records the episode (no tag is kept for a discarded one); `q` or Esc stops the
 session. Both arrow keys keep working -- the letters exist because arrow escape sequences get

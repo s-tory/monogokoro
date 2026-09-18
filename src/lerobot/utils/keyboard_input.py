@@ -49,7 +49,7 @@ from functools import cache
 from typing import TYPE_CHECKING
 
 from .import_utils import _pynput_available
-from .salience import GOOD, NEAR_MISS, ORDINARY, QUIT
+from .salience import GAVE_UP, GOOD, NEAR_MISS, ORDINARY, QUIT
 
 logger = logging.getLogger(__name__)
 
@@ -443,6 +443,10 @@ def init_keyboard_listener():
             print("b pressed. That was close. Ending the episode...")
             events["salience"] = NEAR_MISS
             apply_recording_control("right", events)
+        elif key == "x":
+            print("x pressed. Gave up on this one. Ending the episode...")
+            events["salience"] = GAVE_UP
+            apply_recording_control("right", events)
         elif key in ("left", "r"):
             apply_recording_control("left", events)
         elif key in ("esc", "q"):
@@ -452,6 +456,8 @@ def init_keyboard_listener():
 
     listener = create_key_listener(
         on_key,
-        controls_help="g=it worked, b=that was close, n/Right=ordinary, r/Left=re-record, q/Esc=quit",
+        controls_help=(
+            "g=it worked, b=that was close, x=gave up, n/Right=ordinary, r/Left=re-record, q/Esc=quit"
+        ),
     )
     return listener, events
