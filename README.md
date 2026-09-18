@@ -63,13 +63,13 @@
 *最初に*答えるものは制御器ではありえない。生物の答えは**前反射 (preflex)** である: 筋と組織が持つ
 固有の機械的応答で、反射弓を一度も通らずに遅延ゼロで返る。ここではそれが各指に重ねたシリコン指サック
 （あかぎれ用の肉厚 2 mm のもの。手元のは Rimikuru の指サポーター。紙を数える事務用の薄いものではない）であり、
-軟らかい指を持つ動物が壊れやすい物を雑に扱えて、このアームにそれができない理由でもある。
+軟らかい指を持つ動物が壊れやすい物を雑に扱えて、指先の硬いグリッパにそれができない理由でもある。
 **シリコンをむき出しで使うと 2 週間ほどで破れた**（2026-09-16 に発見）。今は上から
 **天然ゴムの指サック**（滑り止めのドット付き）を被せてカバーしている。
 
 <p align="center">
-  <img src="media/readme/fingertip_rubber_20260916.jpg" width="360"
-       alt="The SO-101 gripper held in a hand, orange natural-rubber finger cots with a dotted grip surface pulled over each jaw, covering the silicone caps underneath" />
+  <img src="media/readme/gripper_chip_20260918.jpg" width="520"
+       alt="The SO-101 gripper, orange natural-rubber finger cots with a dotted grip surface pulled over each jaw, holding one potato chip upright between them above a glass plate of chips, a Pringles can standing out of focus at the left" />
 </p>
 
 それはグリッパの触覚を細かくもする。こちらは少し分かりにくい。握力はもともと読めていた — 接触後は

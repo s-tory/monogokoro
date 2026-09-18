@@ -64,13 +64,13 @@ all. Biology's answer is the **preflex** -- the intrinsic mechanical response of
 at zero latency, before any reflex arc has been traversed. Here it is three silicone finger caps
 stacked on each jaw -- the thick anti-chapping kind, ~2 mm wall (ours are Rimikuru finger
 supporters), not the thin office cots sold for counting paper -- and it is why a soft-fingered
-animal can be careless with a fragile object in a way this arm cannot. **Bare silicone split after
+animal can be careless with a fragile object in a way a hard-fingered gripper cannot. **Bare silicone split after
 about two weeks** (found 2026-09-16); a **natural-rubber finger cot** with a dotted grip surface
 now goes over the top of it.
 
 <p align="center">
-  <img src="media/readme/fingertip_rubber_20260916.jpg" width="360"
-       alt="The SO-101 gripper held in a hand, orange natural-rubber finger cots with a dotted grip surface pulled over each jaw, covering the silicone caps underneath" />
+  <img src="media/readme/gripper_chip_20260918.jpg" width="520"
+       alt="The SO-101 gripper, orange natural-rubber finger cots with a dotted grip surface pulled over each jaw, holding one potato chip upright between them above a glass plate of chips, a Pringles can standing out of focus at the left" />
 </p>
 
 It also gives the gripper a finer sense of touch, which is less obvious. Grip force was always

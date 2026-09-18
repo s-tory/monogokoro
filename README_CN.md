@@ -55,13 +55,13 @@
 指尖碰到物体那一刻的力上升过程，在反射 2.5 ms 的一个 tick 内部就结束了，所以*最先*应答它的东西不可能
 是控制器。生物给出的答案是**预反射 (preflex)**：肌肉与组织自身固有的机械响应，不经过反射弧、以零延迟
 返回。在这里它就是每个夹爪面上叠起来的硅胶指套（防皲裂用的厚款，壁厚约 2 mm，手上这批是 Rimikuru 的手指保护套，不是办公用来数纸的薄指套），
-也正是有柔软手指的动物能粗手粗脚地对待易碎物、而这条机械臂不能的原因。
+也正是有柔软手指的动物能粗手粗脚地对待易碎物、而硬指尖的夹爪不能的原因。
 **硅胶直接裸露着用，大约两周就裂开了**（2026-09-16 发现）；现在在外面再套一层
 **天然橡胶指套**（表面带防滑颗粒）来保护它。
 
 <p align="center">
-  <img src="media/readme/fingertip_rubber_20260916.jpg" width="360"
-       alt="The SO-101 gripper held in a hand, orange natural-rubber finger cots with a dotted grip surface pulled over each jaw, covering the silicone caps underneath" />
+  <img src="media/readme/gripper_chip_20260918.jpg" width="520"
+       alt="The SO-101 gripper, orange natural-rubber finger cots with a dotted grip surface pulled over each jaw, holding one potato chip upright between them above a glass plate of chips, a Pringles can standing out of focus at the left" />
 </p>
 
 它还提高了夹爪触觉的分辨率。这一点稍微不那么直观。握力本来就读得到 —— 接触之后只有指令位置继续前进而实际
