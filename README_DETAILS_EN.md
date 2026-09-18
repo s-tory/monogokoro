@@ -535,11 +535,14 @@ for three reasons:
 - **The figure for that replacement is further up this page**: 4.9 V idle. The withdrawn sentence
   reached past a newer number in the same document to fetch the older one
 
-**What can be said is a bound.** The 5 V 6.2 A adapter reads **5.18 V at its terminals unloaded**
-and the servos read **4.9 V idle with everything connected**. The conditions differ, so the two do
-not subtract: 0.28 V mixes the wiring drop with the adapter's own droop under load. But loading a
-supply never raises its terminal voltage, so **the wiring and connectors drop at most 0.28 V**
-(`terminals under load - 4.9 <= 5.18 - 4.9`).
+**What can be said is the total. Connecting six servos costs about 0.3 V** -- the 5 V 6.2 A
+adapter reads **5.18 V at its terminals unloaded**, and the servos read **4.9 V idle with
+everything connected**. "About" is the precision available: 5.18 V is a meter on 2026-09-18, 4.9 V
+is the servos' own `Present_Voltage` on 2026-09-14, **different days and different instruments**,
+and `Present_Voltage` is quantised to 0.1 V.
+
+**Where those 0.3 V go is not separated.** Wiring and connectors, or the adapter's own droop under
+load. Loading a supply never raises its terminal voltage, so the wiring side is **at most** that.
 
 **This does not explain the 0.3-0.4 V at 7.4 V.** Different rail, different current, not directly
 comparable. Comparing them needs the terminals and the servo side read at the same moment **with
