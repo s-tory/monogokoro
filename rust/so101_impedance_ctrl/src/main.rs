@@ -21,7 +21,6 @@ use so101_impedance_ctrl::control::{
     wrapped_delta, MovingAverage, PositionFrame, PositionGate, TravelEnvelope,
 };
 use so101_impedance_ctrl::feetech::{self, FeetechBus};
-use so101_impedance_ctrl::leader::LeaderGripper;
 use so101_impedance_ctrl::pontine;
 use so101_impedance_ctrl::rt;
 use so101_impedance_ctrl::shm::{self, ShmLayout, NUM_MOTORS};
@@ -30,10 +29,6 @@ use so101_impedance_ctrl::shm::{self, ShmLayout, NUM_MOTORS};
 /// assignments: shoulder_pan=1, shoulder_lift=2, elbow_flex=3, wrist_flex=4, wrist_roll=5,
 /// gripper=6.
 const MOTOR_IDS: [u8; NUM_MOTORS] = [1, 2, 3, 4, 5, 6];
-
-/// Index of the gripper within the per-motor arrays. The leader's force feedback is driven
-/// from this joint's tracking error.
-const GRIPPER_INDEX: usize = NUM_MOTORS - 1;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -101,45 +96,6 @@ struct Cli {
     /// 32 * 6 * 1 / 300 = 0.64 s.
     #[arg(long, default_value_t = 1)]
     current_read_divisor: u64,
-
-    /// Serial port of the *leader* arm, to give its gripper force feedback. Omit for follower-only
-    /// operation, which is exactly the previous behaviour.
-    ///
-    /// Supplying this alone changes nothing about how the arm feels: `--force-feedback-gain`
-    /// defaults to 0, so the leader gripper is read and commanded to zero duty. That is the
-    /// measurement mode -- it costs the two extra bus transactions the real thing costs, so the
-    /// per-second timing summary answers "can this machine afford bilateral" before any force is
-    /// ever put into the operator's hand.
-    #[arg(long)]
-    leader_port: Option<String>,
-
-    /// Leader gripper's motor ID on `--leader-port`. The other five leader servos are left
-    /// untouched and backdrivable.
-    #[arg(long, default_value_t = 6)]
-    leader_gripper_id: u8,
-
-    /// Leader duty per count of follower gripper tracking error. 0 disables force feedback.
-    ///
-    /// Signed, and the sign has to be measured rather than assumed: which encoder direction means
-    /// "closed" is a property of each gripper's calibration, and the two arms need not agree. Start
-    /// near zero and raise until the trigger resists a blocked follower; if it *assists* the
-    /// squeeze instead, negate it. Assisting is the dangerous polarity -- it is positive feedback
-    /// through the operator's hand -- which is why the default renders nothing at all.
-    #[arg(long, default_value_t = 0.0)]
-    force_feedback_gain: f32,
-
-    /// Leader duty per count/s of trigger velocity, always opposing motion. Without it the operator
-    /// feels a bare spring, which rings; this is what makes contact feel like contact.
-    #[arg(long, default_value_t = 0.2)]
-    force_feedback_damping: f32,
-
-    /// Hard cap on leader duty, deliberately far below `--pwm-max`.
-    ///
-    /// The follower's limit protects a gearbox; this one is what a human hand is holding. It bounds
-    /// how hard a wrong sign, a bad gain or an unstable loop can push before the operator simply
-    /// overpowers it.
-    #[arg(long, default_value_t = 250.0)]
-    leader_pwm_max: f32,
 
     /// If no fresh input is received within this window, PWM output is zeroed (fail-safe).
     #[arg(long, default_value_t = 75)]
@@ -481,8 +437,8 @@ struct Cli {
 /// Set by the signal handler; the control loop leaves at the top of the next tick.
 ///
 /// A daemon that only exits through Python's Shutdown command would lose a session's learning to
-/// every Ctrl-C, and would leave the leader gripper energised on the way out. Both are reasons to
-/// have a clean exit path that does not depend on anything else still running.
+/// every Ctrl-C. That alone is reason to have a clean exit path that does not depend on anything
+/// else still running.
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn on_shutdown_signal(_sig: libc::c_int) {
@@ -753,8 +709,7 @@ fn main() {
         "config: invert_pwm={} pwm_sign_bit={} loop_hz={} pwm_max={} sync_read={} current_read_divisor={} \
          vel_filter_window={} pos_limits=[{}, {}] max_blind_ticks={} max_pos_slew={} \
          watchdog_ms={} \
-         serial_timeout_ms={} leader_port={:?} force_feedback_gain={} force_feedback_damping={} \
-         leader_pwm_max={} tendon_inhibition_current={} tendon_inhibition_gain={}",
+         serial_timeout_ms={} tendon_inhibition_current={} tendon_inhibition_gain={}",
         args.invert_pwm,
         args.pwm_sign_bit,
         args.loop_hz,
@@ -768,10 +723,6 @@ fn main() {
         args.max_pos_slew,
         args.watchdog_timeout_ms,
         args.serial_timeout_ms,
-        args.leader_port,
-        args.force_feedback_gain,
-        args.force_feedback_damping,
-        args.leader_pwm_max,
         args.tendon_inhibition_current,
         args.tendon_inhibition_gain,
     );
@@ -805,7 +756,7 @@ fn main() {
 
     // The cerebellum is an enhancement, never a prerequisite: no Vulkan driver, a headless host or
     // a GPU in a bad state must all still leave the arm running. So a failure here degrades to the
-    // pure reflex with a loud warning, exactly as the leader gripper does.
+    // pure reflex with a loud warning.
     let mut cerebellum = match build_cerebellum_config(&args) {
         Err(e) => {
             log::error!("cerebellum configuration rejected: {e} -- running without one");
@@ -861,41 +812,6 @@ fn main() {
         (Default::default(), Default::default())
     };
     log_supply_and_temperature(&mut bus, &MOTOR_IDS);
-
-    // Force feedback is an enhancement to teleoperation, never a prerequisite for it: if the
-    // leader's port is missing or its gripper will not go into PWM mode, the follower must still
-    // run. So this degrades to follower-only with a loud warning rather than aborting.
-    let mut leader = match &args.leader_port {
-        None => None,
-        Some(port) => match LeaderGripper::open(
-            port,
-            args.baud,
-            Duration::from_millis(args.serial_timeout_ms),
-            args.leader_gripper_id,
-            args.force_feedback_gain,
-            args.force_feedback_damping,
-            args.leader_pwm_max,
-            args.invert_pwm,
-            args.pwm_sign_bit,
-            args.vel_filter_window,
-        ) {
-            Ok(l) => Some(l),
-            Err(e) => {
-                log::error!(
-                    "leader gripper on {port} unavailable: {e} -- continuing without force \
-                     feedback; the follower is unaffected"
-                );
-                None
-            }
-        },
-    };
-    if leader.is_some() && args.force_feedback_gain == 0.0 {
-        log::info!(
-            "leader attached in measurement mode (--force-feedback-gain 0): the trigger is read \
-             and held at zero duty, so the timing summary shows bilateral's real cost with no \
-             force rendered"
-        );
-    }
 
     // The pontine relay runs whether or not a cerebellum does. It is bookkeeping, not compute, and
     // keeping it unconditional means the context path is exercised on every run rather than only
@@ -1334,14 +1250,6 @@ fn main() {
             }
         }
 
-        // The leader is driven from the follower's *gripper* tracking error: ~0 while the gripper
-        // closes freely, growing once an object stops it. `fresh && !blind` gates it on the same
-        // condition the follower's own output is gated on -- rendering force from an error the
-        // follower is no longer acting on would push the operator's hand for no reason.
-        if let Some(l) = leader.as_mut() {
-            l.tick(pos_error[GRIPPER_INDEX], safe, dt_s);
-        }
-
         // Hand the cerebellum this tick's sensory picture. A seqlock write: no lock, no blocking,
         // and no way for a slow or dead cerebellum thread to hold up the control loop.
         if let Some(c) = cerebellum.as_ref() {
@@ -1365,9 +1273,6 @@ fn main() {
         }
         if comms_error {
             fault_flags |= shm::FAULT_COMMS_ERROR;
-        }
-        if leader.as_ref().is_some_and(|l| l.comms_error) {
-            fault_flags |= shm::FAULT_LEADER_COMMS_ERROR;
         }
         if past_limits {
             fault_flags |= shm::FAULT_POS_LIMIT;
@@ -1396,11 +1301,6 @@ fn main() {
                 log::warn!("servo_error mono_ns={now_ns} motor={id} {from:#04x} -> {to:#04x}");
             },
         );
-        let leader_servo_error = leader.as_mut().map_or(0, |l| l.take_servo_error());
-        if leader_servo_error != 0 {
-            fault_flags |= shm::FAULT_SERVO_ERROR;
-        }
-
         shm::seqlock_write(&layout.output.seq, &mut layout.output.data, |o| {
             o.timestamp_mono_ns = now_ns;
             o.present_pos = present_pos;
@@ -1410,14 +1310,10 @@ fn main() {
             o.ff_pwm_debug = ff_pwm;
             o.cerebellum_flags = cerebellum_flags;
             o.fault_flags = fault_flags;
-            o.leader_gripper_pos = leader.as_ref().map_or(0.0, |l| l.present_pos);
-            o.leader_gripper_vel = leader.as_ref().map_or(0.0, |l| l.present_vel);
-            o.leader_gripper_pwm = leader.as_ref().map_or(0.0, |l| l.pwm_cmd);
             o.supply_decivolts = health_volts;
             o.case_temp_c = health_temp;
             o.health_motor_id = health_id;
             o.servo_error = servo_error as u32;
-            o.leader_servo_error = leader_servo_error as u32;
         });
 
         let shutdown_command = applied.is_some_and(|c| c.kind == shm::CommandKind::Shutdown as u32);
@@ -1427,19 +1323,11 @@ fn main() {
             } else {
                 log::info!("received SIGINT/SIGTERM, exiting control loop");
             }
-            if let Some(l) = leader.as_mut() {
-                l.release();
-            }
             break;
         }
 
         let elapsed = loop_start.elapsed();
-        timing.record(
-            elapsed,
-            loop_period,
-            comms_error,
-            leader.as_ref().map(|l| l.last_tick),
-        );
+        timing.record(elapsed, loop_period, comms_error);
         if let Some(summary) = timing.take_summary_if_due(loop_period) {
             log::info!("{summary}");
             // Sampled here, inside the summary's own branch, so it costs two transactions a second
@@ -1576,26 +1464,11 @@ struct LoopTiming {
     total: Duration,
     min: Option<Duration>,
     max: Duration,
-    /// Time spent on the leader's bus, summed. Reported separately because the whole question
-    /// about bilateral is whether the second arm fits in the period, and a combined mean cannot
-    /// answer it.
-    leader_total: Duration,
-    leader_ticks: u64,
 }
 
 impl LoopTiming {
-    fn record(
-        &mut self,
-        elapsed: Duration,
-        period: Duration,
-        comms_error: bool,
-        leader: Option<Duration>,
-    ) {
+    fn record(&mut self, elapsed: Duration, period: Duration, comms_error: bool) {
         self.ticks += 1;
-        if let Some(d) = leader {
-            self.leader_total += d;
-            self.leader_ticks += 1;
-        }
         if comms_error {
             self.comms_errors += 1;
         }
@@ -1614,17 +1487,9 @@ impl LoopTiming {
             return None;
         }
         let mean = self.total / self.ticks as u32;
-        let leader = if self.leader_ticks > 0 {
-            format!(
-                ", leader {:?}/tick",
-                self.leader_total / self.leader_ticks as u32
-            )
-        } else {
-            String::new()
-        };
         let summary = format!(
             "loop timing over {} ticks: min {:?} / mean {:?} / max {:?} (period {:?}); \
-             {} overruns, {} comms errors{}",
+             {} overruns, {} comms errors",
             self.ticks,
             self.min.unwrap_or_default(),
             mean,
@@ -1632,7 +1497,6 @@ impl LoopTiming {
             period,
             self.overruns,
             self.comms_errors,
-            leader,
         );
         *self = Self::default();
         Some(summary)

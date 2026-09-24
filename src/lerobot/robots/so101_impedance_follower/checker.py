@@ -185,22 +185,6 @@ class SO101ImpedanceChecker:
             "motor_id": float(telemetry["health_motor_id"]),
         }
 
-    def read_leader(self) -> dict[str, float] | None:
-        """Leader gripper telemetry, or None when the daemon runs without `--leader-port`.
-
-        Distinguished by the PWM being driven rather than by the position: a leader that is
-        attached but idle reports a real position too, so position alone cannot tell you whether
-        force feedback exists.
-        """
-        telemetry = self.client.read_output()
-        if "leader_gripper_pos" not in telemetry:
-            return None
-        return {
-            "pos": telemetry["leader_gripper_pos"],
-            "vel": telemetry["leader_gripper_vel"],
-            "pwm": telemetry["leader_gripper_pwm"],
-        }
-
     @property
     def fault_flags(self) -> int:
         return self.client.read_output()["fault_flags"]
@@ -408,7 +392,6 @@ def format_state_table(
     faults: list[str],
     targets: dict[str, float] | None = None,
     pwm_max: float = 1000.0,
-    leader: dict[str, float] | None = None,
 ) -> str:
     """Renders `read_state()`'s output as a fixed-width table for terminal printing.
 
@@ -417,11 +400,6 @@ def format_state_table(
     that look identical from the outside: a joint that drifts away with **near-zero PWM** is simply
     too soft to hold itself (raise K), whereas one that drifts away with **saturated PWM** is being
     driven the wrong way (positive feedback -- flip `--invert-pwm`).
-
-    Passing `leader` (from `read_leader()`) adds the operator's trigger as a final row. Its `pwm`
-    is the force being rendered into their hand, which is the one number that distinguishes a
-    trigger that feels slack because nothing is blocking the follower from one that feels slack
-    because the daemon is not driving it.
 
     The `ff` column is the cerebellum's share of `pwm`, and watching those two is the whole
     bring-up procedure for it: as the feedforward learns a joint's standing load, `ff` should climb
@@ -443,13 +421,6 @@ def format_state_table(
             ff = s.get("ff_pwm", 0.0)
             pct = abs(pwm) / pwm_max * 100 if pwm_max else float("nan")
             row += f"{target:>9.1f}{err:>9.1f}{pwm:>9.1f}{ff:>9.1f}{pct:>6.0f}%"
-        lines.append(row)
-    if leader is not None:
-        lines.append("-" * len(header))
-        row = f"{'LEADER grip':<14}{leader['pos']:>9.1f}{leader['vel']:>9.1f}{'':>9}"
-        if show_target:
-            pwm = leader["pwm"]
-            row += f"{'':>9}{'':>9}{pwm:>9.1f}{'':>9}{abs(pwm) / pwm_max * 100:>6.0f}%"
         lines.append(row)
     if faults:
         lines.append("FAULTS: " + "; ".join(faults))

@@ -55,15 +55,12 @@ NUM_MOTORS = 6
 #     that picks things up and puts them down interleaves by itself.
 NUM_CONTEXT = 2
 
-LAYOUT_VERSION = 8
+LAYOUT_VERSION = 9
 SHM_MAGIC = 0x534F3130  # ASCII "SO10", matches shm::SHM_MAGIC in shm.rs
 
 FAULT_WATCHDOG_TIMEOUT = 1 << 0
 FAULT_COMMS_ERROR = 1 << 1
 FAULT_OVERCURRENT = 1 << 2
-# The *leader* arm's bus failed, so force feedback is dropped. Deliberately distinct from
-# FAULT_COMMS_ERROR: this one does not mean the robot stopped tracking.
-FAULT_LEADER_COMMS_ERROR = 1 << 3
 # At least one joint is outside the daemon's `--pos-min`/`--pos-max`. Worth its own bit because a
 # joint the limits are holding at zero PWM looks exactly like the watchdog, a blind run, or a gain
 # that is simply too soft.
@@ -96,7 +93,6 @@ _FAULT_NAMES: tuple[tuple[int, str], ...] = (
         "servo_error (a servo raised its own protection flag -- see the servo_error column for "
         "which bit; 0x01 on every motor at once is the supply dipping below 4.0 V, not a bus fault)",
     ),
-    (FAULT_LEADER_COMMS_ERROR, "leader_comms_error (force feedback dropped; the follower is unaffected)"),
     (
         FAULT_TENDON_INHIBITION,
         "tendon_inhibition (Ib folded back a saturated command; the duty columns for this tick are "
@@ -216,11 +212,6 @@ class OutputData(ctypes.Structure):
         ("ff_pwm_debug", ctypes.c_float * NUM_MOTORS),
         ("cerebellum_flags", ctypes.c_uint32),
         ("fault_flags", ctypes.c_uint32),
-        # Leader-side gripper, populated only when the daemon runs with `--leader-port`; zero
-        # otherwise. Distinct from the follower arrays above -- this is the *operator's* trigger.
-        ("leader_gripper_pos", ctypes.c_float),
-        ("leader_gripper_vel", ctypes.c_float),
-        ("leader_gripper_pwm", ctypes.c_float),
         # Supply voltage (0.1 V units) and case temperature (C) of the servo named by
         # health_motor_id, sampled round-robin once a second rather than per tick; all zero until
         # the first sample lands. Carried in the same snapshot as pwm_cmd_debug on purpose: a
@@ -234,10 +225,6 @@ class OutputData(ctypes.Structure):
         # Feetech reply carries it, so reading it adds no bus traffic. Raw rather than only a fault
         # bit because the byte names which protection tripped, and the answers differ.
         ("servo_error", ctypes.c_uint32),
-        # The same byte off the *leader* arm's bus, zero without --leader-port. Separate because the
-        # arms have separate buses and separate supplies: a merged value could not say which arm
-        # was in trouble.
-        ("leader_servo_error", ctypes.c_uint32),
     ]
 
 
@@ -443,14 +430,10 @@ class ImpedanceShmClient:
                 "ff_pwm": list(region.data.ff_pwm_debug),
                 "cerebellum_flags": region.data.cerebellum_flags,
                 "fault_flags": region.data.fault_flags,
-                "leader_gripper_pos": region.data.leader_gripper_pos,
-                "leader_gripper_vel": region.data.leader_gripper_vel,
-                "leader_gripper_pwm": region.data.leader_gripper_pwm,
                 "supply_decivolts": region.data.supply_decivolts,
                 "case_temp_c": region.data.case_temp_c,
                 "health_motor_id": region.data.health_motor_id,
                 "servo_error": region.data.servo_error,
-                "leader_servo_error": region.data.leader_servo_error,
             }
             s2 = region.seq
             if s1 == s2:

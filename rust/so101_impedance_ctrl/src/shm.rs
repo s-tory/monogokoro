@@ -10,7 +10,7 @@
 
 use std::sync::atomic::{fence, AtomicU32, Ordering};
 
-pub const LAYOUT_VERSION: u32 = 8;
+pub const LAYOUT_VERSION: u32 = 9;
 pub const SHM_MAGIC: u32 = 0x534F_3130; // ASCII "SO10"
 /// All 6 servos -- the 5 arm joints AND the gripper -- are impedance-controlled (K/D over PWM).
 /// A rigid position-mode gripper crushes anything it grips before it can sense resistance;
@@ -83,12 +83,6 @@ pub struct OutputData {
     /// `CEREBELLUM_*` bits from `cerebellum::mod`, describing why the feedforward is what it is.
     pub cerebellum_flags: u32,
     pub fault_flags: u32,
-    /// Leader-side gripper telemetry, present only when the daemon was given `--leader-port`;
-    /// all zero otherwise. Exposed so the operator-facing tools can show whether the trigger is
-    /// being driven, and so a recording pipeline can eventually label grip intent with it.
-    pub leader_gripper_pos: f32,
-    pub leader_gripper_vel: f32,
-    pub leader_gripper_pwm: f32,
     /// Supply voltage in 0.1 V units, as reported by the servo named by `health_motor_id`, with
     /// that servo's case temperature in C. Sampled round-robin once a second by the summary
     /// branch, not per tick -- see `control::read_supply_and_temperature` for why. Both zero until
@@ -116,13 +110,6 @@ pub struct OutputData {
     /// faster voltmeter than anything else on this bus, and this field is how a run keeps what
     /// they said.
     pub servo_error: u32,
-    /// The same byte from the *leader* arm's bus, zero when no `--leader-port` was given.
-    ///
-    /// Separate from `servo_error` because the arms have separate buses and separate supplies. The
-    /// follower's 5 V brick is the one measured sagging under load; the leader is expected to be
-    /// clear of that because it is never commanded to hold torque -- expected, not measured, and
-    /// this field is what turns that into a measurement.
-    pub leader_servo_error: u32,
 }
 
 #[repr(C)]
@@ -134,10 +121,6 @@ pub struct OutputRegion {
 pub const FAULT_WATCHDOG_TIMEOUT: u32 = 1 << 0;
 pub const FAULT_COMMS_ERROR: u32 = 1 << 1;
 pub const FAULT_OVERCURRENT: u32 = 1 << 2;
-/// The leader arm's bus failed this tick. Kept distinct from [`FAULT_COMMS_ERROR`] because the
-/// consequences differ: the follower losing its bus stops the robot, whereas the leader losing
-/// its bus only drops force feedback -- the follower keeps tracking normally.
-pub const FAULT_LEADER_COMMS_ERROR: u32 = 1 << 3;
 /// At least one joint is outside `--pos-min`/`--pos-max`. Reported because the symptom is
 /// otherwise indistinguishable from several unrelated ones: a joint the limits are holding at zero
 /// PWM looks exactly like the watchdog, a blind run, or a gain that is simply too soft.

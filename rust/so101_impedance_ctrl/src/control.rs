@@ -90,29 +90,6 @@ pub fn impedance_pwm(
     raw.clamp(-pwm_max, pwm_max)
 }
 
-/// PWM to render on a leader-side joint so the operator feels the follower's tracking error.
-///
-/// `follower_error` is the follower joint's own `target - present` gap, in follower encoder
-/// counts: near zero while the follower moves freely, growing once something blocks it. Scaling
-/// that into leader duty is what turns the trigger into a haptic display, with no force sensor
-/// anywhere in the loop.
-///
-/// `feedback_gain` is signed on purpose. Which way "closed" runs depends on each gripper's own
-/// calibration, and the two arms need not agree, so the correct sign is a property of a particular
-/// pair of arms -- measured like `--invert-pwm` was, not derived. `damping` is separate and always
-/// opposes leader motion, so it stays correct whichever sign the gain takes, and it is what keeps
-/// the operator from feeling a bare spring.
-pub fn force_feedback_pwm(
-    feedback_gain: f32,
-    damping: f32,
-    follower_error: f32,
-    leader_vel: f32,
-    pwm_max: f32,
-) -> f32 {
-    let raw = feedback_gain * follower_error - damping * leader_vel;
-    raw.clamp(-pwm_max, pwm_max)
-}
-
 /// The first motor in a freshly read batch whose position could not have got there, given the
 /// last accepted batch and a budget in counts.
 ///
@@ -507,14 +484,6 @@ fn set_operating_mode(bus: &mut FeetechBus, motor_id: u8, mode: u32) -> std::io:
     Err(last_err.expect("loop runs at least once"))
 }
 
-/// Puts one servo into PWM mode with torque enabled, the state the impedance and force-feedback
-/// laws both assume. Split out so the leader's single gripper can reach it without going through
-/// the shared-memory command channel, which only the follower's Python client drives.
-pub fn prepare_pwm_motor(bus: &mut FeetechBus, motor_id: u8) -> std::io::Result<()> {
-    set_operating_mode(bus, motor_id, feetech::OPERATING_MODE_PWM)?;
-    bus.write_register(motor_id, feetech::REG_TORQUE_ENABLE, 1)
-}
-
 /// One-time hardware fixups applied to every servo at daemon startup, mirroring
 /// `FeetechMotorsBus.configure_motors` on the Python side.
 ///
@@ -728,9 +697,7 @@ impl TravelEnvelope {
 ///
 /// Without this the daemon exits leaving each servo holding the last duty it was handed. A joint
 /// carrying the arm's weight at 250/1000 keeps driving at 250 after Ctrl-C, for as long as it has
-/// power, because nothing else on the bus will ever tell it otherwise. The leader's gripper has
-/// had this since it was written -- "the operator is never left holding a powered trigger" -- and
-/// the same sentence is more true of the arm.
+/// power, because nothing else on the bus will ever tell it otherwise.
 ///
 /// It also explains a state the arm was found in: torque enabled with duty 0 after a session had
 /// ended, which brakes the joint (both bridge legs low) and reads by hand as a stiffness nobody

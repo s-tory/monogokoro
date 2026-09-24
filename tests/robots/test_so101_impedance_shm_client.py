@@ -34,9 +34,6 @@ from multiprocessing import shared_memory
 import pytest
 
 from lerobot.robots.so101_impedance_follower.shm_client import (
-    FAULT_COMMS_ERROR,
-    FAULT_LEADER_COMMS_ERROR,
-    FAULT_WATCHDOG_TIMEOUT,
     LAYOUT_VERSION,
     NUM_CONTEXT,
     SHM_MAGIC,
@@ -160,7 +157,7 @@ def test_shm_layout_size_matches_the_rust_struct():
     # catches someone who remembered to bump it. The Rust side asserts this same number in
     # tests/shm_layout_tests.rs; asserting it here too is what makes a one-sided edit fail on the
     # side that made it rather than on the next person's arm.
-    assert ctypes.sizeof(ShmLayout) == 344
+    assert ctypes.sizeof(ShmLayout) == 328
 
 
 def test_read_output_round_trips_values_from_a_simulated_daemon(shm_segment):
@@ -270,26 +267,6 @@ def test_wait_for_ack_times_out_if_daemon_never_acks(shm_segment):
     client.close()
 
 
-def test_read_output_exposes_leader_gripper_telemetry(shm_segment):
-    # The leader's trigger is the operator-facing half of bilateral teleoperation, so it has to
-    # survive the shared-memory round trip alongside the follower's arrays -- and it is a scalar,
-    # not a seventh element of them: it belongs to a different arm, on a different bus.
-    layout = ShmLayout.from_buffer(shm_segment.buf)
-    layout.output.data.leader_gripper_pos = 2048.0
-    layout.output.data.leader_gripper_vel = -37.5
-    layout.output.data.leader_gripper_pwm = 120.0
-    layout.output.data.timestamp_mono_ns = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
-    layout.output.seq = 2  # stable/even
-
-    client = ImpedanceShmClient(shm_segment.name)
-    snapshot = client.read_output()
-
-    assert snapshot["leader_gripper_pos"] == pytest.approx(2048.0)
-    assert snapshot["leader_gripper_vel"] == pytest.approx(-37.5)
-    assert snapshot["leader_gripper_pwm"] == pytest.approx(120.0)
-    client.close()
-
-
 def test_read_output_exposes_the_shared_rail_reading(shm_segment):
     # The rail voltage rides in the same snapshot as the duty it explains. A servo whose power
     # stage shorts pulls the shared supply down for hundreds of ms whenever it is written to,
@@ -328,14 +305,6 @@ def test_a_daemon_that_never_sampled_the_rail_reports_zero_not_a_plausible_volta
     assert snapshot["health_motor_id"] == 0
     assert snapshot["supply_decivolts"] == 0
     client.close()
-
-
-def test_leader_fault_is_distinct_from_the_followers_comms_fault(shm_segment):
-    # Losing the leader's bus only drops force feedback; losing the follower's stops the robot.
-    # Sharing one flag would make an operator-visible annoyance indistinguishable from a fault
-    # that means the arm is no longer tracking.
-    assert FAULT_LEADER_COMMS_ERROR != FAULT_COMMS_ERROR
-    assert FAULT_LEADER_COMMS_ERROR & (FAULT_COMMS_ERROR | FAULT_WATCHDOG_TIMEOUT) == 0
 
 
 def test_close_does_not_raise_when_a_traceback_still_holds_a_view(shm_segment):
