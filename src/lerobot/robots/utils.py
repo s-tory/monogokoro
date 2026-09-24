@@ -42,7 +42,7 @@ def make_robot_from_config(config: RobotConfig) -> Robot:
         from .so_follower import SO101Follower
 
         return SO101Follower(config)
-    elif config.type == "so101_follower_impedance":
+    elif config.type == "so101_impedance_follower":
         from .so101_impedance_follower import SO101ImpedanceFollower
 
         return SO101ImpedanceFollower(config)

@@ -32,17 +32,16 @@ pwm = clamp(K · (target_pos − present_pos) + D · (target_vel − present_vel
 余量仍然充足。超过 400 Hz 也得不到什么 —— 决定这条机械臂手感的是开环 PWM 和齿轮摩擦，
 而 400 Hz 已经远远超过机械臂的机械带宽。
 
-### 2. 主臂夹爪的力反馈
+### 2. 主臂夹爪的力反馈——做过，2026-09-24 撤回
 
-加上 `--leader-port` 之后，同一个回路也会把**主臂 (leader)** 的夹爪当作触觉显示器来驱动，操作者就能
-感觉到从臂正握着什么。主臂剩下的 5 个舵机保持力矩关闭，维持可反向驱动。
+曾经有一条 `--leader-port` 路径把主臂夹爪当触觉显示器驱动。撤回的理由有两个，在这台臂上都没有测过。
+**总线竞争没解决**——`--leader-port` 打开的是 Python 侧 `so101_leader` teleoperator 已经在用的**同一个
+串口**，来自另一个没有协调的进程，没有锁也没有仲裁。守护进程自己文件头的注释宣称独占"SO101 的单个半双工
+总线"，但那只在从臂这一侧成立过。**预计会被静摩擦盖过**——STS3215 减速箱本身的静摩擦，预计会压过扳机能
+渲染出的任何力。这是对硬件的假设，不是测量。
 
-力不是来自力传感器，而是从从臂自身的跟随误差导出的。自由的夹爪能到达目标，所以扳机保持松弛；被挡住
-的夹爪则是指令位置跑到了实现位置前面，而这个差会随着操作者要求握得多紧而变大。
-
-两条臂共享**单核上的单个回路**。端口是分开的，所以半双工的约束不会把两者耦合起来，而且一个 tick 内
-两条臂的采样是同步的 —— 若拆成两个独立回路，相位就会自由漂移，耦合处会引入一个周期量级的可变延迟。
-而那正是让双边回路不稳定的东西。
+如果以后要重新做双边遥操作，先把总线所有权理顺（加锁，或者把主臂夹爪也走从臂已经在用的共享内存通道），
+而不是继续让两个进程各自打开同一个端口。
 
 ### 3. ACT 处理力与柔顺
 
@@ -260,8 +259,8 @@ README [已知限制](README_CN.md#已知限制)里每一条的正文。README �
 
 **演示不会给出策略以下各层的标签。** 力矩关闭的主臂只是一个位置传感器，回合会被打上配置里默认
 K/D 作为标签。用它训练出来的 ACT 学到的是复现那些默认值的方法，而不是改变增益的方法。小脑的权重
-同样只是留在文件里，不会进入数据集。主臂夹爪的力反馈是修正前半部分的第一步，而从多次演示之间的
-方差里导出刚度，大概是接下来的一手。
+同样只是留在文件里，不会进入数据集。主臂夹爪的力反馈曾是修正前半部分的一个候选方案，但已经撤回
+（见"主臂夹爪的力反馈——做过，撤回"一节）。从多次演示之间的方差里导出刚度，仍然是没人动过的一手。
 
 ### 随附的电源在默认设置下就会塌陷
 
@@ -466,7 +465,23 @@ _测过了，2026-09-16。_ 让舵机跑在它被设计的电压上。STS3215 �
 ### 交互式标定尚未实现
 
 面向阻抗机器人的**交互式标定和 `setup-motors`** 尚未实现。两者都请用原版 `so101_follower` 对同一批
-舵机执行，然后把标定文件复制过来 —— 两种机器人类型写入的是不同的目录。
+舵机执行，然后把标定文件复制过来 —— 两种机器人类型写入的是`$HF_LEROBOT_CALIBRATION/robots/`
+(默认 `~/.cache/huggingface/lerobot/calibration/robots/`)下不同的目录: 原版机器人是
+`so_follower/<id>.json`，这一个是`so101_impedance_follower/<id>.json`。
+
+```bash
+# 先停掉守护进程，否则两个进程会抢同一个串口。
+sudo systemctl stop so101-impedance
+lerobot-calibrate --robot.type=so101_follower --robot.port=<PORT> --robot.id=<id>
+mkdir -p ~/.cache/huggingface/lerobot/calibration/robots/so101_impedance_follower
+cp ~/.cache/huggingface/lerobot/calibration/robots/so_follower/<id>.json \
+   ~/.cache/huggingface/lerobot/calibration/robots/so101_impedance_follower/<id>.json
+sudo systemctl start so101-impedance
+```
+
+(也可以不复制，直接把`--robot.calibration_dir`指向`so_follower`的目录。)两者都不做就去连接，会触发
+`NotImplementedError`，报出同样的命令——不是手写的，是从`self.calibration_dir`生成的(见
+`so101_impedance_follower.py`的`calibrate()`)，所以不会像这段文字本身那样，因为一次改名就悄悄过时。
 
 ### iGPU 训练的 OOM 会把桌面搞崩
 

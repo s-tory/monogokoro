@@ -35,20 +35,20 @@ Beyond 400 Hz there is nothing to gain --
 what limits how the arm feels is open-loop PWM and gearbox friction, and 400 Hz is already far past
 the arm's mechanical bandwidth.
 
-### 2. Force feedback on the leader gripper
+### 2. Force feedback on the leader gripper -- tried, withdrawn (2026-09-24)
 
-With `--leader-port`, the same loop also drives the **leader** arm's gripper as a haptic display, so
-the operator feels what the follower is holding. The other five leader servos stay torque-off and
-backdrivable.
+A `--leader-port` path once drove the leader gripper as a haptic display. Withdrawn for two reasons,
+neither measured on this arm. **Unresolved bus contention** -- `--leader-port` opened the _same_
+serial port the Python-side `so101_leader` teleoperator already has open, from a second,
+uncoordinated process, with no lock and no arbitration. The daemon's own header comment claims
+exclusive ownership of "the SO101's single half-duplex serial bus", which only ever held for the
+follower. **Expected to be swamped by static friction** -- the STS3215 gearbox's own stiction was
+expected to dominate whatever force the trigger could render. An assumption about the hardware, not
+a measurement.
 
-The force is derived from the follower's own tracking error, not from a force sensor: a free gripper
-reaches its target and the trigger stays slack; a blocked one lets the commanded position run ahead
-of the achieved one, and that gap grows with how hard the operator is asking it to squeeze.
-
-Both arms share **one loop on one core**. Their ports are separate, so the half-duplex constraint
-does not couple them, and a single tick keeps the two arms' samples in lockstep -- two independent
-loops would let their phase free-run, injecting a full period of variable delay into the coupling,
-which is precisely what destabilises a bilateral loop.
+If bilateral teleoperation is revisited, fix the bus ownership first -- a lock, or routing the
+leader's gripper through the same shared-memory channel the follower already uses -- rather than
+reopening the port twice.
 
 ### 3. ACT reasons about force and compliance
 
@@ -309,8 +309,10 @@ obvious missing bundle.
 **Demonstrations do not label the layers below the policy.** A torque-off leader is a position
 sensor and nothing else, so episodes are labelled with the config's default K/D and ACT trained on
 them learns to reproduce those gains, not to vary them. The cerebellum's weights likewise persist
-to a file and not into any dataset. The leader gripper's force feedback is the first step toward
-fixing the first half; deriving stiffness from cross-demonstration variance is the likely next.
+to a file and not into any dataset. Leader-gripper force feedback was one candidate fix for the
+first half and has since been withdrawn (see [Force feedback on the leader gripper -- tried,
+withdrawn](#2-force-feedback-on-the-leader-gripper----tried-withdrawn-2026-09-24)); deriving
+stiffness from cross-demonstration variance is still open.
 
 ### The bundled supply collapses at the defaults
 
@@ -539,7 +541,25 @@ two motors for 1.9 s -- **not the voltage bit `0x01`**.
 
 **Interactive calibration and `setup-motors`** are not implemented for the impedance robot. Run
 both with the stock `so101_follower` against the same servos, then copy the calibration across --
-the two robot types write to different directories.
+the two robot types write to different directories under `$HF_LEROBOT_CALIBRATION/robots/`
+(default `~/.cache/huggingface/lerobot/calibration/robots/`): `so_follower/<id>.json` for the plain
+robot, `so101_impedance_follower/<id>.json` for this one.
+
+```bash
+# Stop the daemon first, or the two processes fight over the serial port.
+sudo systemctl stop so101-impedance
+lerobot-calibrate --robot.type=so101_follower --robot.port=<PORT> --robot.id=<id>
+mkdir -p ~/.cache/huggingface/lerobot/calibration/robots/so101_impedance_follower
+cp ~/.cache/huggingface/lerobot/calibration/robots/so_follower/<id>.json \
+   ~/.cache/huggingface/lerobot/calibration/robots/so101_impedance_follower/<id>.json
+sudo systemctl start so101-impedance
+```
+
+(Or skip the `cp` and pass `--robot.calibration_dir` pointing at the `so_follower` directory
+instead.) Connecting without either raises `NotImplementedError` with this same command, generated
+from `self.calibration_dir` rather than hand-written -- see `calibrate()` in
+`so101_impedance_follower.py` -- so the exact path can't drift out of sync with a rename the way
+this paragraph itself already had.
 
 ### An iGPU training OOM takes the desktop down
 

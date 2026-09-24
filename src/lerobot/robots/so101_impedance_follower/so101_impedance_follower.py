@@ -77,16 +77,33 @@ class SO101ImpedanceFollower(Robot):
     matching this repo's existing `MotorCurrentProcessorStep` convention. The telemetry columns are
     likewise unconverted: `.pwm_cmd`/`.ff_pwm` are in the Rust loop's duty units, and
     `supply_decivolts` is in 0.1 V steps, as the name says.
+
+    Clutch: `send_action` never applies a teleop device's `.pos` values directly. The first call
+    after `connect()` anchors instead -- it reads the follower's own current pose and treats that
+    call's action as the zero of a relative offset, then every later call moves the follower by
+    however far the teleop device's reading has moved *since that anchor*, not to its absolute
+    reading. Discovered 2026-09-24: a leader arm reshaped into a compact grip housing rests, by
+    construction, away from the geometric middle of several joints' travel -- and "0" in normalized
+    units is exactly that middle, not "wherever the operator happened to hold the leader when
+    calibration's centering step asked for ENTER". Without the anchor, every teleop session opened
+    with the follower slamming from its parked pose to the leader's absolute reading, which reads as
+    the same "runaway" symptom several genuinely broken states in this file's history produced --
+    the mechanism here is a home-pose mismatch, not a fault. `connect()` clears the anchor, so a
+    daemon restart or a fresh session always re-anchors to wherever the follower actually is.
     """
 
     config_class = SO101ImpedanceFollowerRobotConfig
-    name = "so101_follower_impedance"
+    name = "so101_impedance_follower"
 
     def __init__(self, config: SO101ImpedanceFollowerRobotConfig):
         super().__init__(config)
         self.config = config
         self.cameras = make_cameras_from_configs(config.cameras)
         self._shm_client: ImpedanceShmClient | None = None
+        # The clutch's anchor -- see the class docstring. `None` means "not yet anchored", which
+        # `send_action` uses to trigger anchoring on its first call after each `connect()`.
+        self._clutch_leader_ref: dict[str, float] | None = None
+        self._clutch_follower_ref: dict[str, float] | None = None
         # Checked here rather than at the shared-memory write: a mismatched length would otherwise
         # surface as a ctypes assignment error mid-episode, long after the run was configured.
         if len(config.pontine_context) != NUM_CONTEXT:
@@ -224,10 +241,31 @@ class SO101ImpedanceFollower(Robot):
             return MotorNormMode.RANGE_0_100
         return MotorNormMode.DEGREES if self.config.use_degrees else MotorNormMode.RANGE_M100_100
 
+    def _pwm_to_position_frame(self, motor: str, raw: float) -> float:
+        """Converts a PWM-frame tick (what the daemon's `present_pos`/`Present_Position` reports
+        while `Operating_Mode` is PWM) into the POSITION-frame tick `lerobot-calibrate` recorded
+        `range_min`/`range_max`/the calibration midpoint against.
+
+        Measured 2026-09-24: the STS3215 does not apply `Homing_Offset` to `Present_Position` in
+        PWM mode (this robot's mode, always), so the two frames differ by exactly that offset.
+        Verified on the gripper with no motion in between the two reads: POSITION-mode read 2090,
+        this robot's shm telemetry (PWM mode) read 3983 moments later, and
+        `3983 - Homing_Offset(1896) = 2087 ≈ 2090`. Without this conversion, `_raw_to_normalized`/
+        `_normalized_to_raw` compared PWM-frame numbers against POSITION-frame calibration bounds
+        directly -- silently wrong for every joint, worst where a clamp (`RANGE_0_100`'s 100%) made
+        it visible as "the gripper won't open".
+        """
+        return (raw - self.calibration[motor].homing_offset) % _STS3215_RESOLUTION
+
+    def _position_to_pwm_frame(self, motor: str, position_frame_raw: float) -> float:
+        """Inverse of `_pwm_to_position_frame`."""
+        return (position_frame_raw + self.calibration[motor].homing_offset) % _STS3215_RESOLUTION
+
     def _raw_to_normalized(self, motor: str, raw: float) -> float:
         """Converts a raw encoder-tick position (as read by the Rust daemon) to this robot's
         normalized `.pos` units, mirroring `SerialMotorsBus._normalize`."""
         calib = self.calibration[motor]
+        raw = self._pwm_to_position_frame(motor, raw)
         min_, max_ = calib.range_min, calib.range_max
         if max_ == min_:
             raise ValueError(f"Invalid calibration for motor '{motor}': min and max are equal.")
@@ -253,17 +291,24 @@ class SO101ImpedanceFollower(Robot):
         if mode is MotorNormMode.RANGE_M100_100:
             value = -value if calib.drive_mode else value
             bounded = min(100.0, max(-100.0, value))
-            return ((bounded + 100) / 200) * (max_ - min_) + min_
-        if mode is MotorNormMode.RANGE_0_100:
+            position_frame_raw = ((bounded + 100) / 200) * (max_ - min_) + min_
+        elif mode is MotorNormMode.RANGE_0_100:
             value = 100 - value if calib.drive_mode else value
             bounded = min(100.0, max(0.0, value))
-            return (bounded / 100) * (max_ - min_) + min_
-        mid = (min_ + max_) / 2
-        max_res = _STS3215_RESOLUTION - 1
-        return (value * max_res / 360) + mid
+            position_frame_raw = (bounded / 100) * (max_ - min_) + min_
+        else:
+            mid = (min_ + max_) / 2
+            max_res = _STS3215_RESOLUTION - 1
+            position_frame_raw = (value * max_res / 360) + mid
+        return self._position_to_pwm_frame(motor, position_frame_raw)
 
     @check_if_already_connected
     def connect(self, calibrate: bool = True) -> None:
+        # Cleared on every connect so a fresh session (or a reconnect after the daemon restarted
+        # mid-run) always re-anchors to wherever the follower actually is now, never to a pose left
+        # over from before.
+        self._clutch_leader_ref = None
+        self._clutch_follower_ref = None
         try:
             self._shm_client = ImpedanceShmClient(
                 self.config.shm_name, attach_timeout_s=self.config.shm_attach_timeout_s
@@ -390,6 +435,12 @@ class SO101ImpedanceFollower(Robot):
         """Command all 6 motors (arm joints + gripper) toward a target configuration under
         impedance control.
 
+        The teleop device's absolute `.pos` is never applied directly -- see the class docstring's
+        clutch note. The first call after `connect()` anchors: it reads the follower's own current
+        pose and treats this call's `action` as the reference, then every later call moves the
+        follower by `action - reference` from the follower's anchored pose, not to `action`'s
+        absolute value.
+
         The relative position magnitude may be clipped (`config.max_relative_target`); K/D are
         clamped to `[k_min, k_max]`/`[d_min, d_max]`; K/D default to `config.default_k`/
         `default_d` per motor when absent from `action` (defense-in-depth -- the primary source
@@ -409,13 +460,28 @@ class SO101ImpedanceFollower(Robot):
         if missing:
             raise ValueError(f"{self} action is missing required keys: {missing}")
 
-        goal_pos = {m: action[f"{m}.pos"] for m in self.impedance_joints}
-        if self.config.max_relative_target is not None:
+        raw_goal_pos = {m: action[f"{m}.pos"] for m in self.impedance_joints}
+
+        # Telemetry is needed to anchor the clutch on the first call, and again whenever
+        # `max_relative_target` needs the follower's live pose -- one read covers both.
+        present_by_name: dict[str, float] | None = None
+        if self._clutch_leader_ref is None or self.config.max_relative_target is not None:
             telemetry = shm.read_output()
             present_by_name = {
                 m: self._raw_to_normalized(m, telemetry["present_pos"][i])
                 for i, m in enumerate(self.impedance_joints)
             }
+
+        if self._clutch_leader_ref is None:
+            self._clutch_leader_ref = dict(raw_goal_pos)
+            self._clutch_follower_ref = dict(present_by_name)
+
+        goal_pos = {
+            m: self._clutch_follower_ref[m] + (raw_goal_pos[m] - self._clutch_leader_ref[m])
+            for m in self.impedance_joints
+        }
+
+        if self.config.max_relative_target is not None:
             goal_present_pos = {m: (v, present_by_name[m]) for m, v in goal_pos.items()}
             goal_pos = ensure_safe_goal_position(goal_present_pos, self.config.max_relative_target)
 

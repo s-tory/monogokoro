@@ -192,7 +192,7 @@ class SO101ImpedanceFollowerConfig:
     command_ack_timeout_s: float = 2.0
 
 
-@RobotConfig.register_subclass("so101_follower_impedance")
+@RobotConfig.register_subclass("so101_impedance_follower")
 @dataclass
 class SO101ImpedanceFollowerRobotConfig(RobotConfig, SO101ImpedanceFollowerConfig):
     pass

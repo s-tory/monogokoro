@@ -144,7 +144,7 @@ python examples/check_so101_impedance.py --shm-name so101_impedance
 
 ステップ 3 が Python 環境を必要とする最初の場所になる。作り方は [`SETUP_XPU.md`](SETUP_XPU.md)（英語）。ステップ 1〜2 のデーモンは Rust なので、Python 環境が無くても単体で動く。
 
-あとは `--robot.type=so101_follower_impedance` で遠隔操作なり記録なりを行う。どちらもロボットの設定から
+あとは `--robot.type=so101_impedance_follower` で遠隔操作なり記録なりを行う。どちらもロボットの設定から
 関節ごとの K/D を自動で埋める。**その既定値は 7.4 V の電源（サーボの読みで 7.0〜7.1 V）の上で、
 盲検で決めた。** デューティは電圧に対する割合なので、5 V では同じ K でも出る力が約 2/3 になり、
 手触りも保持も変わるはず。5 V では決め直していない。

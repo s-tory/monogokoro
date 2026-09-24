@@ -148,7 +148,7 @@ _ENCODER = 4096.0
 
 
 def load_travel(robot_id: str) -> Travel:
-    path = HF_LEROBOT_CALIBRATION / "robots" / "so101_follower_impedance" / f"{robot_id}.json"
+    path = HF_LEROBOT_CALIBRATION / "robots" / "so101_impedance_follower" / f"{robot_id}.json"
     if not path.is_file():
         raise SystemExit(
             f"no calibration at {path}: ramps need each joint's Homing_Offset to know which way "
@@ -188,7 +188,7 @@ def travel_distance(a: dict, b: dict, travel: Travel) -> float:
 
 
 ROBOT_ID_HELP = (
-    "Calibration to read Homing_Offset from, under the so101_follower_impedance calibration "
+    "Calibration to read Homing_Offset from, under the so101_impedance_follower calibration "
     "directory. Ramps move along each joint's travel, which only the offset locates."
 )
 

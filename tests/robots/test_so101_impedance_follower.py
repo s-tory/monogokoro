@@ -144,6 +144,35 @@ def test_get_observation_converts_raw_ticks_to_normalized_units(follower):
     assert obs["cerebellum_flags"] == pytest.approx(4.0)
 
 
+def test_frame_conversion_accounts_for_homing_offset(follower):
+    """PWM mode does not apply `Homing_Offset` to `Present_Position`, but the calibration file's
+    `range_min`/`range_max` are recorded in POSITION mode (via `lerobot-calibrate`).
+
+    Discovered 2026-09-24 on the real arm: the gripper read 2090 in POSITION mode and 3983 through
+    this robot's shm telemetry (always PWM mode) moments later, with no motion in between --
+    `3983 - 1896 (its Homing_Offset) ~= 2090`. Before `_pwm_to_position_frame` existed,
+    `_raw_to_normalized`/`_normalized_to_raw` compared numbers from these two different frames
+    directly, silently wrong for every joint -- worst on the gripper, where `RANGE_0_100`'s 100%
+    clamp made it visible as "the gripper won't open".
+    """
+    robot, _ = follower
+    homing_offset = 1896
+    robot.calibration["gripper"] = MotorCalibration(
+        id=6, drive_mode=0, homing_offset=homing_offset, range_min=1975, range_max=3541
+    )
+
+    # range_min's PWM-frame equivalent must normalize to 0%, range_max's to 100%.
+    pwm_frame_min = (1975 + homing_offset) % 4096
+    pwm_frame_max = (3541 + homing_offset) % 4096
+    assert robot._raw_to_normalized("gripper", pwm_frame_min) == pytest.approx(0.0)
+    assert robot._raw_to_normalized("gripper", pwm_frame_max) == pytest.approx(100.0)
+
+    # Round trip through both conversions must return to the same PWM-frame tick.
+    for value in (0.0, 37.5, 100.0):
+        raw = robot._normalized_to_raw("gripper", value)
+        assert robot._raw_to_normalized("gripper", raw) == pytest.approx(value, abs=1e-6)
+
+
 def test_send_action_requires_all_positions(follower):
     robot, _ = follower
     incomplete = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints if motor != "gripper"}
@@ -195,6 +224,71 @@ def test_send_action_clamps_gains_and_converts_positions(follower):
     # Gripper still gets its own (softer) default gain, same defense-in-depth path as arm joints.
     assert kwargs["k_gain"][5] == robot.config.default_k[5]
     assert kwargs["d_gain"][5] == robot.config.default_d[5]
+
+
+def _telemetry_at(present_pos: float, n: int = 6) -> dict:
+    return {
+        "timestamp_mono_ns": 0,
+        "present_pos": [present_pos] * n,
+        "present_vel": [0.0] * n,
+        "present_current_avg": [0.0] * n,
+        "pwm_cmd": [0.0] * n,
+        "ff_pwm": [0.0] * n,
+        "cerebellum_flags": 0,
+        "fault_flags": 0,
+        "supply_decivolts": 0,
+        "case_temp_c": 0,
+        "health_motor_id": 1,
+    }
+
+
+def test_send_action_anchors_to_the_followers_pose_on_first_call(follower):
+    """The first send_action after connect must land on the follower's OWN current pose, not
+    wherever the teleop device happens to read -- see the class docstring's clutch note.
+
+    Discovered 2026-09-24: a leader arm folded into a compact grip housing rests, by construction,
+    away from the geometric middle of several joints' travel -- and "0" in normalized units is
+    exactly that middle, not wherever the operator held the leader during calibration's centering
+    step. Without an anchor, every teleop session opened with the follower slamming from its parked
+    pose to the leader's absolute reading.
+    """
+    robot, shm_mock = follower
+    shm_mock.read_output.return_value = _telemetry_at(3000.0)  # far from the "0" pose
+
+    # The leader also reads far from 0 (its own natural grip pose), but the first commanded goal
+    # must be the follower's own current raw position, whatever the leader says.
+    far_action = {f"{motor}.pos": 80.0 for motor in robot.impedance_joints}
+    robot.send_action(far_action)
+    _, kwargs = shm_mock.write_input.call_args
+    assert kwargs["target_pos"] == pytest.approx([3000.0] * 6)
+
+    # A further +10 (the leader's own normalized units) should move the follower by the equivalent
+    # +10 from its anchored pose, not jump to this new absolute leader reading.
+    moved_action = {f"{motor}.pos": 90.0 for motor in robot.impedance_joints}
+    robot.send_action(moved_action)
+    _, kwargs = shm_mock.write_input.call_args
+    # DEGREES mode (arm joints): 1 degree == max_res/360 raw ticks (max_res=4095 here).
+    delta_arm_raw = 10.0 * 4095 / 360
+    # RANGE_0_100 mode (gripper): 1 percent == (range_max-range_min)/100 raw ticks.
+    delta_gripper_raw = 10.0 * 4095 / 100
+    expected = [3000.0 + delta_arm_raw] * 5 + [3000.0 + delta_gripper_raw]
+    assert kwargs["target_pos"] == pytest.approx(expected, rel=1e-6)
+
+
+def test_send_action_clutch_resets_on_reconnect(follower):
+    """A daemon restart or a fresh session mid-run must not carry the old anchor forward -- the
+    next send_action after reconnect has to re-anchor to wherever the follower actually is now."""
+    robot, shm_mock = follower
+    shm_mock.read_output.return_value = _telemetry_at(1000.0)
+    robot.send_action({f"{motor}.pos": 0.0 for motor in robot.impedance_joints})
+
+    robot.disconnect()
+    robot.connect(calibrate=False)
+    shm_mock.read_output.return_value = _telemetry_at(2500.0)
+    robot.send_action({f"{motor}.pos": 999.0 for motor in robot.impedance_joints})
+
+    _, kwargs = shm_mock.write_input.call_args
+    assert kwargs["target_pos"] == pytest.approx([2500.0] * 6)
 
 
 def test_configure_sets_pwm_and_torque_enable_for_all_motors(follower):
