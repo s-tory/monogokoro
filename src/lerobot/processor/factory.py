@@ -86,7 +86,7 @@ def robot_teleop_action_steps(robot: Any) -> list:
     """Extra teleop-pipeline steps a robot asks for, or none if it does not define any.
 
     Duck-typed on purpose: `record` and `teleoperate` should not have to import or know about every
-    robot whose teleop actions need rewriting (a clutch, gains a leader arm cannot supply).
+    robot whose teleop actions need rewriting (a handover ramp, gains a leader arm cannot supply).
     """
     hook = getattr(robot, "teleop_action_processor_steps", None)
     if hook is None:

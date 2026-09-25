@@ -27,7 +27,7 @@ from lerobot.processor import (
     ImpedanceGainDefaultsProcessorStep,
     PontineContextProcessorStep,
     RobotProcessorPipeline,
-    TeleopClutchProcessorStep,
+    TeleopHandoverRampProcessorStep,
 )
 from lerobot.processor.converters import (
     robot_action_observation_to_transition,
@@ -279,47 +279,82 @@ def test_send_action_applies_pos_as_an_absolute_target(follower):
     assert kwargs["target_pos"] == pytest.approx([2047.5] * 5 + [0.0])
 
 
-def test_recorded_action_is_the_target_the_follower_receives(follower):
-    """The record pipeline's output is written as the dataset's `action` and is also what
-    `send_action` gets. On 2026-09-25 the first recorded episode held the leader's pre-clutch
-    reading instead, a constant -22.55 deg from the state on wrist_roll, re-drawn on every connect.
-    """
+class _Clock:
+    """Stands in for `time.monotonic` inside the ramp step so its rate is checked exactly."""
+
+    def __init__(self):
+        self.t = 100.0
+
+    def __call__(self):
+        return self.t
+
+
+@pytest.fixture
+def clock():
+    c = _Clock()
+    with patch("lerobot.processor.teleop_handover_ramp_processor.time.monotonic", c):
+        yield c
+
+
+def _ramp_pipeline(rate: float = 10.0) -> tuple[TeleopHandoverRampProcessorStep, RobotProcessorPipeline]:
+    step = TeleopHandoverRampProcessorStep(joints=("a",), rate=rate)
+    return step, RobotProcessorPipeline(
+        steps=[step],
+        to_transition=robot_action_observation_to_transition,
+        to_output=transition_to_robot_action,
+    )
+
+
+def test_recorded_action_is_the_target_the_follower_receives(follower, clock):
+    """The teleop pipeline's output is written as the dataset's `action` and is also what
+    `send_action` gets. On 2026-09-25 a clutch inside `send_action` made the recorded action the
+    leader's pre-clutch reading, a constant -22.55 deg from the state on wrist_roll."""
     robot, shm_mock = follower
     pipeline = _teleop_pipeline(robot)
     follower_obs = {f"{motor}.pos": 12.0 for motor in robot.impedance_joints}
 
-    # The leader rests far from the follower (its own pistol-grip pose).
+    # The leader is far from the parked follower: the first target is the follower's own pose.
     recorded = pipeline(({f"{motor}.pos": 80.0 for motor in robot.impedance_joints}, follower_obs))
     assert all(recorded[f"{motor}.pos"] == pytest.approx(12.0) for motor in robot.impedance_joints)
-
-    # A later +10 on the leader moves the target +10 from the anchor, not to the leader's 90.
-    recorded = pipeline(({f"{motor}.pos": 90.0 for motor in robot.impedance_joints}, follower_obs))
-    assert all(recorded[f"{motor}.pos"] == pytest.approx(22.0) for motor in robot.impedance_joints)
 
     shm_mock.read_output.return_value = _telemetry_at(0.0)
     sent = robot.send_action(recorded)
     assert all(sent[f"{motor}.pos"] == recorded[f"{motor}.pos"] for motor in robot.impedance_joints)
 
 
-def test_clutch_reanchors_after_reset():
-    step = TeleopClutchProcessorStep(joints=("a",))
-    pipeline = RobotProcessorPipeline(
-        steps=[step],
-        to_transition=robot_action_observation_to_transition,
-        to_output=transition_to_robot_action,
-    )
-    pipeline(({"a.pos": 50.0}, {"a.pos": 1.0}))
+def test_ramp_moves_toward_the_leader_at_the_rate_then_follows_it_exactly(clock):
+    _, pipeline = _ramp_pipeline(rate=10.0)
+    assert pipeline(({"a.pos": 30.0}, {"a.pos": 0.0}))["a.pos"] == pytest.approx(0.0)
+
+    clock.t += 1.0
+    assert pipeline(({"a.pos": 30.0}, {"a.pos": 0.0}))["a.pos"] == pytest.approx(10.0)
+
+    clock.t += 2.5  # 25 more would overshoot the leader's 30: it lands on it and latches
+    assert pipeline(({"a.pos": 30.0}, {"a.pos": 0.0}))["a.pos"] == pytest.approx(30.0)
+
+    # Latched: a fast leader motion afterwards is passed through, not rate-limited.
+    clock.t += 0.01
+    assert pipeline(({"a.pos": -50.0}, {"a.pos": 0.0}))["a.pos"] == pytest.approx(-50.0)
+
+
+def test_ramp_chases_a_leader_that_moves_during_the_handover(clock):
+    _, pipeline = _ramp_pipeline(rate=10.0)
+    pipeline(({"a.pos": 30.0}, {"a.pos": 0.0}))
+    clock.t += 1.0
+    # The leader came back below the ramped target: the ramp turns around rather than overshooting.
+    assert pipeline(({"a.pos": -5.0}, {"a.pos": 0.0}))["a.pos"] == pytest.approx(-5.0)
+
+
+def test_ramp_starts_over_after_reset(clock):
+    step, pipeline = _ramp_pipeline()
+    pipeline(({"a.pos": 50.0}, {"a.pos": 50.0}))  # already level: latched on the first call
     step.reset()
     assert pipeline(({"a.pos": -30.0}, {"a.pos": 7.0}))["a.pos"] == pytest.approx(7.0)
 
 
-def test_clutch_refuses_to_anchor_without_the_followers_pose():
-    # Anchoring on a missing observation would silently use nothing as the follower's pose.
-    pipeline = RobotProcessorPipeline(
-        steps=[TeleopClutchProcessorStep(joints=("a",))],
-        to_transition=robot_action_observation_to_transition,
-        to_output=transition_to_robot_action,
-    )
+def test_ramp_refuses_to_start_without_the_followers_pose(clock):
+    # Starting from a missing observation would silently use nothing as the follower's pose.
+    _, pipeline = _ramp_pipeline()
     with pytest.raises(ValueError, match="missing"):
         pipeline(({"a.pos": 50.0}, {}))
 

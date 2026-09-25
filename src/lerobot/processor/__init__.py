@@ -100,7 +100,7 @@ from .relative_action_processor import (
     to_relative_actions,
 )
 from .rename_processor import RenameObservationsProcessorStep, rename_stats
-from .teleop_clutch_processor import TeleopClutchProcessorStep
+from .teleop_handover_ramp_processor import TeleopHandoverRampProcessorStep
 from .tokenizer_processor import ActionTokenizerProcessorStep, TokenizerProcessorStep
 
 # RenderMessagesStep is intentionally NOT re-exported here: it pulls in
@@ -117,7 +117,7 @@ __all__ = [
     "ComplementaryDataProcessorStep",
     "DEFAULT_IMPEDANCE_JOINTS",
     "ImpedanceGainDefaultsProcessorStep",
-    "TeleopClutchProcessorStep",
+    "TeleopHandoverRampProcessorStep",
     "batch_to_transition",
     "create_transition",
     "from_tensor_to_numpy",

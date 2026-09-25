@@ -78,10 +78,10 @@ class SO101ImpedanceFollower(Robot):
     likewise unconverted: `.pwm_cmd`/`.ff_pwm` are in the Rust loop's duty units, and
     `supply_decivolts` is in 0.1 V steps, as the name says.
 
-    `send_action` applies `.pos` as an absolute target. A leader arm's home does not match this
-    arm's, so teleoperation goes through `TeleopClutchProcessorStep`, which this robot requests via
-    `teleop_action_processor_steps()`. The clutch lived here until 2026-09-25 and made the recorded
-    `action` differ from the target actually sent; see that step's docstring.
+    `send_action` applies `.pos` as an absolute target. Teleoperation maps the leader onto it
+    absolutely too, through `TeleopHandoverRampProcessorStep` (requested via
+    `teleop_action_processor_steps()`), which only bounds how fast the follower closes the gap to the
+    leader when a session starts. See that step's docstring for why this replaced a clutch.
     """
 
     config_class = SO101ImpedanceFollowerRobotConfig
@@ -191,12 +191,12 @@ class SO101ImpedanceFollower(Robot):
         from lerobot.processor import (
             ImpedanceGainDefaultsProcessorStep,
             PontineContextProcessorStep,
-            TeleopClutchProcessorStep,
+            TeleopHandoverRampProcessorStep,
         )
 
         return [
-            # First, so the recorded `.pos` is the clutched target that `send_action` receives.
-            TeleopClutchProcessorStep(joints=self.impedance_joints),
+            # First, so the recorded `.pos` is the ramped target that `send_action` receives.
+            TeleopHandoverRampProcessorStep(joints=self.impedance_joints),
             ImpedanceGainDefaultsProcessorStep(
                 impedance_joints=self.impedance_joints,
                 default_k=tuple(self.config.default_k),
