@@ -264,6 +264,37 @@ pub fn apply_tendon_inhibition(pwm: f32, current_avg: f32, threshold: f32, gain:
     magnitude * pwm.signum()
 }
 
+/// The duty bound each joint's total command is clamped to: `--pwm-max`, lowered per joint by
+/// `--joint-pwm-max`. An empty list leaves every joint at `--pwm-max`.
+///
+/// Symmetric on purpose. The direction that closes the gripper depends on the calibration's drive
+/// mode, and a one-sided cap written for the wrong sign would limit the release instead of the grip.
+///
+/// Added for the gripper on 2026-09-25: a leader closed fully puts the target past where the jaw can
+/// close, so every squeeze saturated the duty; a chip held at +13 survived -42 for one frame and was
+/// broken by the time the ramp reached -156.
+pub fn joint_pwm_caps(pwm_max: f32, per_joint: &[f32]) -> Result<[f32; NUM_MOTORS], String> {
+    let mut caps = [pwm_max; NUM_MOTORS];
+    if per_joint.is_empty() {
+        return Ok(caps);
+    }
+    if per_joint.len() != NUM_MOTORS {
+        return Err(format!(
+            "--joint-pwm-max takes {NUM_MOTORS} values (one per motor), got {}",
+            per_joint.len()
+        ));
+    }
+    for (i, &v) in per_joint.iter().enumerate() {
+        if !v.is_finite() || v < 0.0 {
+            return Err(format!(
+                "--joint-pwm-max value {i} must be finite and >= 0, got {v}"
+            ));
+        }
+        caps[i] = v.min(pwm_max);
+    }
+    Ok(caps)
+}
+
 /// Where `present_pos` sits for the purpose of `--pos-min` / `--pos-max`.
 ///
 /// Those limits guard the encoder seam, and they only mean that in a frame where no joint's travel

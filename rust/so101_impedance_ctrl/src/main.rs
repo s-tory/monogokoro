@@ -15,8 +15,8 @@ use nix::unistd::{Gid, Uid};
 use so101_impedance_ctrl::cerebellum::{self, Backend, Cerebellum, CerebellumConfig, SensoryState};
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_startup_config, apply_tendon_inhibition, finite_difference_velocity,
-    first_outside_travel, impedance_pwm, input_is_fresh, log_supply_and_temperature,
-    poll_and_apply_commands, read_homing_offsets, read_position_frames,
+    first_outside_travel, impedance_pwm, input_is_fresh, joint_pwm_caps,
+    log_supply_and_temperature, poll_and_apply_commands, read_homing_offsets, read_position_frames,
     read_supply_and_temperature, read_travel_envelopes, release_all, soft_limit_position,
     wrapped_delta, MovingAverage, PositionFrame, PositionGate, TravelEnvelope,
 };
@@ -120,6 +120,12 @@ struct Cli {
 
     #[arg(long, default_value_t = 1000.0)]
     pwm_max: f32,
+
+    /// Per-motor duty cap, one comma-separated value per motor in ID order, each lowered to
+    /// `--pwm-max` if above it. Unset leaves every motor at `--pwm-max`. Bounds the total command,
+    /// feedforward included, in both directions. See `control::joint_pwm_caps`.
+    #[arg(long, value_delimiter = ',')]
+    joint_pwm_max: Vec<f32>,
 
     /// Bit position of the direction flag in the PWM command register.
     ///
@@ -689,6 +695,9 @@ fn main() {
         "--current-read-divisor must be >= 1 (1 = read Present_Current every tick)"
     );
 
+    let pwm_caps =
+        joint_pwm_caps(args.pwm_max, &args.joint_pwm_max).unwrap_or_else(|e| panic!("{e}"));
+
     let shmem = create_shm_reclaiming_stale(&args.shm_name);
     // SAFETY: the segment is exactly sized for `ShmLayout` and only this process writes the
     // header/`init_in_place` fields; Python only attaches after this daemon has started.
@@ -709,7 +718,7 @@ fn main() {
         "config: invert_pwm={} pwm_sign_bit={} loop_hz={} pwm_max={} sync_read={} current_read_divisor={} \
          vel_filter_window={} pos_limits=[{}, {}] max_blind_ticks={} max_pos_slew={} \
          watchdog_ms={} \
-         serial_timeout_ms={} tendon_inhibition_current={} tendon_inhibition_gain={}",
+         serial_timeout_ms={} tendon_inhibition_current={} tendon_inhibition_gain={} pwm_caps={:?}",
         args.invert_pwm,
         args.pwm_sign_bit,
         args.loop_hz,
@@ -725,6 +734,7 @@ fn main() {
         args.serial_timeout_ms,
         args.tendon_inhibition_current,
         args.tendon_inhibition_gain,
+        pwm_caps,
     );
     log::info!(
         "cerebellum config: backend={:?} gc_dim={} seed={:#x} hz={} rate={} leak={} cf_deadband={} sparsity={} \
@@ -1201,7 +1211,7 @@ fn main() {
                 // Re-clamped after the sum: each term is bounded on its own, and the total has to
                 // be too. Soft limits are applied last so they still veto a feedforward that would
                 // drive a joint further past its limit.
-                let total = (fb_pwm[i] + ff_pwm[i]).clamp(-args.pwm_max, args.pwm_max);
+                let total = (fb_pwm[i] + ff_pwm[i]).clamp(-pwm_caps[i], pwm_caps[i]);
                 // Ib inhibition goes between the clamp and the limits: it answers force where they
                 // answer position, and the comment above is why they have to stay last.
                 let folded = apply_tendon_inhibition(

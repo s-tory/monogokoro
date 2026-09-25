@@ -3,8 +3,8 @@
 
 use so101_impedance_ctrl::control::{
     apply_soft_limits, apply_tendon_inhibition, finite_difference_velocity, first_implausible_step,
-    first_outside_travel, impedance_pwm, input_is_fresh, soft_limit_position, MovingAverage,
-    PositionFrame, PositionGate, TravelEnvelope, TravelVerdict,
+    first_outside_travel, impedance_pwm, input_is_fresh, joint_pwm_caps, soft_limit_position,
+    MovingAverage, PositionFrame, PositionGate, TravelEnvelope, TravelVerdict,
 };
 
 /// One tick's worth of budget at the shipped defaults: 20000 counts/s at 400 Hz.
@@ -666,4 +666,23 @@ fn without_an_offset_or_a_frame_the_raw_rule_stands() {
         100.0
     );
     assert_eq!(soft_limit_position(100.0, Some(-1294.0), None), 100.0);
+}
+
+#[test]
+fn joint_pwm_caps_default_to_pwm_max() {
+    assert_eq!(joint_pwm_caps(1000.0, &[]).unwrap(), [1000.0; 6]);
+}
+
+#[test]
+fn joint_pwm_caps_lower_only_the_named_joint_and_never_exceed_pwm_max() {
+    let caps = joint_pwm_caps(1000.0, &[2000.0, 1000.0, 1000.0, 1000.0, 1000.0, 40.0]).unwrap();
+    assert_eq!(caps, [1000.0, 1000.0, 1000.0, 1000.0, 1000.0, 40.0]);
+}
+
+#[test]
+fn joint_pwm_caps_reject_a_wrong_count_or_a_bad_value() {
+    // Five values would silently shift every cap one motor over if it were accepted.
+    assert!(joint_pwm_caps(1000.0, &[40.0; 5]).is_err());
+    assert!(joint_pwm_caps(1000.0, &[1000.0, 1000.0, 1000.0, 1000.0, 1000.0, -1.0]).is_err());
+    assert!(joint_pwm_caps(1000.0, &[1000.0, 1000.0, 1000.0, 1000.0, 1000.0, f32::NAN]).is_err());
 }

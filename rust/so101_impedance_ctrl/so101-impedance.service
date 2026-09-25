@@ -71,8 +71,13 @@ ExecStart=/home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/target/release/s
     --cerebellum-backend gpu \
     --cerebellum-cpu-core 1 \
     --cerebellum-cf-deadband 8 \
-    --cerebellum-weights /home/s-tory/.local/share/so101/cerebellum.bin
+    --cerebellum-weights /home/s-tory/.local/share/so101/cerebellum.bin \
+    --joint-pwm-max 1000,1000,1000,1000,1000,40
 
+# The gripper's 40 is a trial, not a measurement. On 2026-09-25 a chip survived -42 for one frame
+# and was broken by the time the duty reached -156; whether 40 still holds a chip without dropping
+# it is what the trial is for. The other joints sit at --pwm-max's 1000, i.e. uncapped.
+#
 # The cerebellum is on, because the shipped gains assume it: on 2026-09-17 wrist_flex was tuned
 # blind to K=1.3 with it running, and with it off the same K leaves the wrist wherever it is pushed
 # upward. Turn it off and raise wrist_flex to 2.0 (the lowest value that returned without it).
