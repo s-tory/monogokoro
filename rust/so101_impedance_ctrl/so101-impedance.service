@@ -26,9 +26,13 @@ Description=SO-101 impedance control daemon (realtime, isolated core)
 Documentation=file:///home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/README.md
 Documentation=file:///home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/PREEMPT_RT.md
 
-# The serial device must exist, but "an ACM device is present" is not "the arm is present" --
-# numbering follows plug order. This orders the start; it does not verify what is on the other end.
-After=dev-ttyACM0.device
+# The follower's USB-serial adapter, by serial number. /dev/ttyACMn follows plug order, and on
+# 2026-09-25 a re-enumeration moved the follower to ttyACM1 and the leader onto ttyACM1's old slot.
+# BindsTo stops the daemon when the adapter disappears. Without it the daemon kept the dead ttyACM0
+# open and reported active (running) for 30 minutes while every tick failed (400 comms errors/s).
+# A different adapter means a different serial here: ls -l /dev/serial/by-id/
+BindsTo=dev-serial-by\x2did-usb\x2d1a86_USB_Single_Serial_5B42076600\x2dif00.device
+After=dev-serial-by\x2did-usb\x2d1a86_USB_Single_Serial_5B42076600\x2dif00.device
 
 [Service]
 Type=simple
@@ -60,7 +64,7 @@ LogRateLimitIntervalSec=0
 
 WorkingDirectory=/home/s-tory/git/monogokoro/rust/so101_impedance_ctrl
 ExecStart=/home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/target/release/so101_impedance_ctrl \
-    --port /dev/ttyACM0 \
+    --port /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B42076600-if00 \
     --shm-name so101_impedance \
     --cpu-core 3 \
     --priority 99 \
@@ -91,9 +95,9 @@ Restart=no
 [Install]
 # Intentionally empty -- `systemctl enable` fails with "no installation config", which is the
 # point. Starting at boot means the arm takes torque with nobody watching, and a human watching
-# the arm has already stopped a run that no telemetry threshold caught. Two other things are
+# the arm has already stopped a run that no telemetry threshold caught. Something else is
 # unresolved on this rig: the supply collapses below the servos' undervoltage limit under
-# six-motor load, and /dev/ttyACM0 is whatever enumerated first.
+# six-motor load.
 #
 # When those are settled and someone has decided what conditions make an unattended arm
 # acceptable, add:
