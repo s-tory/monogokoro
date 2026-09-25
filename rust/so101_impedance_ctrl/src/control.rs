@@ -264,11 +264,8 @@ pub fn apply_tendon_inhibition(pwm: f32, current_avg: f32, threshold: f32, gain:
     magnitude * pwm.signum()
 }
 
-/// The duty bound each joint's total command is clamped to: `--pwm-max`, lowered per joint by
-/// `--joint-pwm-max`. An empty list leaves every joint at `--pwm-max`.
-///
-/// Symmetric on purpose. The direction that closes the gripper depends on the calibration's drive
-/// mode, and a one-sided cap written for the wrong sign would limit the release instead of the grip.
+/// Per-joint duty bounds: `pwm_max`, lowered joint by joint by `per_joint`. An empty list leaves
+/// every joint at `pwm_max`. The daemon calls this once for each direction of travel.
 ///
 /// Added for the gripper on 2026-09-25: a leader closed fully puts the target past where the jaw can
 /// close, so every squeeze saturated the duty; a chip held at +13 survived -42 for one frame and was

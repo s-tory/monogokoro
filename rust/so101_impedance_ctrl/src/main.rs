@@ -123,9 +123,17 @@ struct Cli {
 
     /// Per-motor duty cap, one comma-separated value per motor in ID order, each lowered to
     /// `--pwm-max` if above it. Unset leaves every motor at `--pwm-max`. Bounds the total command,
-    /// feedforward included, in both directions. See `control::joint_pwm_caps`.
+    /// feedforward included. Applies in both directions unless `--joint-pwm-max-increasing` is
+    /// given. See `control::joint_pwm_caps`.
     #[arg(long, value_delimiter = ',')]
     joint_pwm_max: Vec<f32>,
+
+    /// Replaces `--joint-pwm-max` for the direction that increases position (positive duty), in the
+    /// same format. Which physical motion that is depends on the calibration's drive mode, so check
+    /// it on the arm: on 2026-09-25, on this unit, closing the gripper was negative duty (the jaw
+    /// closed while the command sat at -40), so opening is the direction this names.
+    #[arg(long, value_delimiter = ',')]
+    joint_pwm_max_increasing: Vec<f32>,
 
     /// Bit position of the direction flag in the PWM command register.
     ///
@@ -697,6 +705,12 @@ fn main() {
 
     let pwm_caps =
         joint_pwm_caps(args.pwm_max, &args.joint_pwm_max).unwrap_or_else(|e| panic!("{e}"));
+    let pwm_caps_increasing = if args.joint_pwm_max_increasing.is_empty() {
+        pwm_caps
+    } else {
+        joint_pwm_caps(args.pwm_max, &args.joint_pwm_max_increasing)
+            .unwrap_or_else(|e| panic!("--joint-pwm-max-increasing: {e}"))
+    };
 
     let shmem = create_shm_reclaiming_stale(&args.shm_name);
     // SAFETY: the segment is exactly sized for `ShmLayout` and only this process writes the
@@ -718,7 +732,7 @@ fn main() {
         "config: invert_pwm={} pwm_sign_bit={} loop_hz={} pwm_max={} sync_read={} current_read_divisor={} \
          vel_filter_window={} pos_limits=[{}, {}] max_blind_ticks={} max_pos_slew={} \
          watchdog_ms={} \
-         serial_timeout_ms={} tendon_inhibition_current={} tendon_inhibition_gain={} pwm_caps={:?}",
+         serial_timeout_ms={} tendon_inhibition_current={} tendon_inhibition_gain={} pwm_caps={:?} pwm_caps_increasing={:?}",
         args.invert_pwm,
         args.pwm_sign_bit,
         args.loop_hz,
@@ -735,6 +749,7 @@ fn main() {
         args.tendon_inhibition_current,
         args.tendon_inhibition_gain,
         pwm_caps,
+        pwm_caps_increasing,
     );
     log::info!(
         "cerebellum config: backend={:?} gc_dim={} seed={:#x} hz={} rate={} leak={} cf_deadband={} sparsity={} \
@@ -1211,7 +1226,7 @@ fn main() {
                 // Re-clamped after the sum: each term is bounded on its own, and the total has to
                 // be too. Soft limits are applied last so they still veto a feedforward that would
                 // drive a joint further past its limit.
-                let total = (fb_pwm[i] + ff_pwm[i]).clamp(-pwm_caps[i], pwm_caps[i]);
+                let total = (fb_pwm[i] + ff_pwm[i]).clamp(-pwm_caps[i], pwm_caps_increasing[i]);
                 // Ib inhibition goes between the clamp and the limits: it answers force where they
                 // answer position, and the comment above is why they have to stay last.
                 let folded = apply_tendon_inhibition(
