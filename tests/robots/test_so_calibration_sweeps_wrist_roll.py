@@ -44,6 +44,7 @@ def _stub(cls):
     bus.motors = {
         name: Motor(i + 1, "sts3215", MotorNormMode.RANGE_M100_100) for i, name in enumerate(JOINTS)
     }
+    bus.model_resolution_table = {"sts3215": 4096}
     bus.set_half_turn_homings.return_value = dict.fromkeys(JOINTS, 2048)
     bus.record_ranges_of_motion.return_value = (dict(SWEPT_MINS), dict(SWEPT_MAXES))
     return SimpleNamespace(
@@ -100,3 +101,23 @@ def test_a_joint_that_really_spins_still_reports_full_travel(cls):
 
     roll = stub.calibration["wrist_roll"]
     assert (roll.range_min, roll.range_max) == (0, 4095)
+
+
+@pytest.mark.parametrize("cls", [SOFollower, SOLeader])
+def test_wrist_roll_is_zeroed_on_the_middle_of_its_travel_not_on_the_enter_pose(cls):
+    """ENTER held 90 deg off the travel's middle: the travel crosses the encoder seam, and without
+    unwrapping it records 0-4095 and the ENTER pose becomes the zero. On 2026-09-25 that put the
+    leader's and follower's wrist_roll zeros visibly apart."""
+    stub = _stub(cls)
+    # The same 3868-count travel as above, seen from a homing 613 counts off its middle.
+    stub.bus.record_ranges_of_motion.return_value = (
+        dict(SWEPT_MINS) | {"wrist_roll": -500},
+        dict(SWEPT_MAXES) | {"wrist_roll": 3368},
+    )
+    with patch("builtins.input", return_value=""):
+        cls.calibrate(stub)
+
+    (_, kwargs) = stub.bus.record_ranges_of_motion.call_args
+    assert "wrist_roll" in kwargs["unwrap"]
+    roll = stub.calibration["wrist_roll"]
+    assert (roll.homing_offset, roll.range_min, roll.range_max) == (2048 - 613, 113, 3981)
