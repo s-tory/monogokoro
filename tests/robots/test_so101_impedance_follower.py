@@ -23,7 +23,16 @@ pytest.importorskip("datasets", reason="datasets is required (install lerobot[da
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.motors import MotorCalibration
 from lerobot.motors.feetech import OperatingMode
-from lerobot.processor import ImpedanceGainDefaultsProcessorStep, PontineContextProcessorStep
+from lerobot.processor import (
+    ImpedanceGainDefaultsProcessorStep,
+    PontineContextProcessorStep,
+    RobotProcessorPipeline,
+    TeleopClutchProcessorStep,
+)
+from lerobot.processor.converters import (
+    robot_action_observation_to_transition,
+    transition_to_robot_action,
+)
 from lerobot.robots.so101_impedance_follower import (
     SO101ImpedanceFollower,
     SO101ImpedanceFollowerRobotConfig,
@@ -242,53 +251,77 @@ def _telemetry_at(present_pos: float, n: int = 6) -> dict:
     }
 
 
-def test_send_action_anchors_to_the_followers_pose_on_first_call(follower):
-    """The first send_action after connect must land on the follower's OWN current pose, not
-    wherever the teleop device happens to read -- see the class docstring's clutch note.
+def _step_of(robot, step_type):
+    (step,) = (s for s in robot.teleop_action_processor_steps() if isinstance(s, step_type))
+    return step
 
-    Discovered 2026-09-24: a leader arm folded into a compact grip housing rests, by construction,
-    away from the geometric middle of several joints' travel -- and "0" in normalized units is
-    exactly that middle, not wherever the operator held the leader during calibration's centering
-    step. Without an anchor, every teleop session opened with the follower slamming from its parked
-    pose to the leader's absolute reading.
-    """
+
+def _teleop_pipeline(robot) -> RobotProcessorPipeline:
+    # The shape `lerobot-record` builds: the robot's steps, fed `(teleop action, observation)`.
+    return RobotProcessorPipeline(
+        steps=robot.teleop_action_processor_steps(),
+        to_transition=robot_action_observation_to_transition,
+        to_output=transition_to_robot_action,
+    )
+
+
+def test_send_action_applies_pos_as_an_absolute_target(follower):
+    """A policy's output reaches `send_action` without any teleop step in between, so the robot
+    itself must not re-reference it. Until 2026-09-25 the clutch lived here and offset the first
+    policy action, too."""
     robot, shm_mock = follower
-    shm_mock.read_output.return_value = _telemetry_at(3000.0)  # far from the "0" pose
+    shm_mock.read_output.return_value = _telemetry_at(3000.0)
 
-    # The leader also reads far from 0 (its own natural grip pose), but the first commanded goal
-    # must be the follower's own current raw position, whatever the leader says.
-    far_action = {f"{motor}.pos": 80.0 for motor in robot.impedance_joints}
-    robot.send_action(far_action)
-    _, kwargs = shm_mock.write_input.call_args
-    assert kwargs["target_pos"] == pytest.approx([3000.0] * 6)
-
-    # A further +10 (the leader's own normalized units) should move the follower by the equivalent
-    # +10 from its anchored pose, not jump to this new absolute leader reading.
-    moved_action = {f"{motor}.pos": 90.0 for motor in robot.impedance_joints}
-    robot.send_action(moved_action)
-    _, kwargs = shm_mock.write_input.call_args
-    # DEGREES mode (arm joints): 1 degree == max_res/360 raw ticks (max_res=4095 here).
-    delta_arm_raw = 10.0 * 4095 / 360
-    # RANGE_0_100 mode (gripper): 1 percent == (range_max-range_min)/100 raw ticks.
-    delta_gripper_raw = 10.0 * 4095 / 100
-    expected = [3000.0 + delta_arm_raw] * 5 + [3000.0 + delta_gripper_raw]
-    assert kwargs["target_pos"] == pytest.approx(expected, rel=1e-6)
-
-
-def test_send_action_clutch_resets_on_reconnect(follower):
-    """A daemon restart or a fresh session mid-run must not carry the old anchor forward -- the
-    next send_action after reconnect has to re-anchor to wherever the follower actually is now."""
-    robot, shm_mock = follower
-    shm_mock.read_output.return_value = _telemetry_at(1000.0)
     robot.send_action({f"{motor}.pos": 0.0 for motor in robot.impedance_joints})
 
-    robot.disconnect()
-    robot.connect(calibrate=False)
-    shm_mock.read_output.return_value = _telemetry_at(2500.0)
-    robot.send_action({f"{motor}.pos": 999.0 for motor in robot.impedance_joints})
-
     _, kwargs = shm_mock.write_input.call_args
-    assert kwargs["target_pos"] == pytest.approx([2500.0] * 6)
+    # 0 in both DEGREES and RANGE_0_100 has a closed form under the fixture's [0, 4095] range.
+    assert kwargs["target_pos"] == pytest.approx([2047.5] * 5 + [0.0])
+
+
+def test_recorded_action_is_the_target_the_follower_receives(follower):
+    """The record pipeline's output is written as the dataset's `action` and is also what
+    `send_action` gets. On 2026-09-25 the first recorded episode held the leader's pre-clutch
+    reading instead, a constant -22.55 deg from the state on wrist_roll, re-drawn on every connect.
+    """
+    robot, shm_mock = follower
+    pipeline = _teleop_pipeline(robot)
+    follower_obs = {f"{motor}.pos": 12.0 for motor in robot.impedance_joints}
+
+    # The leader rests far from the follower (its own pistol-grip pose).
+    recorded = pipeline(({f"{motor}.pos": 80.0 for motor in robot.impedance_joints}, follower_obs))
+    assert all(recorded[f"{motor}.pos"] == pytest.approx(12.0) for motor in robot.impedance_joints)
+
+    # A later +10 on the leader moves the target +10 from the anchor, not to the leader's 90.
+    recorded = pipeline(({f"{motor}.pos": 90.0 for motor in robot.impedance_joints}, follower_obs))
+    assert all(recorded[f"{motor}.pos"] == pytest.approx(22.0) for motor in robot.impedance_joints)
+
+    shm_mock.read_output.return_value = _telemetry_at(0.0)
+    sent = robot.send_action(recorded)
+    assert all(sent[f"{motor}.pos"] == recorded[f"{motor}.pos"] for motor in robot.impedance_joints)
+
+
+def test_clutch_reanchors_after_reset():
+    step = TeleopClutchProcessorStep(joints=("a",))
+    pipeline = RobotProcessorPipeline(
+        steps=[step],
+        to_transition=robot_action_observation_to_transition,
+        to_output=transition_to_robot_action,
+    )
+    pipeline(({"a.pos": 50.0}, {"a.pos": 1.0}))
+    step.reset()
+    assert pipeline(({"a.pos": -30.0}, {"a.pos": 7.0}))["a.pos"] == pytest.approx(7.0)
+
+
+def test_clutch_refuses_to_anchor_without_the_followers_pose():
+    # Anchoring on a missing observation would silently use nothing as the follower's pose.
+    pipeline = RobotProcessorPipeline(
+        steps=[TeleopClutchProcessorStep(joints=("a",))],
+        to_transition=robot_action_observation_to_transition,
+        to_output=transition_to_robot_action,
+    )
+    with pytest.raises(ValueError, match="missing"):
+        pipeline(({"a.pos": 50.0}, {}))
 
 
 def test_configure_sets_pwm_and_torque_enable_for_all_motors(follower):
@@ -327,7 +360,7 @@ def test_teleop_action_processor_steps_seeds_gains_from_the_robots_own_config():
     )
     robot = SO101ImpedanceFollower(config)
 
-    step, _ = robot.teleop_action_processor_steps()
+    step = _step_of(robot, ImpedanceGainDefaultsProcessorStep)
 
     assert isinstance(step, ImpedanceGainDefaultsProcessorStep)
     assert step.impedance_joints == robot.impedance_joints
@@ -340,11 +373,10 @@ def test_teleop_action_processor_steps_fill_every_recorded_action_dimension():
     # wide. The gap is exactly what these steps close, and they have to close it here rather than
     # in `send_action`, which runs after the frame is written.
     robot = SO101ImpedanceFollower(SO101ImpedanceFollowerRobotConfig(shm_name="unused"))
-    steps = robot.teleop_action_processor_steps()
+    pipeline = _teleop_pipeline(robot)
 
-    filled = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
-    for step in steps:
-        filled = step.action(filled)
+    leader = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
+    filled = pipeline((leader, dict(leader)))
 
     assert set(filled) == set(robot.action_features)
     assert len(filled) == 18 + NUM_CONTEXT
@@ -353,7 +385,7 @@ def test_teleop_action_processor_steps_fill_every_recorded_action_dimension():
 def test_teleop_action_processor_steps_do_not_override_supplied_gains():
     # During policy rollout the action already carries predicted K/D; the step must leave those be.
     robot = SO101ImpedanceFollower(SO101ImpedanceFollowerRobotConfig(shm_name="unused"))
-    step, _ = robot.teleop_action_processor_steps()
+    step = _step_of(robot, ImpedanceGainDefaultsProcessorStep)
 
     action = {f"{motor}.pos": 0.0 for motor in robot.impedance_joints}
     action["gripper.k"] = 99.0
@@ -440,7 +472,7 @@ def test_teleop_action_processor_steps_seed_context_from_the_robots_own_config()
     config = SO101ImpedanceFollowerRobotConfig(shm_name="unused", pontine_context=(1.0, 0.0))
     robot = SO101ImpedanceFollower(config)
 
-    _, context_step = robot.teleop_action_processor_steps()
+    context_step = _step_of(robot, PontineContextProcessorStep)
 
     assert isinstance(context_step, PontineContextProcessorStep)
     assert context_step.context == (1.0, 0.0)
@@ -454,7 +486,7 @@ def test_teleop_action_processor_steps_seed_the_context_cycle():
     )
     robot = SO101ImpedanceFollower(config)
 
-    _, context_step = robot.teleop_action_processor_steps()
+    context_step = _step_of(robot, PontineContextProcessorStep)
 
     assert context_step.cycle == ((1.0, 0.0), (-1.0, 0.0))
     # The cycle wins over `pontine_context`, which was left at its neutral default here.

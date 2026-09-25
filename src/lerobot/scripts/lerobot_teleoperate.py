@@ -83,6 +83,7 @@ from lerobot.processor import (
     RobotObservation,
     RobotProcessorPipeline,
     make_default_processors,
+    robot_teleop_action_steps,
 )
 from lerobot.robots import (  # noqa: F401
     Robot,
@@ -267,6 +268,9 @@ def teleoperate(cfg: TeleoperateConfig):
     teleop = make_teleoperator_from_config(cfg.teleop)
     robot = make_robot_from_config(cfg.robot)
     teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
+    # Same as `lerobot-record`: a robot whose teleop actions need rewriting (a clutch, for one) asks
+    # for it, and teleoperating without those steps would drive it differently from recording.
+    teleop_action_processor.steps = [*robot_teleop_action_steps(robot), *teleop_action_processor.steps]
 
     teleop.connect()
     robot.connect()

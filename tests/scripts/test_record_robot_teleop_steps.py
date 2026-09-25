@@ -20,7 +20,7 @@ import pytest
 
 pytest.importorskip("datasets", reason="lerobot.scripts.lerobot_record requires the `dataset` extra")
 
-from lerobot.scripts.lerobot_record import _robot_teleop_action_steps  # noqa: E402
+from lerobot.processor import robot_teleop_action_steps  # noqa: E402
 
 
 class _PlainRobot:
@@ -34,17 +34,17 @@ class _HookedRobot:
 
 def test_robot_without_the_hook_contributes_no_steps():
     # The hook is duck-typed, so the common case must be a robot that simply does not define it.
-    assert _robot_teleop_action_steps(_PlainRobot()) == []
+    assert robot_teleop_action_steps(_PlainRobot()) == []
 
 
 def test_robot_with_the_hook_contributes_its_steps():
-    assert _robot_teleop_action_steps(_HookedRobot()) == ["step-a", "step-b"]
+    assert robot_teleop_action_steps(_HookedRobot()) == ["step-a", "step-b"]
 
 
 def test_returned_steps_are_a_fresh_list():
     # `record` splices these into a pipeline; handing back the robot's own container would let one
     # recording session mutate what the next one gets.
     robot = _HookedRobot()
-    steps = _robot_teleop_action_steps(robot)
+    steps = robot_teleop_action_steps(robot)
     steps.append("mutated")
-    assert _robot_teleop_action_steps(robot) == ["step-a", "step-b"]
+    assert robot_teleop_action_steps(robot) == ["step-a", "step-b"]

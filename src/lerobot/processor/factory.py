@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -79,6 +80,26 @@ def make_default_processors():
     robot_action_processor = make_default_robot_action_processor()
     robot_observation_processor = make_default_robot_observation_processor()
     return (teleop_action_processor, robot_action_processor, robot_observation_processor)
+
+
+def robot_teleop_action_steps(robot: Any) -> list:
+    """Extra teleop-pipeline steps a robot asks for, or none if it does not define any.
+
+    Duck-typed on purpose: `record` and `teleoperate` should not have to import or know about every
+    robot whose teleop actions need rewriting (a clutch, gains a leader arm cannot supply).
+    """
+    hook = getattr(robot, "teleop_action_processor_steps", None)
+    if hook is None:
+        return []
+    steps = list(hook())
+    if steps:
+        logging.info(
+            "%s requested %d extra teleop action step(s): %s",
+            robot,
+            len(steps),
+            ", ".join(type(step).__name__ for step in steps),
+        )
+    return steps
 
 
 @dataclass

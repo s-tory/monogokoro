@@ -50,6 +50,7 @@ from .factory import (
     make_default_robot_observation_processor,
     make_default_teleop_action_processor,
     make_policy_processor_pipelines,
+    robot_teleop_action_steps,
 )
 from .gym_action_processor import (
     Numpy2TorchActionProcessorStep,
@@ -99,6 +100,7 @@ from .relative_action_processor import (
     to_relative_actions,
 )
 from .rename_processor import RenameObservationsProcessorStep, rename_stats
+from .teleop_clutch_processor import TeleopClutchProcessorStep
 from .tokenizer_processor import ActionTokenizerProcessorStep, TokenizerProcessorStep
 
 # RenderMessagesStep is intentionally NOT re-exported here: it pulls in
@@ -115,6 +117,7 @@ __all__ = [
     "ComplementaryDataProcessorStep",
     "DEFAULT_IMPEDANCE_JOINTS",
     "ImpedanceGainDefaultsProcessorStep",
+    "TeleopClutchProcessorStep",
     "batch_to_transition",
     "create_transition",
     "from_tensor_to_numpy",
@@ -141,6 +144,7 @@ __all__ = [
     "make_default_policy_processor_steps",
     "make_default_pre_post_processors",
     "make_default_processors",
+    "robot_teleop_action_steps",
     "make_default_teleop_action_processor",
     "make_default_robot_action_processor",
     "make_default_robot_observation_processor",

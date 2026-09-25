@@ -114,6 +114,7 @@ from lerobot.processor import (
     RobotObservation,
     RobotProcessorPipeline,
     make_default_processors,
+    robot_teleop_action_steps,
 )
 from lerobot.robots import (  # noqa: F401
     Robot,
@@ -379,30 +380,10 @@ def record_loop(
         timestamp = time.perf_counter() - start_episode_t
 
 
-def _robot_teleop_action_steps(robot: Robot) -> list:
-    """Extra teleop-pipeline steps a robot asks for, or none if it does not define any.
-
-    Duck-typed on purpose: `record` should not have to import or know about every robot that has
-    action dimensions its teleoperator cannot supply.
-    """
-    hook = getattr(robot, "teleop_action_processor_steps", None)
-    if hook is None:
-        return []
-    steps = list(hook())
-    if steps:
-        logging.info(
-            "%s requested %d extra teleop action step(s): %s",
-            robot,
-            len(steps),
-            ", ".join(type(step).__name__ for step in steps),
-        )
-    return steps
-
-
 def _context_cycling_steps(pipeline) -> list:
     """Steps in a pipeline that want to be advanced to their next context between episodes.
 
-    Duck-typed for the same reason as `_robot_teleop_action_steps`: `record` should not have to
+    Duck-typed for the same reason as `robot_teleop_action_steps`: `record` should not have to
     know which robots declare a context to a layer below the policy, only that a step may ask to
     be advanced once an episode is kept.
     """
@@ -449,7 +430,7 @@ def record(
         # empty columns. Asked of the robot rather than branched on its type, so this stays
         # robot-agnostic. Only for the pipelines we built: a caller who passed their own owns it.
         if teleop_action_processor is None:
-            _t.steps = [*_robot_teleop_action_steps(robot), *_t.steps]
+            _t.steps = [*robot_teleop_action_steps(robot), *_t.steps]
         teleop_action_processor = teleop_action_processor or _t
         robot_action_processor = robot_action_processor or _r
         robot_observation_processor = robot_observation_processor or _o
@@ -602,6 +583,16 @@ def record(
                     dataset.clear_episode_buffer()
                     timer.log_episode_summary("discarded episode")
                     timer.restart()
+                    continue
+
+                if not dataset.has_pending_frames():
+                    # An episode can end before its first frame: a key that sets `exit_early`
+                    # between two loops (for one, while the previous episode is still being
+                    # encoded) is only consumed when the next `record_loop` checks it, before its
+                    # first frame. On 2026-09-25 saving that empty buffer raised and ended the
+                    # session; which key and when was not established.
+                    logging.warning("Episode %d ended with no frames; not saved.", episode_index)
+                    events["salience"] = None
                     continue
 
                 dataset.save_episode()
