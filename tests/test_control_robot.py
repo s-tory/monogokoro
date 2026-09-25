@@ -223,3 +223,39 @@ def test_record_loop_without_a_teleoperator_paces_and_terminates():
 
     # 0.1 s at 30 Hz is 3 ticks; the upper bound is what proves the phase was paced.
     assert 1 <= calls <= 6
+
+
+def test_a_key_during_the_reset_does_not_relabel_the_episode(tmp_path):
+    """On 2026-09-25 an episode ended on `g`, `q` was pressed during the (silent) reset, and the
+    episode was saved tagged `q`. The tag has to be the key that ended the episode."""
+    from lerobot.scripts import lerobot_record
+    from lerobot.utils.salience import GOOD, QUIT, read_salience
+
+    real_record_loop = lerobot_record.record_loop
+
+    def keyed_record_loop(*args, events, dataset=None, **kwargs):
+        real_record_loop(*args, events=events, dataset=dataset, **kwargs)
+        if dataset is not None:
+            events["salience"] = GOOD  # `g` ends the episode
+        else:
+            events["salience"] = QUIT  # `q` during the reset
+            events["stop_recording"] = True
+
+    dataset_cfg = DatasetRecordConfig(
+        repo_id=DUMMY_REPO_ID,
+        single_task="Dummy task",
+        root=tmp_path / "record",
+        num_episodes=2,
+        episode_time_s=0.1,
+        reset_time_s=0.1,
+        push_to_hub=False,
+    )
+    cfg = RecordConfig(
+        robot=MockRobotConfig(), dataset=dataset_cfg, teleop=MockTeleopConfig(), play_sounds=False
+    )
+
+    with patch.object(lerobot_record, "record_loop", keyed_record_loop):
+        dataset = record(cfg)
+
+    assert dataset.meta.total_episodes == 1
+    assert read_salience(tmp_path / "record") == [GOOD]

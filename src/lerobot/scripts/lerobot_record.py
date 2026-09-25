@@ -554,6 +554,14 @@ def record(
                     timer=timer,
                 )
 
+                # Latched here, before the reset: the tag is the key that ended *this* episode. Every
+                # key also writes `events["salience"]`, so reading it after the reset let a key
+                # pressed during the reset relabel the episode already recorded. On 2026-09-25 an
+                # episode ended on `g`, `q` was pressed during a silent reset (sounds off), and the
+                # episode was saved as `Q`. A key during the reset now only ends the reset.
+                episode_salience = events["salience"]
+                events["salience"] = None
+
                 # Execute a few seconds without recording to give time to manually reset the environment
                 # Skip reset for the last episode to be recorded
                 if not events["stop_recording"] and (
@@ -601,7 +609,7 @@ def record(
                 # discarded episode can leave a line behind. `UNLABELLED` is what an episode
                 # that ended on the clock gets -- nobody judged it, and saying "ordinary"
                 # for it would be inventing the judgement.
-                append_salience(dataset.root, events["salience"] or UNLABELLED)
+                append_salience(dataset.root, episode_salience or UNLABELLED)
                 events["salience"] = None
                 recorded_episodes += 1
                 # Only after the episode is kept: a re-record takes the `continue` above and must

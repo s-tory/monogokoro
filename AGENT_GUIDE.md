@@ -266,7 +266,10 @@ at that moment, not a property of the frames.
 
 The tags land in `salience.txt` beside the dataset, one line per episode in recording order.
 An episode that runs out the clock with no key pressed is written `?`, which states that
-nobody judged it. How training should use the tags is not settled yet.
+nobody judged it. A key pressed during the reset that follows only ends the reset; it does not
+tag the episode before it. With `--play_sounds=false` nothing announces the reset, so the
+terminal's `Reset the environment` line is the only sign of it. How training should use the tags
+is not settled yet.
 
 ### 5.6 Start small, then extend (the golden rule)
 
