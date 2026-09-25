@@ -141,7 +141,7 @@ def unwrap_step(prev: int, curr: int, resolution: int) -> int:
 
 
 def center_homing_on_travel(
-    homing_offset: int, travel_min: int, travel_max: int, resolution: int
+    homing_offset: float, travel_min: float, travel_max: float, resolution: int
 ) -> tuple[int, int, int] | None:
     """Re-home a joint so the middle of its swept travel reads one half-turn.
 
@@ -156,14 +156,14 @@ def center_homing_on_travel(
     follower `wrist_roll` zeros disagreed visibly while every joint whose travel did not cross the
     seam agreed. Feetech convention: `Present_Position = Actual_Position - Homing_Offset`.
     """
-    span = travel_max - travel_min
+    span = round(travel_max - travel_min)
     if span >= resolution - 1:
         return None
     half = resolution // 2 - 1
     shift = round((travel_min + travel_max) / 2) - half
     # Sign-magnitude register: keep the offset within one turn of zero. A shift by whole turns does
     # not change the reported position, which the servo already reports modulo one turn.
-    new_offset = (homing_offset + shift + half) % resolution - half
+    new_offset = (round(homing_offset) + shift + half) % resolution - half
     new_min = half - span // 2
     return new_offset, new_min, new_min + span
 
