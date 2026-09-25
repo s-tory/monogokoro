@@ -155,18 +155,16 @@ def apply_recording_control(control: str, events: dict) -> None:
     """Apply a recording control-flow key press to the shared ``events`` dict.
 
     Centralizes the mapping so the ``pynput`` and terminal backends behave
-    identically. ``control`` is one of ``"right"`` (end the loop early), ``"left"``
+    identically. Prints nothing: every key reaches here as one of three controls, so a message
+    here could only name the control, and it named the arrow key even when ``g`` was pressed. ``control`` is one of ``"right"`` (end the loop early), ``"left"``
     (re-record the last episode), or ``"esc"`` (stop recording).
     """
     if control == "right":
-        print("Right arrow key pressed. Exiting loop...")
         events["exit_early"] = True
     elif control == "left":
-        print("Left arrow key pressed. Exiting loop and rerecord the last episode...")
         events["rerecord_episode"] = True
         events["exit_early"] = True
     elif control == "esc":
-        print("Escape key pressed. Stopping data recording...")
         events["stop_recording"] = True
         events["exit_early"] = True
 
@@ -433,6 +431,7 @@ def init_keyboard_listener():
         # Every key that ends an episode also states its salience, so no saved episode
         # carries a default -- see lerobot.utils.salience for why that matters.
         if key in ("right", "n"):
+            print(f"{key} pressed. Ordinary. Ending the episode...")
             events["salience"] = ORDINARY
             apply_recording_control("right", events)
         elif key == "g":
@@ -448,8 +447,10 @@ def init_keyboard_listener():
             events["salience"] = GAVE_UP
             apply_recording_control("right", events)
         elif key in ("left", "r"):
+            print(f"{key} pressed. Re-recording the last episode...")
             apply_recording_control("left", events)
         elif key in ("esc", "q"):
+            print(f"{key} pressed. Stopping data recording...")
             events["salience"] = QUIT
             apply_recording_control("esc", events)
         # other keys (incl. up/down) are intentionally ignored
