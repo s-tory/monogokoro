@@ -59,16 +59,16 @@ what the claiming is for. The other half is the commitments: what the work is sp
   does not pretend to. So 慈悲 is not a restriction placed on anyone downstream. It is
   upstream and it is ours: **do not take on the problem whose hard part is aiming.** Where the
   difficulty is put is the only lever a permissive licence leaves, and it is enough of one.
-- **アンパンマン / Anpanman — give from your own face, and never punch to kill.** 慈悲 says what the
+- **アンパンマン — give from your own face, and never punch to kill.** 慈悲 says what the
   work is spent on and nothing about how to act once it is, which left it the only principle
-  here that says what is worth doing. Takashi Yanase's Anpanman is a hero whose head is bread: he tears
+  here that says what is worth doing. Takashi Yanase's アンパンマン is a hero whose head is bread: he tears
   off a piece of his own face for whoever is hungry, and he fights Baikinman with a punch that sends
   him flying and never finishes him. Two rules come out of that, and one caution the picture book
   leaves unsaid. **Do not fear your own loss.** When a cost has to land somewhere, let it land here
   rather than on whoever builds, reads or maintains this next: retake the measurement instead of
   inheriting it, answer the round trip on what we file upstream, lay a stuck state out in public
   instead of keeping it tidy in private, and carry the difficulty that lets the arm run on parts
-  anyone can buy. **But fear it wisely.** Anpanman knows exactly what giving costs — a face that is
+  anyone can buy. **But fear it wisely.** アンパンマン knows exactly what giving costs — a face that is
   wet or bitten leaves him with no strength — and still does not leave Kabao hungry. So count the
   loss first, precisely, and then give anyway. A loss nobody counted is not generosity; it is the
   step skipped without noticing it was there. The rule against filing bug reports we will not
