@@ -4,11 +4,16 @@ This file provides guidance to AI agents when working with code in this reposito
 
 ## Project Overview
 
-LeRobot is a PyTorch-based library for real-world robotics, providing datasets, pretrained policies, and tools for training, evaluation, data collection, and robot control. It integrates with Hugging Face Hub for model/dataset sharing.
+MONOGOKORO grew out of [LeRobot](https://github.com/huggingface/lerobot) and still merges from it. It
+builds the motor layers _underneath_ a policy for the SO-101: a spinal reflex that yields to contact, a cerebellum
+that learns to cancel a load before the reflex feels it, and the relays and memory tags around them.
+The policy on top (ACT today) is LeRobot's, unmodified. Why the layers are where they are is in
+[`README_EN.md`](./README_EN.md); what they are and where they live is under
+[Architecture](#architecture) below.
 
 ## Principles
 
-This fork exists to build a reflex layer, and it is being built on observations that predate the
+This project exists to build a reflex layer, and it is being built on observations that predate the
 field by 2500 years, and on a commitment of the same age. They are not decoration. The
 observations are rules about what to write and — more often — what to refuse to write; the
 commitment is about what to build; the last is about the one doing the writing.
@@ -354,7 +359,9 @@ leaves from**, which is what every entry below is for.
 
 ## Tech Stack
 
-Python 3.12+ · PyTorch · Hugging Face (datasets, Hub, accelerate) · draccus (config/CLI) · Gymnasium (envs) · uv (package management)
+Python 3.12+ · PyTorch (XPU on this rig) · Hugging Face (datasets, Hub, accelerate) · draccus (config/CLI) ·
+Rust (the real-time daemon, `cargo`, PREEMPT_RT kernel) · Vulkan compute / GLSL via `glslc` (the
+cerebellum) · uv or miniforge (see below)
 
 ## Development Setup
 
@@ -378,26 +385,67 @@ DEVICE=cuda make test-end-to-end                      # All E2E tests
 pre-commit run --all-files                           # Lint + format (ruff, typos, bandit, etc.)
 ```
 
-## Architecture (`src/lerobot/`)
+## Architecture
 
-- **`scripts/`** — CLI entry points (`lerobot-train`, `lerobot-eval`, `lerobot-record`, etc.), mapped in `pyproject.toml [project.scripts]`.
-- **`configs/`** — Dataclass configs parsed by draccus. `train.py` has `TrainPipelineConfig` (top-level). `policies.py` has `PreTrainedConfig` base. Polymorphism via `draccus.ChoiceRegistry` with `@register_subclass("name")` decorators.
-- **`policies/`** — Each policy in its own subdir. All inherit `PreTrainedPolicy` (`nn.Module` + `HubMixin`) from `pretrained.py`. Factory with lazy imports in `factory.py`.
-- **`processor/`** — Data transformation pipeline. `ProcessorStep` base with registry. `DataProcessorPipeline` / `PolicyProcessorPipeline` chain steps.
-- **`datasets/`** — `LeRobotDataset` (episode-aware sampling + video decoding) and `LeRobotDatasetMetadata`.
-- **`envs/`** — `EnvConfig` base in `configs.py`, factory in `factory.py`. Each env subclass defines `gym_kwargs` and `create_envs()`.
-- **`robots/`, `motors/`, `cameras/`, `teleoperators/`** — Hardware abstraction layers.
-- **`lerobot_types.py`** and **`configs/types.py`** — Core type aliases and feature type definitions.
+### The layers built here
 
-## Repository Structure (outside `src/`)
+Named after the biology they copy, because the names are also the design argument. Rates are the
+defaults as shipped.
 
-- **`tests/`** — Pytest suite organized by module. Fixtures in `tests/fixtures/`, mocks in `tests/mocks/`. Hardware tests use skip decorators from `tests/utils.py`. E2E tests via `Makefile` write to `tests/outputs/`.
-- **`.github/workflows/`** — CI: `quality.yml` (pre-commit), `fast_tests.yml` (base deps, every PR), `full_tests.yml` (all extras + E2E + GPU, post-approval), `latest_deps_tests.yml` (daily lockfile upgrade), `security.yml` (TruffleHog), `release.yml` (PyPI publish on tags).
-- **`docs/source/`** — HF documentation (`.mdx` files). Per-policy READMEs, hardware guides, tutorials. Built separately via `docs-requirements.txt` and CI workflows.
-- **`examples/`** — End-user tutorials and scripts organized by use case (dataset creation, training, hardware setup).
-- **`docker/`** — Dockerfiles for user (`Dockerfile.user`) and CI (`Dockerfile.internal`).
-- **`benchmarks/`** — Performance benchmarking scripts.
-- **Root files**: `pyproject.toml` (single source of truth for deps, build, tool config), `Makefile` (E2E test targets), `uv.lock`, `CONTRIBUTING.md` & `README.md` (general information).
+- **Preflex** (tissue, no loop): silicone finger caps under a rubber cot. Hardware, answers contact
+  before any loop could be scheduled.
+- **Spinal reflex**: impedance `K·err + D·vel` over all 6 STS3215, driven as open-loop PWM.
+  `rust/so101_impedance_ctrl/src/{control,feetech,rt}.rs`, a Rust daemon on `SCHED_FIFO` and an
+  isolated core at 400 Hz, started by `so101-impedance.service` (a system unit, deliberately without
+  `[Install]`). Talks to Python through the shared memory `so101_impedance` (`shm.rs`).
+- **Cerebellum**: adaptive feedforward learned from the reflex's own error, added to its duty as
+  `ff_pwm`. `rust/so101_impedance_ctrl/src/cerebellum/` and `shaders/*.comp`, on its own thread
+  inside the daemon. `--cerebellum-backend gpu|cpu|off`: the binary defaults to `off`, the unit
+  turns on `gpu`.
+- **Pontine relay**: context carried from the top of the stack down to the cerebellum. A path, not a
+  loop, so it has no rate. `rust/so101_impedance_ctrl/src/pontine.rs` and
+  `processor/pontine_context_processor.py`; appears as the `context.0` and `context.1` action columns.
+- **The robot as Python sees it**: `src/lerobot/robots/so101_impedance_follower/` (`shm_client.py`),
+  used from `lerobot-record` and `lerobot-rollout`.
+- **Hippocampus**: one salience tag per episode, keyed live by the operator.
+  `src/lerobot/utils/salience.py` writes `salience.txt` beside the dataset, one line per episode;
+  `--dataset.drop_salience` reads it at train time.
+- **Neocortex**: the policy, LeRobot's `policies/` (ACT today), trained with `lerobot-train` and run
+  on the arm with `lerobot-rollout --strategy.type=episodic`.
+
+**Where the layers meet is the dataset schema**, and a mismatch there fails far from its cause. For
+`so101_impedance_follower`, `observation.state` is 26 scalars -- per joint `.pos` and
+`.current_avg`, per joint `.pwm_cmd` and `.ff_pwm`, then `supply_decivolts` and `cerebellum_flags`
+-- and `action` is 20: per joint `.pos`, `.k`, `.d`, then the two context channels. A policy trained
+on this robot expects all of them. `.current_avg`, `.pwm_cmd`, `.ff_pwm` and the supply are the
+daemon's raw units, unconverted.
+
+Also added here: the teleop handover ramp and gain-default processor steps
+(`processor/teleop_handover_ramp_processor.py`, `processor/impedance_gains_processor.py`),
+`wrist_roll` calibration on the middle of its travel (`motors/motors_bus.py`), and bench tools in
+`examples/` (`probe_so101_bus.py`, `analyze_servo_error_log.py`, `measure_so101_cerebellum.py`,
+`check_so101_impedance.py`, and the `measure_*_vram_scaling.py` family). The daemon's own README and
+[`PREEMPT_RT.md`](./rust/so101_impedance_ctrl/PREEMPT_RT.md) cover build and host setup.
+
+### Living on upstream's tree
+
+Most of `src/lerobot/` is still LeRobot's code, and upstream is under heavy development, so merges
+continue. Read that code rather than a summary of it; what cannot be read from it is below.
+
+- **What a merge costs is what git does not report.** The 2026-09-01 merge (`75e2c118`, 144 commits)
+  had three conflicts and two silent breakages -- upstream renamed `lerobot/types.py` and three
+  fork modules still imported the old name, and a workflow grew a duplicate `if:` key -- and the
+  silent two cost more. So put new behaviour in new files where it fits; when an upstream file has
+  to change, keep the change narrow and say beside it why it is there, so the next merge can read
+  intent instead of guessing; and after a merge, run the suite in a pre-merge worktree as well and
+  compare the failures, not the pass count.
+- **Upstream's documents are not ours.** `docs/source/*.mdx` describes upstream and is left as it
+  is, including where it has gone stale (`act.mdx` still evaluates with `lerobot-record`).
+  [`AGENT_GUIDE.md`](./AGENT_GUIDE.md) came from upstream but is used here, so it is kept true.
+  Where either disagrees with the code, the code wins.
+- **CI is ours, not upstream's.** `quality.yml` (pre-commit on every file), `fast_tests.yml`,
+  `full_tests.yml`, `security.yml` and `rust_tests.yml` gate a push. `gh` defaults to the upstream
+  repository: pass `-R s-tory/monogokoro`.
 
 ## Notes
 
