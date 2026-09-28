@@ -59,7 +59,7 @@ what the claiming is for. The other half is the commitments: what the work is sp
   does not pretend to. So 慈悲 is not a restriction placed on anyone downstream. It is
   upstream and it is ours: **do not take on the problem whose hard part is aiming.** Where the
   difficulty is put is the only lever a permissive licence leaves, and it is enough of one.
-- **アンパンマン — give from your own face, and never punch to kill.** 慈悲 says what the
+- **アンパンマン=ANPANMAN — give from your own face, and never punch to kill.** 慈悲 says what the
   work is spent on and nothing about how to act once it is, which left it the only principle
   here that says what is worth doing. Takashi Yanase's アンパンマン is a hero whose head is bread: he tears
   off a piece of his own face for whoever is hungry, and he fights Baikinman with a punch that sends
