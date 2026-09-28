@@ -44,6 +44,7 @@ from lerobot.utils.cycle_timer import CycleTimer
 from lerobot.utils.feature_utils import build_dataset_frame
 from lerobot.utils.keyboard_input import init_keyboard_listener
 from lerobot.utils.robot_utils import precise_sleep
+from lerobot.utils.salience import UNLABELLED, align_salience, append_salience
 from lerobot.utils.utils import log_say
 from lerobot.utils.visualization_utils import log_visualization_data
 
@@ -114,6 +115,10 @@ class EpisodicStrategy(RolloutStrategy):
         # the run summary averages across them without the untimed reset phases.
         timer = CycleTimer(fps, self._interpolator.multiplier)
 
+        # Line N of the salience sidecar is episode N, as in lerobot_record.py, so a resumed
+        # dataset is caught up before the first append.
+        align_salience(dataset.root, dataset.num_episodes)
+
         with VideoEncodingManager(dataset):
             try:
                 recorded_episodes = 0
@@ -141,6 +146,11 @@ class EpisodicStrategy(RolloutStrategy):
                         dataset=dataset,
                         single_task=single_task,
                     )
+
+                    # Latched before the reset, as in lerobot_record.py: the tag is the key that
+                    # ended *this* episode, and a key pressed during the reset only ends the reset.
+                    episode_salience = events["salience"]
+                    events["salience"] = None
 
                     # Reset phase, skip after the last episode (but run when re-recording)
                     if not events["stop_recording"] and (
@@ -194,6 +204,7 @@ class EpisodicStrategy(RolloutStrategy):
                         log_say("Re-record episode", play_sounds)
                         events["rerecord_episode"] = False
                         events["exit_early"] = False
+                        events["salience"] = None
                         dataset.clear_episode_buffer()
                         timer.log_episode_summary("discarded episode")
 
@@ -203,7 +214,17 @@ class EpisodicStrategy(RolloutStrategy):
 
                         continue
 
+                    if not dataset.has_pending_frames():
+                        # Same guard as lerobot_record.py: a key pressed while the previous
+                        # episode wraps up is consumed before the next one's first frame. On
+                        # 2026-09-28 that saved an empty buffer, which raised and ended the run.
+                        logger.warning("Episode ended with no frames; not saved.")
+                        events["salience"] = None
+                        continue
+
                     dataset.save_episode()
+                    # An episode that ended on the clock was judged by nobody: UNLABELLED, not ordinary.
+                    append_salience(dataset.root, episode_salience or UNLABELLED)
                     recorded_episodes += 1
                     timer.log_episode_summary(f"episode {dataset.num_episodes}")
             finally:
@@ -212,8 +233,12 @@ class EpisodicStrategy(RolloutStrategy):
                 # suppress: save_episode raises if the buffer is empty (nothing to lose).
                 logger.info("Episodic control loop ended — saving any in-progress episode")
                 timer.log_run_summary()
+                saved_before = dataset.num_episodes
                 with contextlib.suppress(Exception):
                     dataset.save_episode()
+                # Keep the sidecar one line per episode if that rescue save kept anything.
+                if dataset.num_episodes > saved_before:
+                    append_salience(dataset.root, UNLABELLED)
 
     def _policy_loop(
         self,

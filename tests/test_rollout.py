@@ -1091,7 +1091,7 @@ def test_starved_engine_is_counted_through_the_real_dispatch_path(caplog):
     assert dataset.add_frame.call_count == 0
 
 
-def test_episodic_run_reports_a_summary_per_episode_and_for_the_run(caplog):
+def test_episodic_run_reports_a_summary_per_episode_and_for_the_run(caplog, tmp_path):
     from lerobot.rollout import EpisodicStrategyConfig
     from lerobot.rollout.strategies import EpisodicStrategy
     from lerobot.utils.action_interpolator import ActionInterpolator
@@ -1100,6 +1100,7 @@ def test_episodic_run_reports_a_summary_per_episode_and_for_the_run(caplog):
     # fresh one each), so this also covers the `restart()` that keeps a
     # re-primed interpolator from being reported as a slow episode.
     ctx, dataset = _make_loop_ctx(fps=200.0, multiplier=2, num_ticks=8)
+    dataset.root = tmp_path
     ctx.runtime.cfg.dataset = SimpleNamespace(
         single_task="task",
         episode_time_s=10.0,
@@ -1112,7 +1113,12 @@ def test_episodic_run_reports_a_summary_per_episode_and_for_the_run(caplog):
     strategy = EpisodicStrategy(EpisodicStrategyConfig())
     strategy._engine = ctx.policy.inference
     strategy._interpolator = ActionInterpolator(multiplier=2)
-    strategy._events = {"stop_recording": False, "exit_early": False, "rerecord_episode": False}
+    strategy._events = {
+        "stop_recording": False,
+        "exit_early": False,
+        "rerecord_episode": False,
+        "salience": None,
+    }
 
     with caplog.at_level(logging.INFO, logger=_TIMER_LOGGER):
         strategy.run(ctx)
@@ -1124,3 +1130,76 @@ def test_episodic_run_reports_a_summary_per_episode_and_for_the_run(caplog):
     # Recording still lands once per interpolation cycle over the 8 ticks.
     assert _recorded_actions(dataset) == [1.0, 2.0, 3.0, 4.0]
     assert not _timer_warnings(caplog)
+
+
+@pytest.mark.parametrize("key_tag, expected", [("g", ["g"]), (None, ["?"])])
+def test_episodic_writes_the_salience_of_each_saved_episode(tmp_path, key_tag, expected):
+    """The key that ended an episode is written to salience.txt, as lerobot-record does.
+
+    Until 2026-09-28 rollout accepted g/b/x and saved none of them. An episode that ends
+    on the clock is judged by nobody and gets UNLABELLED ("?"), never a default tag.
+    """
+    from lerobot.rollout import EpisodicStrategyConfig
+    from lerobot.rollout.strategies import EpisodicStrategy
+    from lerobot.utils.action_interpolator import ActionInterpolator
+    from lerobot.utils.salience import read_salience
+
+    events = {"stop_recording": False, "exit_early": False, "rerecord_episode": False, "salience": None}
+
+    def _press(tick):
+        if tick == 4 and key_tag is not None:
+            events["exit_early"] = True
+            events["salience"] = key_tag
+
+    ctx, dataset = _make_loop_ctx(fps=200.0, multiplier=1, num_ticks=8, on_tick=_press)
+    dataset.root = tmp_path
+    ctx.runtime.cfg.dataset = SimpleNamespace(
+        single_task="task",
+        episode_time_s=10.0,
+        reset_time_s=0.0,
+        num_episodes=1,
+        push_to_hub=False,
+        tags=None,
+        private=False,
+    )
+    # Like the real writer: the first save keeps the episode, and the rescue save in `finally`
+    # then finds an empty buffer and raises.
+    saves = {"n": 0}
+
+    def _save():
+        saves["n"] += 1
+        if saves["n"] > 1:
+            raise ValueError(
+                "You must add one or several frames with `add_frame` before calling `add_episode`."
+            )
+        dataset.num_episodes += 1
+
+    dataset.save_episode.side_effect = _save
+    strategy = EpisodicStrategy(EpisodicStrategyConfig())
+    strategy._engine = ctx.policy.inference
+    strategy._interpolator = ActionInterpolator(multiplier=1)
+    strategy._events = events
+
+    strategy.run(ctx)
+
+    assert read_salience(tmp_path) == expected
+
+
+def test_widen_to_checkpoint_passes_every_scalar_when_the_checkpoint_was_trained_on_them():
+    """A policy trained on a 26-wide state (positions + telemetry) must not be fed 6 positions.
+
+    On 2026-09-28 so101_impedance_follower's ACT failed its first rollout with a 6-vs-26 shape
+    error in the normalizer, because rollout kept only ``.pos``/``.vel`` scalars.
+    """
+    from lerobot.rollout.context import _widen_to_checkpoint
+
+    all_features = {"a.pos": float, "a.current_avg": float, "supply": float, "cam": (360, 640, 3)}
+    filtered = {"a.pos": float, "cam": (360, 640, 3)}
+
+    widened = _widen_to_checkpoint(filtered, all_features, SimpleNamespace(shape=(3,)), "state")
+    assert list(widened) == ["a.pos", "a.current_avg", "supply", "cam"]
+
+    # A checkpoint trained on positions only keeps the filter, and so does a width matching neither.
+    assert _widen_to_checkpoint(filtered, all_features, SimpleNamespace(shape=(1,)), "state") is filtered
+    assert _widen_to_checkpoint(filtered, all_features, SimpleNamespace(shape=(5,)), "state") is filtered
+    assert _widen_to_checkpoint(filtered, all_features, None, "state") is filtered

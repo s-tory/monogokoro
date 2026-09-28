@@ -421,17 +421,20 @@ Two flavors of evaluation:
 
 ### 8.1 Real-robot eval (SO-101, etc.)
 
-Reuse `lerobot-record` with `--policy.path` to run the trained policy on-robot and save the run as an eval dataset. Convention: prefix the dataset with `eval_`.
+Use `lerobot-rollout --strategy.type=episodic` to run the trained policy on-robot and record each run as a dataset. `lerobot-record` no longer takes `--policy.path`, and rollout datasets must be named `rollout_*` (`eval_*` is refused).
 
 ```bash
-lerobot-record \
+lerobot-rollout \
+  --strategy.type=episodic \
   --robot.type=so101_follower --robot.port=<FOLLOWER_PORT> --robot.id=my_follower \
   --robot.cameras="{ front: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}}" \
-  --dataset.repo_id=${HF_USER}/eval_my_task \
+  --policy.path=outputs/train/<run>/checkpoints/<step>/pretrained_model \
+  --dataset.repo_id=${HF_USER}/rollout_my_task \
   --dataset.single_task="<same task description used during training>" \
-  --dataset.num_episodes=10 \
-  --policy.path=${HF_USER}/act_my_task
+  --dataset.num_episodes=10 --dataset.episode_time_s=120
 ```
+
+Start it from an interactive terminal: without one the g/b/x/Right/Left/Esc keys are unavailable (one warning at startup), and the salience tags they write (`salience.txt`, same format as `lerobot-record`) are what you score the run from.
 
 Report success rate across episodes. Compare to a teleoperated baseline and to an earlier checkpoint to catch regressions.
 

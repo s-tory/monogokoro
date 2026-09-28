@@ -49,6 +49,7 @@ from lerobot.processor import (
 from lerobot.processor.relative_action_processor import RelativeActionsProcessorStep
 from lerobot.robots import make_robot_from_config
 from lerobot.teleoperators import Teleoperator, make_teleoperator_from_config
+from lerobot.utils.constants import ACTION, OBS_STATE
 from lerobot.utils.feature_utils import combine_feature_dicts, hw_to_dataset_features
 from lerobot.utils.import_utils import _peft_available, require_package
 
@@ -157,6 +158,31 @@ def _resolve_action_key_order(
         logger.warning("policy.action_feature_names keys don't match dataset; using dataset order")
         return dataset_action_names
     return policy_action_names
+
+
+def _widen_to_checkpoint(
+    filtered: dict[str, type | tuple],
+    all_features: dict[str, type | tuple],
+    checkpoint_feature,
+    what: str,
+) -> dict[str, type | tuple]:
+    """Keep every scalar feature when that, and not the filtered set, matches the checkpoint's width."""
+    if checkpoint_feature is None:
+        return filtered
+    width = checkpoint_feature.shape[0]
+    n_filtered = sum(1 for v in filtered.values() if not isinstance(v, tuple))
+    all_scalars = {k: v for k, v in all_features.items() if not isinstance(v, tuple)}
+    if n_filtered == width or len(all_scalars) != width:
+        return filtered
+    logger.info(
+        "Checkpoint %s is %d wide; the .pos/.vel subset is %d, so passing all %d scalar features",
+        what,
+        width,
+        n_filtered,
+        width,
+    )
+    widened = {k: v for k, v in all_features.items() if isinstance(v, tuple) or k in all_scalars}
+    return widened
 
 
 def _align_state_feature_order(
@@ -423,6 +449,17 @@ def build_rollout_context(
         for k, v in all_obs_features.items()
         if isinstance(v, tuple) or (v is float and k.endswith((".pos", ".vel")))
     }
+    # A robot whose recorded state carries more than positions (so101_impedance_follower: currents,
+    # duty, supply -- 26 scalars) trains a policy on all of them, and the .pos/.vel filter then
+    # feeds 6 into a 26-dim normalizer. The checkpoint stores no names, only a width, so the width
+    # decides: when every scalar the robot reports matches it and the filtered set does not, keep
+    # them all, in the robot's order (the order lerobot-record wrote them in).
+    observation_features_hw = _widen_to_checkpoint(
+        observation_features_hw,
+        all_obs_features,
+        policy_config.input_features.get(OBS_STATE),
+        "state",
+    )
     policy_action_names = getattr(policy_config, "action_feature_names", None)
     observation_features_hw = _align_state_feature_order(
         observation_features_hw,
@@ -434,6 +471,14 @@ def build_rollout_context(
     # a no-op for them. Without the .vel keys the base velocities are silently
     # dropped from dataset_features[ACTION]/ordered_action_keys and the base never moves.
     action_features_hw = {k: v for k, v in robot.action_features.items() if k.endswith((".pos", ".vel"))}
+    # Same for the action: so101_impedance_follower's policies also emit per-joint K/D and the
+    # pontine context (20 wide), which would otherwise be dropped and replaced by the robot's defaults.
+    action_features_hw = _widen_to_checkpoint(
+        action_features_hw,
+        robot.action_features,
+        policy_config.output_features.get(ACTION),
+        "action",
+    )
 
     # The action side is always needed: sync inference reads action names from
     # ``dataset_features[ACTION]`` to map policy tensors back to robot actions.
