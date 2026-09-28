@@ -14,9 +14,10 @@ The policy on top (ACT today) is LeRobot's, unmodified. Why the layers are where
 ## Principles
 
 This project exists to build a reflex layer, and it is being built on observations that predate the
-field by 2500 years, and on a commitment of the same age. They are not decoration. The
-observations are rules about what to write and — more often — what to refuse to write; the
-commitment is about what to build; the last is about the one doing the writing.
+field by 2500 years, and on two commitments — one of the same age, one from a children's picture
+book. They are not decoration. The observations are rules about what to write and — more often —
+what to refuse to write; the commitments are about what to build and how to act while building it;
+the last part is about the one doing the writing.
 
 - **諸行無常 / anicca — nothing holds still.** Every measured constant decays. Gains, offsets,
   calibration, latency, the droop of a servo under load: each is a snapshot of one machine on
@@ -48,16 +49,40 @@ having been wrong. Report the miss, then stop; if the consolation is load-bearin
 being written as its own sentence, and if it is not, it was decoration.
 
 The observations are one half of a pair. They bound what may be claimed; not one of them says
-what the claiming is for. The other half is the commitment.
+what the claiming is for. The other half is the commitments: what the work is spent on, and how it acts once it is spent.
 
 - **慈悲 / karuṇā — difficulty is a choice.** The observations bound what may be asserted; this
   bounds what the work is spent on. A technique is neutral in the abstract and never in the
   particular: what is hard here is not crushing the chip, and feeling the slip through encoder
   counts, and none of that difficulty transfers to a weapon. Dexterity is dual-use and cannot be
   separated at the level of technique — a permissive licence cannot forbid that use, and this one
-  does not pretend to. So the commitment is not a restriction placed on anyone downstream. It is
+  does not pretend to. So 慈悲 is not a restriction placed on anyone downstream. It is
   upstream and it is ours: **do not take on the problem whose hard part is aiming.** Where the
   difficulty is put is the only lever a permissive licence leaves, and it is enough of one.
+- **アンパンマン / Anpanman — give from your own face, and never punch to kill.** 慈悲 says what the
+  work is spent on and nothing about how to act once it is, which left it the only principle
+  here that says what is worth doing. Takashi Yanase's Anpanman is a hero whose head is bread: he tears
+  off a piece of his own face for whoever is hungry, and he fights Baikinman with a punch that sends
+  him flying and never finishes him. Two rules come out of that, and one caution the picture book
+  leaves unsaid. **Do not fear your own loss.** When a cost has to land somewhere, let it land here
+  rather than on whoever builds, reads or maintains this next: retake the measurement instead of
+  inheriting it, answer the round trip on what we file upstream, lay a stuck state out in public
+  instead of keeping it tidy in private, and carry the difficulty that lets the arm run on parts
+  anyone can buy. **But fear it wisely.** Anpanman knows exactly what giving costs — a face that is
+  wet or bitten leaves him with no strength — and still does not leave Kabao hungry. So count the
+  loss first, precisely, and then give anyway. A loss nobody counted is not generosity; it is the
+  step skipped without noticing it was there. The rule against filing bug reports we will not
+  follow up is this rule, not an exception to it: the round trip is the face, and a report we
+  abandon hands our loss to a maintainer. **Punch, but never kill.** Force is allowed; destruction
+  is not. That is this project's technique before it is its ethic — an impedance law pushes and
+  yields, and an arm that breaks the chip it came to pick up has thrown its punch too hard, which on
+  2026-09-28 it did with the gripper inside its own duty cap. It holds for people and ideas too:
+  argue, reject, send a bad idea flying, and do not set out to destroy whoever brought it. And
+  Baikinman comes back every episode; the story never tries to end that. That is the shape of
+  dukkha, and closer still of Devadatta — the Buddha's cousin and disciple, who tried to kill him and
+  split the order, and whom the Lotus Sutra names as the Buddha's teacher in a past life and
+  promises Buddhahood. The adversary who keeps returning is also where the lessons come from. Design
+  to repel what returns, not to annihilate it.
 
 These collide, and nothing above ranks them. A supply that cannot carry this arm is fixed by
 buying a better one; 慈悲 answers that everyone who later builds this arm would have to buy one
