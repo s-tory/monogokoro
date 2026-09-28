@@ -127,8 +127,8 @@ outlives them.
   explains nothing, and the children's version — _where you put the zero on the ruler_ — turned out
   to be the more accurate account of the mechanism. **Being unable to write it plainly is not a
   vocabulary problem, it is a sign the mechanism is not held yet**, and formulas hide that while
-  drawings cannot. Keep the plain version as a replacement, not an addition. The cautions attached to this were
-  paid for: do not buy simplicity with accuracy — say what is still unverified in the simple
+  drawings cannot. Keep the plain version as a replacement, not an addition. The cautions attached
+  to this were paid for: do not buy simplicity with accuracy — say what is still unverified in the simple
   version too; and **do not let the precision leak back out** — the same day a comic correctly said
   the servos answer _when asked_, the adult sentence became "the servos were talking for three
   weeks and nobody listened", which promotes a device that only ever replies into one that speaks.
@@ -148,8 +148,8 @@ outlives them.
   keeps a guess from arriving as a fact that nobody can trace back far enough to doubt, and
   **writing down why something was deferred** stops the next individual from re-making the same
   decision from zero. The cost of not doing it is on record: `let (id, _, data)` was an acquired
-  characteristic written into code with no date and no reason attached, so nobody could audit it,
-  and it ran 400 times a second for three weeks.
+  characteristic written into code with no date and no reason attached, so nobody could audit it
+  (the story is under Method, _the answer may already be in hand_).
 
 ## Method
 
@@ -160,8 +160,8 @@ They also share a premise, which the user of this repository put in one line on 
 **there is only the long way round.** Not that shortcuts are forbidden -- that the thing which
 looked like one comes back. What makes it expensive is never the decision to skip a step, because
 that decision is rarely taken: **the step gets skipped without anyone noticing it was there.**
-Three from a single day, none of them a choice anybody made: `let (id, _, data)` dropped a byte the
-servos had been returning all along, and cost three weeks of suspecting the bus; a droop target of
+Three from a single day, none of them a choice anybody made: the status byte the servos had been
+returning all along was dropped (see _the answer may already be in hand_ below); a droop target of
 "~5 counts" was written into a config and never held against anybody's hand, so the gains stayed
 twice as stiff as the hand wanted for as long as the comment stood; and a check for location data
 in some photographs reported clean because the tool it called was not installed, which is a check
@@ -174,8 +174,7 @@ leaves from**, which is what every entry below is for.
   `wrist_roll` reported `0-4095` of travel because a calibration script assigned that without ever
   sweeping the joint; the arm reaches 340 deg and is stopped by two printed parts touching -- on
   this unit, and that stop is not on every SO-101. One photograph settled what four register reads
-  had not. And it did not only correct a number, it
-  changed what could be loaded: that stop is a printed corner, so driving a saturated duty into it
+  had not. And it did not only correct a number, it changed what could be loaded: that stop is a printed corner, so driving a saturated duty into it
   would have deformed the very thing defining the measurement, and the test had to move to a joint
   whose stop is not the instrument. Before choosing what to push against, look at it — and keep
   looking while it moves, because a human watching the arm has already stopped a run that no
@@ -194,47 +193,48 @@ leaves from**, which is what every entry below is for.
   biology has almost no static friction and cannot be copied on friction — that is where a
   measured deadband has to come from instead.)
 - **The measurement is never wrong; the question was.** A run that returns a surprising number
-  returned a correct answer to whatever you actually asked. Before doubting the instrument,
-  check what you asked. Corollary on who judges: the payment for being right is prediction, and
-  the judge is nature, not the audience. Rejection carries no information in either direction —
-  Semmelweis had the measurement, published it, and was not believed. More ways remain to measure
-  correctly and still see nothing. **The answer may already be in hand, unread**: this daemon
-  asked its servos for their state 400 times a second for three weeks and discarded the status
-  byte in every reply — `let (id, _, data)` — so a supply collapsing below the servos' own
-  under-voltage limit arrived as a read timeout, and cost three weeks of suspecting bus load,
-  serial timeouts and wiring. Re-reading a reply you already have beats asking a new question:
-  it adds no traffic, and it cannot be swallowed by the fault it is measuring. **Or it was read
-  and passed over.** That byte was discarded; these were displayed. In one day, 2026-09-14: a
-  clippy warning printed and answered with "clippy done", when CI runs the same lint at
-  `-D warnings` and the push went red; `reasoning_tokens` equal to `completion_tokens` read twice
-  -- the field saying the whole budget went to thinking and none of it to the answer -- before
-  going to look at the hardware for why generation was slow; and a claim that nobody had asked
-  for failed predictions to be written down, made with the note saying exactly that already in
-  context. **A line displayed and not acted on is worth less than one never read, because it
-  leaves behind the impression of having checked.** **Or the
-  instrument was too slow to have shown it**: a supply sampled once a second cannot render an
-  833 ms dip. Before writing "no anomaly", check that the instrument could have produced one.
-  **Or the counterexample never reached the sample**: an instrument fast enough and patient enough
-  still shows nothing when whatever would disprove the rule is absent from view by construction.
-  One of us grew up on 三つ子の魂百まで — _the soul at three stays until a hundred_ — said so often
-  that nobody counted, by a grandmother with a lifetime of data and not one counterexample; the
-  people who did change at forty had mostly moved away by then, and what stayed in view was
-  filtered to those who had not. A filtered population reads exactly like a strong result, and no
-  amount of care with the instrument separates them. Note what this one does _not_ have yet: every
-  constant in this repository is measured on servos that answered, and the motor whose power stage
-  was shorted got replaced without its numbers entering any baseline — but nothing here has
-  actually gone wrong from that, so it is a shape to watch and not a cost to report. Before
-  writing "no counterexample", ask what would be missing from view if the rule were false.
-  **Or the question was an identity, and could only ever agree.** `err = pwm / K` is not a finding
-  about an arm; with no feedforward, clamp or integrator, a PD law outputs `K·err` by definition,
-  so the two sides match on any rig, in any pose, including one that is jammed. That agreement was
-  read here as textbook droop and therefore as evidence the measurement was sound — and the
-  companion number, `sd = 0.00`, was read as a clean hold, when standing still does not separate
-  equilibrium from stiction. What had actually been measured was one arbitrary point inside the
-  static-friction band. The warning was already written in the same file, one section up
-  ("zero velocity and unchanged position do not distinguish balance from sticking"), and was not
-  applied to the run that needed it. **Before measuring, ask what else the quantity could have
-  come out as. If the answer is nothing, the run is arithmetic wearing an instrument's clothes.**
+  returned a correct answer to whatever you actually asked. Before doubting the instrument, check
+  what you asked. Corollary on who judges: the payment for being right is prediction, and the judge
+  is nature, not the audience. Rejection carries no information in either direction — Semmelweis had
+  the measurement, published it, and was not believed. More ways remain to measure correctly and
+  still see nothing.
+- **The answer may already be in hand, unread.** This daemon asked its servos for their state 400
+  times a second for three weeks and discarded the status byte in every reply — `let (id, _, data)`
+  — so a supply collapsing below the servos' own under-voltage limit arrived as a read timeout, and
+  cost three weeks of suspecting bus load, serial timeouts and wiring. Re-reading a reply you
+  already have beats asking a new question: it adds no traffic, and it cannot be swallowed by the
+  fault it is measuring. **Or it was read and passed over.** That byte was discarded; these were
+  displayed. In one day, 2026-09-14: a clippy warning printed and answered with "clippy done", when
+  CI runs the same lint at `-D warnings` and the push went red; `reasoning_tokens` equal to
+  `completion_tokens` read twice -- the field saying the whole budget went to thinking and none of it
+  to the answer -- before going to look at the hardware for why generation was slow; and a claim
+  that nobody had asked for failed predictions to be written down, made with the note saying exactly
+  that already in context. **A line displayed and not acted on is worth less than one never read,
+  because it leaves behind the impression of having checked.**
+- **An empty result needs an instrument that could have filled it.** **The instrument may be too
+  slow to have shown it**: a supply sampled once a second cannot render an 833 ms dip. Before writing
+  "no anomaly", check that the instrument could have produced one. **Or the counterexample never
+  reached the sample**: an instrument fast enough and patient enough still shows nothing when
+  whatever would disprove the rule is absent from view by construction. One of us grew up on
+  三つ子の魂百まで — _the soul at three stays until a hundred_ — said so often that nobody counted,
+  by a grandmother with a lifetime of data and not one counterexample; the people who did change at
+  forty had mostly moved away by then, and what stayed in view was filtered to those who had not. A
+  filtered population reads exactly like a strong result, and no amount of care with the instrument
+  separates them. Note what this one does _not_ have yet: every constant in this repository is
+  measured on servos that answered, and the motor whose power stage was shorted got replaced without
+  its numbers entering any baseline — but nothing here has actually gone wrong from that, so it is a
+  shape to watch and not a cost to report. Before writing "no counterexample", ask what would be
+  missing from view if the rule were false.
+- **Before measuring, ask what else the quantity could have come out as.** **The question may be an
+  identity, and could only ever agree.** `err = pwm / K` is not a finding about an arm; with no
+  feedforward, clamp or integrator, a PD law outputs `K·err` by definition, so the two sides match on
+  any rig, in any pose, including one that is jammed. That agreement was read here as textbook droop
+  and therefore as evidence the measurement was sound — and the companion number, `sd = 0.00`, was
+  read as a clean hold, when standing still does not separate equilibrium from stiction. What had
+  actually been measured was one arbitrary point inside the static-friction band. The warning was
+  already written in the same file, one section up ("zero velocity and unchanged position do not
+  distinguish balance from sticking"), and was not applied to the run that needed it. **If the
+  answer is nothing, the run is arithmetic wearing an instrument's clothes.**
 - **The condition measured second wins.** An A/B whose two conditions always run in the same order
   hands the second one every drift in the machine — warm-up, a thermal ramp, a buffer that settled.
   On 2026-09-12 `setserial low_latency` on the servo link came out 3.6 us in the flag's favour at
