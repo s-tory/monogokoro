@@ -2,6 +2,8 @@
 
 **日本語** | [English](README_EN.md) | [简体中文](README_CN.md)
 
+[![SO-101 がポテチをつまんで皿に置く動画（YouTube）](https://img.youtube.com/vi/skqLuFOSNOQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=skqLuFOSNOQ)
+
 このリポジトリは、LeRobot-ACT-SO-101 スタックに「運動神経」を実装する。
 
 日常語のほうの運動神経 — つまり脊髄反射と小脳のことであって、解剖学のそれ（α運動ニューロン）では

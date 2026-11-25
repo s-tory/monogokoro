@@ -2,6 +2,8 @@
 
 [日本語](README.md) | [English](README_EN.md) | **简体中文**
 
+[![视频：SO-101 夹起一片薯片放到盘子上（YouTube）](https://img.youtube.com/vi/skqLuFOSNOQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=skqLuFOSNOQ)
+
 本仓库为 LeRobot-ACT-SO-101 技术栈实现「运动神经」。
 
 是通俗意义上的运动神经 —— 也就是脊髓反射和小脑，而不是解剖学意义上的那个（α 运动神经元）。

@@ -2,6 +2,8 @@
 
 [日本語](README.md) | **English** | [简体中文](README_CN.md)
 
+[![Video: the SO-101 picking up a potato chip and placing it on a plate (YouTube)](https://img.youtube.com/vi/skqLuFOSNOQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=skqLuFOSNOQ)
+
 A fork of [LeRobot](https://github.com/huggingface/lerobot) that gives the SO-101 two of the motor
 layers that sit _underneath_ a policy: a **spinal reflex** whose joints and gripper yield to contact
 instead of driving through it, and a **cerebellum** that learns, online, to cancel a load before the
