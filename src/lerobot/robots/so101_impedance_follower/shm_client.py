@@ -394,6 +394,11 @@ class ImpedanceShmClient:
         if context is None:
             context = [0.0] * NUM_CONTEXT
 
+        # Neither this nor `read_output` issues a memory barrier; Python has none to issue. The
+        # seqlock is correct only because x86 keeps stores in order with stores and loads with
+        # loads, which is what both sides here run on. On ARM (weakly ordered) the daemon could see
+        # the even `seq` before the data, or this reader the data before the odd `seq`, and accept
+        # a torn snapshot. Porting there needs real fences, e.g. a small C helper. Never run on ARM.
         region = self._layout.input
         seq = region.seq
         region.seq = seq + 1  # odd: writer in progress
