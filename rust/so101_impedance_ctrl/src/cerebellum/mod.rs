@@ -766,7 +766,20 @@ pub fn save_weights(path: &Path, weights: &[f32], gc_dim: usize, seed: u64) -> s
     for w in weights {
         buf.extend_from_slice(&w.to_le_bytes());
     }
-    std::fs::write(path, buf)
+    // Write beside the target, sync, then rename over it. A plain `fs::write` truncates first, so
+    // dying mid-write left a short file; `load_weights` rejects that and starts from zero, and the
+    // next save overwrites it -- the session's learning gone. A rename within one directory is
+    // atomic, so the file on disk is always the old weights or the new ones.
+    use std::io::Write;
+    let mut tmp_name = path.as_os_str().to_owned();
+    tmp_name.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp_name);
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&buf)?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, path)
 }
 
 /// Loads Purkinje weights, returning `Ok(None)` if the file simply does not exist yet.

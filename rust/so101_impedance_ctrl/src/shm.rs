@@ -43,9 +43,9 @@ pub const NUM_CONTEXT: usize = 2;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InputData {
     pub timestamp_mono_ns: u64,
-    /// rad; order: shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper.
+    /// Raw encoder counts in the servo's PWM-mode frame (0-4095), not radians; order: shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper.
     pub target_pos: [f32; NUM_MOTORS],
-    /// rad/s; 0 if the caller doesn't supply a velocity target.
+    /// Counts/s; 0 if the caller doesn't supply a velocity target.
     pub target_vel: [f32; NUM_MOTORS],
     pub k_gain: [f32; NUM_MOTORS],
     pub d_gain: [f32; NUM_MOTORS],
@@ -72,7 +72,8 @@ pub struct OutputData {
     /// 5 arm joints + gripper.
     pub present_pos: [f32; NUM_MOTORS],
     pub present_vel: [f32; NUM_MOTORS],
-    /// Pre-averaged in Rust (fixed-sample-count moving average), mA.
+    /// Pre-averaged in Rust (fixed-sample-count moving average), in raw `Present_Current` register
+    /// units, unconverted -- not mA.
     pub present_current_avg: [f32; NUM_MOTORS],
     pub pwm_cmd_debug: [f32; NUM_MOTORS],
     /// The cerebellum's contribution to `pwm_cmd_debug`, already clamped, slew-limited and gated.

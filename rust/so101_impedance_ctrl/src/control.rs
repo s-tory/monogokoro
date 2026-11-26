@@ -196,25 +196,6 @@ impl PositionGate {
     }
 }
 
-/// Zeroes any command that would drive a servo further past a soft position limit.
-///
-/// `pwm` and the limits are both in the *position-increasing* convention: positive `pwm` is
-/// whatever moves `Present_Position` up, regardless of how the hardware's direction bit is wired
-/// (that is applied later, at encode time). Motion back toward the middle is always allowed, so a
-/// joint that is already past a limit can recover instead of being stuck there.
-///
-/// That last promise is what `last_in_range` is for. The limits are an interval on a line while
-/// [`wrapped_delta`] treats position as a circle, and the two disagree about which way "back" is.
-/// Measured on the arm: a joint sitting at 4051 with its target at 123 has every positive command
-/// looking like "further past `pos_max`" to the raw rule, while the short way back to that target
-/// is positive and runs through the 4095/0 seam. Judging by the raw sign parks the joint there for
-/// as long as the target stands -- the exact opposite of recovery.
-///
-/// So once the joint is outside the limits the question becomes *does this move it toward where it
-/// was last seen legally*, which the loop observed rather than inferred. `None` means it has not
-/// been seen inside the limits at all since startup: there is no observation to appeal to, so this
-/// falls back to the raw rule, which is right whenever the travel does not cross the seam and
-/// declines to guess when it does.
 /// Ib inhibition: reduces the command in proportion to how far the measured current exceeds
 /// `threshold`, and does nothing at all below it.
 ///
@@ -320,6 +301,25 @@ pub fn soft_limit_position(
     }
 }
 
+/// Zeroes any command that would drive a servo further past a soft position limit.
+///
+/// `pwm` and the limits are both in the *position-increasing* convention: positive `pwm` is
+/// whatever moves `Present_Position` up, regardless of how the hardware's direction bit is wired
+/// (that is applied later, at encode time). Motion back toward the middle is always allowed, so a
+/// joint that is already past a limit can recover instead of being stuck there.
+///
+/// That last promise is what `last_in_range` is for. The limits are an interval on a line while
+/// [`wrapped_delta`] treats position as a circle, and the two disagree about which way "back" is.
+/// Measured on the arm: a joint sitting at 4051 with its target at 123 has every positive command
+/// looking like "further past `pos_max`" to the raw rule, while the short way back to that target
+/// is positive and runs through the 4095/0 seam. Judging by the raw sign parks the joint there for
+/// as long as the target stands -- the exact opposite of recovery.
+///
+/// So once the joint is outside the limits the question becomes *does this move it toward where it
+/// was last seen legally*, which the loop observed rather than inferred. `None` means it has not
+/// been seen inside the limits at all since startup: there is no observation to appeal to, so this
+/// falls back to the raw rule, which is right whenever the travel does not cross the seam and
+/// declines to guess when it does.
 pub fn apply_soft_limits(
     pwm: f32,
     present_pos: f32,

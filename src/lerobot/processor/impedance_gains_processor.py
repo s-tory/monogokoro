@@ -65,10 +65,11 @@ class ImpedanceGainDefaultsProcessorStep(RobotActionProcessorStep):
     # Fallback only. `lerobot-record` overrides these from the robot's own config, because
     # recording gains the robot would not actually apply would teach the policy a K/D pair that
     # does not correspond to the compliance visible in the videos. These mirror
-    # `SO101ImpedanceFollowerConfig`, which documents how they were measured.
+    # `SO101ImpedanceFollowerConfig`, which documents how they were measured; a test holds them
+    # equal, because until 2026-11-27 they still carried the pre-blind-test (10, 20, 15, ...).
     impedance_joints: tuple[str, ...] = DEFAULT_IMPEDANCE_JOINTS
-    default_k: tuple[float, ...] = (10.0, 20.0, 15.0, 10.0, 8.0, 5.0)
-    default_d: tuple[float, ...] = (0.3, 0.5, 0.4, 0.3, 0.2, 0.15)
+    default_k: tuple[float, ...] = (3.0, 8.0, 3.0, 1.3, 1.0, 1.0)
+    default_d: tuple[float, ...] = (0.09, 0.2, 0.08, 0.039, 0.025, 0.03)
 
     def __post_init__(self):
         if len(self.default_k) != len(self.impedance_joints) or len(self.default_d) != len(

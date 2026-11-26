@@ -117,3 +117,14 @@ def test_composes_with_robot_processor_pipeline_like_record_loop():
     for motor in _IMPEDANCE_JOINTS:
         assert f"{motor}.k" in out
         assert f"{motor}.d" in out
+
+
+def test_fallback_defaults_mirror_the_robot_config():
+    # The fallback said it mirrored the robot's gains and had drifted to 2-8x stiffer. Hold it.
+    from lerobot.robots.so101_impedance_follower.config_so101_impedance_follower import (
+        SO101ImpedanceFollowerConfig,
+    )
+
+    step = ImpedanceGainDefaultsProcessorStep()
+    assert step.default_k == SO101ImpedanceFollowerConfig.default_k
+    assert step.default_d == SO101ImpedanceFollowerConfig.default_d

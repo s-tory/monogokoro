@@ -185,6 +185,27 @@ fn sign_magnitude_round_trips_positive_and_negative() {
 }
 
 #[test]
+fn sign_magnitude_saturates_rather_than_wrapping() {
+    // At the PWM field's bit 10, 1024 used to encode as 0: full duty asked, nothing sent.
+    assert_eq!(
+        decode_sign_magnitude(encode_sign_magnitude(1024, 10), 10),
+        1023
+    );
+    assert_eq!(
+        decode_sign_magnitude(encode_sign_magnitude(1100, 10), 10),
+        1023
+    );
+    assert_eq!(
+        decode_sign_magnitude(encode_sign_magnitude(-1500, 10), 10),
+        -1023
+    );
+    assert_eq!(
+        decode_sign_magnitude(encode_sign_magnitude(i32::MIN, 10), 10),
+        -1023
+    );
+}
+
+#[test]
 fn sign_magnitude_negative_zero_decodes_as_zero() {
     // Sign bit set but zero magnitude -- some firmwares emit this for "no direction" at rest.
     let raw = 1u16 << 11;

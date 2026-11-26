@@ -73,8 +73,9 @@ pub const REG_TORQUE_ENABLE: (u8, u8) = (40, 1);
 pub const REG_LOCK: (u8, u8) = (55, 1);
 pub const REG_GOAL_POSITION: (u8, u8) = (42, 2);
 /// Overloaded as the PWM duty-cycle command register when `Operating_Mode = PWM` (addr 0x2c).
-/// tables.py calls this register `Goal_Time` for POSITION mode; per the Feetech datasheet, in PWM
-/// mode bit 11 (not bit 15, unlike `Goal_Position`) is the sign/direction bit.
+/// tables.py calls this register `Goal_Time` for POSITION mode. In PWM mode the sign/direction bit
+/// is bit 10 as measured on this arm (not 15 as for `Goal_Position`, and not the 11 that
+/// `feetech.py` states) -- see [`PWM_SIGN_BIT`].
 pub const REG_GOAL_PWM: (u8, u8) = (44, 2);
 pub const REG_PRESENT_POSITION: (u8, u8) = (56, 2);
 pub const REG_PRESENT_CURRENT: (u8, u8) = (69, 2);
@@ -121,12 +122,17 @@ pub fn decode_sign_magnitude(value: u16, sign_bit: u32) -> i32 {
     }
 }
 
-/// Sign-magnitude encode, inverse of [`decode_sign_magnitude`]. `value`'s magnitude is truncated
-/// to fit in `sign_bit` bits if it overflows.
+/// Sign-magnitude encode, inverse of [`decode_sign_magnitude`]. A magnitude too large for the
+/// field saturates at its maximum.
+///
+/// It used to be masked, which wraps: at bit 10, 1024 encoded as 0 and 1100 as 76, so a duty asked
+/// for at full strength went out as almost nothing, with no error anywhere. Nothing in the shipped
+/// configuration reaches that (`--pwm-max` 1000 caps the duty first), but the flag accepts larger.
+/// What the servo does with 1001-1023 on a 0-1000 duty scale has not been measured.
 pub fn encode_sign_magnitude(value: i32, sign_bit: u32) -> u16 {
     let sign_mask = 1u16 << sign_bit;
-    let magnitude_mask = (sign_mask - 1) as i32;
-    let magnitude = value.unsigned_abs() as i32 & magnitude_mask;
+    let magnitude_mask = (sign_mask - 1) as u32;
+    let magnitude = value.unsigned_abs().min(magnitude_mask);
     let mut out = magnitude as u16;
     if value < 0 {
         out |= sign_mask;
