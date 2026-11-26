@@ -48,6 +48,10 @@ class SO101ImpedanceFollowerConfig:
     # `--shm-name` argument).
     shm_name: str
 
+    # Does not make the arm limp while the daemon runs. Its watchdog keeps writing duty 0, and a
+    # duty write re-enables torque (measured 2026-09-03), so what follows a disconnect is torque on
+    # at duty 0: the joints brake rather than fall. Kept that way by choice on 2026-11-27 -- a limp
+    # arm drops under gravity, a braked one sags. Limp needs the daemon stopped.
     disable_torque_on_disconnect: bool = True
 
     # Same semantics as `SOFollowerConfig.max_relative_target`, applied to all 6 motors'
