@@ -2,7 +2,10 @@
 
 [日本語](README.md) | [English](README_EN.md) | **简体中文**
 
-[![视频：SO-101 夹起一片薯片放到盘子上（YouTube）](https://img.youtube.com/vi/skqLuFOSNOQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=skqLuFOSNOQ)
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=skqLuFOSNOQ"><img src="media/readme/sample_preview.webp" width="480"
+       alt="SO-101 从待机姿态出发，从绿色碗里夹起一片薯片，放到近处的盘子上，再回到待机姿态（原速）。点击观看 YouTube 视频" /></a>
+</p>
 
 本仓库为 LeRobot-ACT-SO-101 技术栈实现「运动神经」。
 

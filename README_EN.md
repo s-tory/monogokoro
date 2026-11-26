@@ -2,7 +2,10 @@
 
 [日本語](README.md) | **English** | [简体中文](README_CN.md)
 
-[![Video: the SO-101 picking up a potato chip and placing it on a plate (YouTube)](https://img.youtube.com/vi/skqLuFOSNOQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=skqLuFOSNOQ)
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=skqLuFOSNOQ"><img src="media/readme/sample_preview.webp" width="480"
+       alt="The SO-101 starts from rest, picks one potato chip out of the green bowl, places it on the near plate and returns to rest (real time). Click for the video on YouTube" /></a>
+</p>
 
 A fork of [LeRobot](https://github.com/huggingface/lerobot) that gives the SO-101 two of the motor
 layers that sit _underneath_ a policy: a **spinal reflex** whose joints and gripper yield to contact

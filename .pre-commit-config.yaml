@@ -30,6 +30,8 @@ repos:
     hooks:
       - id: check-added-large-files
         args: ['--maxkb=1024']
+        # monogokoro: the README's top animation does not fit 1 MiB without visible blocking.
+        exclude: ^media/readme/sample_preview\.webp$
       - id: debug-statements
       - id: check-merge-conflict
       - id: check-case-conflict

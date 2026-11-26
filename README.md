@@ -2,7 +2,10 @@
 
 **日本語** | [English](README_EN.md) | [简体中文](README_CN.md)
 
-[![SO-101 がポテチをつまんで皿に置く動画（YouTube）](https://img.youtube.com/vi/skqLuFOSNOQ/maxresdefault.jpg)](https://www.youtube.com/watch?v=skqLuFOSNOQ)
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=skqLuFOSNOQ"><img src="media/readme/sample_preview.webp" width="480"
+       alt="SO-101 が待機姿勢から緑の皿のポテチを1枚つまみ、手前の皿に置いて待機姿勢に戻る（等速）。クリックで YouTube の動画へ" /></a>
+</p>
 
 このリポジトリは、LeRobot-ACT-SO-101 スタックに「運動神経」を実装する。
 
