@@ -15,9 +15,10 @@ use nix::unistd::Pid;
 /// no way to tell which is which is exactly the kind of ambiguity that makes an RT misconfiguration
 /// hard to spot.
 ///
-/// A `priority` of 0 means "leave scheduling alone": pin, but do not ask for `SCHED_FIFO`. That is
-/// the sensible setting for a thread that wants isolation from the control loop without having any
-/// deadline of its own.
+/// A `priority` of 0 means normal scheduling: pin, and explicitly set `SCHED_OTHER`. That is the
+/// sensible setting for a thread that wants isolation from the control loop without having any
+/// deadline of its own. It used to mean "leave scheduling alone", which silently kept whatever the
+/// spawning thread had -- `SCHED_FIFO` 99 in the cerebellum's case.
 pub fn apply_rt_settings(who: &str, core_id: usize, priority: i32) {
     match pin_to_core(core_id) {
         Ok(()) => log::info!("{who}: pinned to CPU core {core_id}"),
@@ -29,7 +30,12 @@ pub fn apply_rt_settings(who: &str, core_id: usize, priority: i32) {
     }
 
     if priority == 0 {
-        log::info!("{who}: left at default scheduling policy (priority 0)");
+        // Set, not assumed: whatever spawned this thread may have been SCHED_FIFO, and the thread
+        // inherits that. Dropping to SCHED_OTHER needs no capability.
+        match set_sched_other() {
+            Ok(()) => log::info!("{who}: set to normal scheduling (SCHED_OTHER, priority 0)"),
+            Err(e) => log::warn!("{who}: failed to set SCHED_OTHER: {e} -- policy is inherited"),
+        }
         return;
     }
 
@@ -47,6 +53,22 @@ fn pin_to_core(core_id: usize) -> nix::Result<()> {
     let mut cpu_set = CpuSet::new();
     cpu_set.set(core_id)?;
     sched_setaffinity(Pid::from_raw(0), &cpu_set)
+}
+
+fn set_sched_other() -> std::io::Result<()> {
+    let param = libc::sched_param { sched_priority: 0 };
+    let ret = unsafe {
+        libc::pthread_setschedparam(
+            libc::pthread_self(),
+            libc::SCHED_OTHER,
+            &param as *const libc::sched_param,
+        )
+    };
+    if ret != 0 {
+        Err(std::io::Error::from_raw_os_error(ret))
+    } else {
+        Ok(())
+    }
 }
 
 fn set_sched_fifo(priority: i32) -> std::io::Result<()> {

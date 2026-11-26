@@ -777,7 +777,6 @@ fn main() {
     );
 
     install_shutdown_handler();
-    rt::apply_rt_settings("control loop", args.cpu_core, args.priority);
 
     // The cerebellum is an enhancement, never a prerequisite: no Vulkan driver, a headless host or
     // a GPU in a bad state must all still leave the arm running. So a failure here degrades to the
@@ -810,6 +809,12 @@ fn main() {
             }
         },
     };
+
+    // Only after the cerebellum is up. A thread inherits its creator's policy, priority and CPU
+    // mask, so taking realtime first handed the cerebellum SCHED_FIFO 99 on the RT core, and ran
+    // the Vulkan setup inside `Cerebellum::start` there too -- while its own log said "default
+    // scheduling". Found by reading, 2026-11-27; not yet seen in `ps` on the running daemon.
+    rt::apply_rt_settings("control loop", args.cpu_core, args.priority);
 
     let mut bus = FeetechBus::open(
         &args.port,
