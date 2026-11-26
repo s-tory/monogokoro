@@ -242,6 +242,11 @@ this away was an arm found stiff by hand after a session had ended: torque enabl
 the joint (both bridge legs low), which is a stiffness nobody commanded and no telemetry reported.
 It also means "limp" is not `K = 0`; it is torque off, and that needs the loop to stop writing.
 
+That path runs only on an exit the loop reaches. A second Ctrl-C (`_exit`), `SIGKILL` -- including
+systemd's own after `TimeoutStopSec` -- or a panic skips it. `--release-only` does the same release
+and nothing else, and the systemd unit runs it from `ExecStopPost=`, which fires however the main
+process ended. Started by hand, outside the unit, nothing covers those exits.
+
 Validate with **monitor mode**, which cannot run away: Python writes nothing, so the watchdog holds
 PWM at zero and the arm stays limp. Move each joint by hand and confirm the positions track it with
 no comms errors in the daemon's per-second summary. Fall back with `--sync-read false --loop-hz 300`.

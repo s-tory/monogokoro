@@ -94,6 +94,15 @@ ExecStart=/home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/target/release/s
 # session that trains on the iGPU beside a live arm. The weights file must be writable by User=;
 # its directory is not created for you.
 
+# The daemon releases the arm itself only on an exit it reaches. A second Ctrl-C, SIGKILL (including
+# systemd's own after TimeoutStopSec) or a panic leaves every servo holding its last duty, so the
+# release runs again here, after the main process has gone however it went. Harmless after a clean
+# exit: duty 0 and torque off a second time.
+ExecStopPost=/home/s-tory/git/monogokoro/rust/so101_impedance_ctrl/target/release/so101_impedance_ctrl \
+    --port /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B42076600-if00 \
+    --shm-name so101_impedance \
+    --release-only
+
 # No restart. A daemon that failed was refused the port, refused realtime, or found no arm; each
 # of those wants a person, not another attempt at a motor.
 Restart=no

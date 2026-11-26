@@ -43,6 +43,15 @@ struct Cli {
     #[arg(long, default_value_t = 1_000_000)]
     baud: u32,
 
+    /// Zero every servo's duty, turn torque off, and exit -- no shared memory, no loop.
+    ///
+    /// The loop releases the arm only on an exit it reaches. A second Ctrl-C (`_exit`), SIGKILL,
+    /// or a panic skips that and leaves each servo holding its last duty. The systemd unit runs
+    /// this from `ExecStopPost=`, which fires however the main process ended; outside systemd
+    /// nothing does.
+    #[arg(long)]
+    release_only: bool,
+
     /// CPU core index to pin this process's control-loop thread to (see README.md for isolcpus=
     /// kernel setup).
     #[arg(long, default_value_t = 0)]
@@ -698,6 +707,17 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Cli::parse();
 
+    if args.release_only {
+        let mut bus = FeetechBus::open(
+            &args.port,
+            args.baud,
+            Duration::from_millis(args.serial_timeout_ms),
+        )
+        .expect("failed to open SO101 serial port");
+        release_all(&mut bus, &MOTOR_IDS);
+        return;
+    }
+
     assert!(
         args.current_read_divisor >= 1,
         "--current-read-divisor must be >= 1 (1 = read Present_Current every tick)"
@@ -1004,6 +1024,7 @@ fn main() {
         let fresh = input_is_fresh(now_ns, input_ts, watchdog_timeout_ns);
 
         let mut present_pos = prev_pos; // default: hold last known-good on a failed read
+        let mut restart_velocity = false;
         let mut present_current = [0f32; NUM_MOTORS];
         let mut comms_error = false;
 
@@ -1051,6 +1072,13 @@ fn main() {
                             "read Present_Position recovered after {blind_ticks} failed tick(s)"
                         );
                     }
+                    // A blind run of N ticks plus this one is N+1 per-tick deltas. While that fits
+                    // in the velocity window the deltas telescope to the true displacement and the
+                    // average is honest; past it, everything the joint did while unseen lands in
+                    // one window -- 300 counts in 8 ticks at 400 Hz reads as 15000 counts/s, for
+                    // 20 ms of D at the duty cap. Past `--max-blind-ticks` the arm was limp, so
+                    // that is the case where it has fallen. Restart the filter instead.
+                    restart_velocity = blind_ticks as usize >= args.vel_filter_window.max(1);
                     blind_ticks = 0;
                     pos_seeded = true;
                 }
@@ -1122,6 +1150,11 @@ fn main() {
         let dt_s = loop_period.as_secs_f32();
         let mut present_vel = [0f32; NUM_MOTORS];
         for i in 0..NUM_MOTORS {
+            if restart_velocity {
+                // Zero rather than a guess: for the next window D damps less, never more.
+                vel_avgs[i].clear();
+                prev_pos[i] = present_pos[i];
+            }
             // Filtered, because the raw difference carries `1 / dt` ticks/s of quantisation noise
             // -- see `--vel-filter-window`. On a tick whose read failed, `present_pos` still holds
             // the previous sample, so this pushes a genuine zero rather than a fabricated spike.

@@ -38,6 +38,12 @@ impl MovingAverage {
         self.average()
     }
 
+    /// Forgets every sample, as if just constructed.
+    pub fn clear(&mut self) {
+        self.window.clear();
+        self.sum = 0.0;
+    }
+
     pub fn average(&self) -> f32 {
         if self.window.is_empty() {
             0.0

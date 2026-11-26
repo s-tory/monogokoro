@@ -135,6 +135,40 @@ fn velocity_filter_preserves_a_steady_velocity() {
     assert!((filtered - 800.0).abs() < 1e-2, "got {filtered}");
 }
 
+#[test]
+fn velocity_filter_absorbs_a_blind_run_only_while_it_fits_the_window() {
+    use so101_impedance_ctrl::control::MovingAverage;
+
+    // The loop holds the last position on a failed read, so a blind run pushes zeros and then the
+    // whole displacement on the tick it recovers. The main loop restarts the filter exactly when
+    // `blind_ticks >= window`; this pins down why that is the boundary.
+    let dt = 1.0 / 400.0;
+    let n = 8;
+    // Joint falling at 4 counts/tick (1600 counts/s) throughout.
+    let recover_after = |blind: usize| -> f32 {
+        // n ticks of honest motion, `blind` held ticks, then the recovery tick.
+        let mut avg = MovingAverage::new(n);
+        let mut pos = 1000.0f32;
+        for _ in 0..n {
+            avg.push(finite_difference_velocity(pos, pos - 4.0, dt));
+            pos -= 4.0;
+        }
+        let seen = pos;
+        for _ in 0..blind {
+            avg.push(finite_difference_velocity(seen, seen, dt));
+            pos -= 4.0;
+        }
+        pos -= 4.0;
+        avg.push(finite_difference_velocity(seen, pos, dt))
+    };
+
+    // Fits: N+1 = 8 deltas telescope to the true 8-tick displacement.
+    assert!((recover_after(n - 1) + 1600.0).abs() < 1e-2);
+    // Does not fit: 40 blind ticks' worth of fall lands in one window -> 41*4/(8*dt) = 8200.
+    let spiked = recover_after(40);
+    assert!((spiked + 8200.0).abs() < 1e-1, "got {spiked}");
+}
+
 /// Ordinary motion is not a glitch. The servo's own no-load speed is ~3100 counts/s, which is
 /// ~8 counts per 2.5 ms tick -- well inside one tick's budget.
 #[test]
