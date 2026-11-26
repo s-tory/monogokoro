@@ -112,10 +112,10 @@ Restart=no
 [Install]
 # Intentionally empty -- `systemctl enable` fails with "no installation config", which is the
 # point. Starting at boot means the arm takes torque with nobody watching, and a human watching
-# the arm has already stopped a run that no telemetry threshold caught. Something else is
-# unresolved on this rig: the supply collapses below the servos' undervoltage limit under
-# six-motor load.
+# the arm has already stopped a run that no telemetry threshold caught. Whether the supply still
+# collapses under six-motor load is open: a better 5 V supply removed it at the defaults and not at
+# --pwm-max 700, and the 7.4 V supply has not been loaded hard enough to say. See "A better supply
+# did not remove every collapse" in README_DETAILS_EN.md.
 #
-# When those are settled and someone has decided what conditions make an unattended arm
-# acceptable, add:
+# When someone has decided what conditions make an unattended arm acceptable, add:
 #     WantedBy=multi-user.target

@@ -245,7 +245,10 @@ It also means "limp" is not `K = 0`; it is torque off, and that needs the loop t
 That path runs only on an exit the loop reaches. A second Ctrl-C (`_exit`), `SIGKILL` -- including
 systemd's own after `TimeoutStopSec` -- or a panic skips it. `--release-only` does the same release
 and nothing else, and the systemd unit runs it from `ExecStopPost=`, which fires however the main
-process ended. Started by hand, outside the unit, nothing covers those exits.
+process ended. Started by hand, outside the unit, nothing covers those exits. Measured 2026-11-27,
+arm folded at rest on the 7.4 V supply: `kill -9` on a hand-started daemon left all six at
+`Torque_Enable = 1`; `systemctl kill -s SIGKILL` on the unit had them at 0 within 23 ms, read back
+from a separate process and confirmed by hand. A kill with duty on the joints has not been tried.
 
 Validate with **monitor mode**, which cannot run away: Python writes nothing, so the watchdog holds
 PWM at zero and the arm stays limp. Move each joint by hand and confirm the positions track it with
